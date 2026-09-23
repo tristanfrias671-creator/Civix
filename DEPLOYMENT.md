@@ -15,7 +15,7 @@ This repo is prepared for a demo deployment with Vercel (React client) and Railw
    - `GOOGLE_CLIENT_ID` and mail provider variables only if those integrations are enabled.
 5. Enable scheduled database backups and document how to restore one. Do not expose MySQL through a public TCP proxy for application traffic.
 
-`PORT` is assigned by Railway. Do not set `UPLOAD_DIR` for production unless it points to persistent storage; Cloudinary is already supported for submission photos and avatars.
+`PORT` is assigned by Railway. Cloudinary is the recommended image store. If you do not have Cloudinary credentials for a small single-instance demo, attach a Railway volume at `/app/uploads` and set `UPLOAD_DIR=/app/uploads`; do not rely on the service's ephemeral disk for uploaded files.
 
 ## 2. Deploy the client on Vercel
 
@@ -33,6 +33,6 @@ Do not run `server/prisma/seed.js` against a public deployment. It inserts demo 
 
 The checked-in `.env` files are ignored by Git. Never commit provider credentials or paste them into chat; enter them directly in each provider's secret-variable screen.
 
-## 4. Current access requirement
+## 4. Provider access
 
-The local GitHub CLI credentials are invalid, and no Railway account session is configured. A signed-in GitHub account and Railway account are required to connect the repository, provision MySQL, and publish the API. Vercel also needs an authenticated account to publish a persistent project/domain. Once those provider sessions are signed in on this machine, the deployment can continue from these settings.
+The project source is published to `https://github.com/tristanfrias671-creator/Civix` on branch `main`. Authenticated Railway and Vercel accounts are required to connect the repository, provision MySQL, and publish the API and client. Store all deployment secrets in the providers' secret-variable settings; do not commit them or send them in chat.
