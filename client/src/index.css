@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import 'leaflet/dist/leaflet.css';
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #eef2f7;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.leaflet-container {
+  z-index: 1;
+  height: 100%;
+  width: 100%;
+}
+
+.civix-map-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ═══════════════════════════════════════════════
+   DARK MODE OVERRIDES
+═══════════════════════════════════════════════ */
+.dark body {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+/* ── Backgrounds ── */
+.dark .bg-white           { background-color: #1e293b !important; }
+.dark .bg-gray-50         { background-color: #0f172a !important; }
+.dark .bg-gray-100        { background-color: #1e293b !important; }
+.dark .bg-gray-200        { background-color: #334155 !important; }
+.dark .bg-slate-50        { background-color: #0f172a !important; }
+.dark .bg-blue-50         { background-color: rgba(37,99,235,0.15) !important; }
+.dark .bg-green-50        { background-color: rgba(22,163,74,0.15) !important; }
+.dark .bg-red-50          { background-color: rgba(220,38,38,0.15) !important; }
+.dark .bg-amber-50        { background-color: rgba(217,119,6,0.15) !important; }
+.dark .bg-yellow-50       { background-color: rgba(234,179,8,0.12) !important; }
+.dark .bg-purple-50       { background-color: rgba(124,58,237,0.15) !important; }
+.dark .bg-indigo-50       { background-color: rgba(79,70,229,0.15) !important; }
+.dark .bg-orange-100      { background-color: rgba(234,88,12,0.2) !important; }
+.dark .bg-blue-100        { background-color: rgba(37,99,235,0.2) !important; }
+.dark .bg-indigo-100      { background-color: rgba(79,70,229,0.2) !important; }
+.dark .bg-amber-100       { background-color: rgba(217,119,6,0.2) !important; }
+.dark .bg-green-100       { background-color: rgba(22,163,74,0.2) !important; }
+.dark .bg-red-100         { background-color: rgba(220,38,38,0.2) !important; }
+.dark .bg-purple-100      { background-color: rgba(124,58,237,0.2) !important; }
+
+/* ── Text ── */
+.dark .text-gray-900      { color: #f8fafc !important; }
+.dark .text-gray-800      { color: #f1f5f9 !important; }
+.dark .text-gray-700      { color: #e2e8f0 !important; }
+.dark .text-gray-600      { color: #cbd5e1 !important; }
+.dark .text-gray-500      { color: #94a3b8 !important; }
+.dark .text-gray-400      { color: #64748b !important; }
+.dark .text-gray-300      { color: #475569 !important; }
+.dark .text-slate-800     { color: #f1f5f9 !important; }
+.dark .text-slate-700     { color: #e2e8f0 !important; }
+.dark .text-slate-600     { color: #cbd5e1 !important; }
+.dark .text-blue-600      { color: #60a5fa !important; }
+.dark .text-blue-700      { color: #93c5fd !important; }
+.dark .text-indigo-700    { color: #a5b4fc !important; }
+.dark .text-amber-600     { color: #fbbf24 !important; }
+.dark .text-green-600     { color: #4ade80 !important; }
+.dark .text-green-700     { color: #4ade80 !important; }
+.dark .text-red-600       { color: #f87171 !important; }
+.dark .text-red-700       { color: #fca5a5 !important; }
+
+/* ── Borders ── */
+.dark .border-gray-100    { border-color: #1e293b !important; }
+.dark .border-gray-200    { border-color: #334155 !important; }
+.dark .border-gray-300    { border-color: #475569 !important; }
+.dark .border-b           { border-color: #334155; }
+.dark .divide-gray-50 > * + *   { border-color: #1e293b !important; }
+.dark .divide-gray-100 > * + *  { border-color: #1e293b !important; }
+.dark .divide-y > * + *         { border-color: #1e293b !important; }
+
+/* ── Inputs & Forms ── */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark textarea,
+.dark select {
+  background-color: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+/* Glass inputs on Login/Register — keep semi-transparent regardless of dark mode */
+.glass-page input,
+.dark .glass-page input {
+  background-color: rgba(255,255,255,0.12) !important;
+  color: white !important;
+  border-color: rgba(255,255,255,0.25) !important;
+}
+.glass-page input::placeholder,
+.dark .glass-page input::placeholder {
+  color: rgba(255,255,255,0.45) !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #475569 !important;
+}
+.dark input[readonly],
+.dark input:read-only {
+  background-color: #1e293b !important;
+  color: #64748b !important;
+}
+.dark option {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+
+/* ── Hover states ── */
+.dark .hover\:bg-gray-50:hover  { background-color: #1e293b !important; }
+.dark .hover\:bg-gray-100:hover { background-color: #334155 !important; }
+.dark .hover\:bg-red-50:hover   { background-color: rgba(220,38,38,0.15) !important; }
+
+/* ── Nav & Header (citizen) ── */
+.dark nav.bg-white,
+.dark header.bg-white {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+/* ── Dropdown menus ── */
+.dark .bg-white.rounded-2xl,
+.dark .bg-white.rounded-xl,
+.dark .bg-white.rounded-lg {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+/* ── Tables ── */
+.dark thead tr,
+.dark thead tr th {
+  background-color: #162032 !important;
+  color: #94a3b8 !important;
+}
+.dark tbody tr:hover {
+  background-color: rgba(255,255,255,0.03) !important;
+}
+
+/* ── Cards (gradient headers) ── */
+.dark [style*="from-slate-50"],
+.dark .from-slate-50 {
+  background: linear-gradient(135deg, #1e293b, #162032) !important;
+}
+
+/* ── Toasts ── */
+.dark .go2072408551 {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+}
+
+/* ── Scrollbar ── */
+.dark ::-webkit-scrollbar { width: 6px; height: 6px; }
+.dark ::-webkit-scrollbar-track { background: #0f172a; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #475569; }

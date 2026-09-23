@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CIVIX Demo Script</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-size: 12pt;
+      line-height: 1.8;
+      color: #1a1a1a;
+      background: #fff;
+      padding: 60px 80px;
+      max-width: 820px;
+      margin: 0 auto;
+    }
+
+    .cover {
+      text-align: center;
+      padding: 80px 0 60px;
+      border-bottom: 2px solid #1a1a1a;
+      margin-bottom: 48px;
+    }
+
+    .cover .system-name {
+      font-size: 28pt;
+      font-weight: bold;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .cover .subtitle {
+      font-size: 13pt;
+      color: #444;
+      margin-bottom: 6px;
+    }
+
+    .cover .lgu {
+      font-size: 11pt;
+      color: #666;
+      font-style: italic;
+    }
+
+    .cover .label {
+      display: inline-block;
+      margin-top: 32px;
+      padding: 8px 28px;
+      border: 1.5px solid #1a1a1a;
+      font-size: 10pt;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .cover .date {
+      margin-top: 16px;
+      font-size: 10pt;
+      color: #888;
+    }
+
+    h1 {
+      font-size: 15pt;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      border-bottom: 1.5px solid #1a1a1a;
+      padding-bottom: 6px;
+      margin-top: 40px;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      font-size: 12pt;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 28px;
+      margin-bottom: 10px;
+      color: #222;
+    }
+
+    h3 {
+      font-size: 11pt;
+      font-weight: bold;
+      margin-top: 20px;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    p {
+      margin-bottom: 12px;
+      text-align: justify;
+    }
+
+    .action {
+      font-style: italic;
+      color: #555;
+      margin-bottom: 10px;
+      padding-left: 16px;
+      border-left: 3px solid #ccc;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #ccc;
+      margin: 32px 0;
+    }
+
+    .closing-box {
+      border: 1.5px solid #1a1a1a;
+      padding: 20px 24px;
+      margin-top: 32px;
+    }
+
+    .closing-box p {
+      margin-bottom: 10px;
+    }
+
+    .closing-box p:last-child {
+      margin-bottom: 0;
+      font-weight: bold;
+      text-align: center;
+      font-size: 11pt;
+      letter-spacing: 1px;
+    }
+
+    .tips {
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      padding: 18px 22px;
+      margin-top: 36px;
+    }
+
+    .tips h2 {
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 11pt;
+    }
+
+    .tips ul {
+      margin-left: 20px;
+    }
+
+    .tips ul li {
+      margin-bottom: 6px;
+      font-size: 11pt;
+    }
+
+    .page-break { page-break-before: always; }
+
+    @media print {
+      body { padding: 40px 60px; }
+      .cover { padding-top: 60px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- COVER -->
+  <div class="cover">
+    <div class="system-name">CIVIX</div>
+    <div class="subtitle">Citizen Complaint and Service Management System</div>
+    <div class="lgu">Municipality of Cantilan, Surigao del Sur</div>
+    <div class="label">Capstone Demo Script</div>
+    <div class="date">Academic Year 2025 – 2026</div>
+  </div>
+
+  <!-- OPENING -->
+  <h1>Opening</h1>
+
+  <p>Good morning / afternoon. I will be presenting CIVIX — the Citizen Complaint and Service Management System developed for the Municipality of Cantilan, Surigao del Sur. The system allows residents to file complaints, suggestions, and feedback directly to their local government, and allows LGU staff and administrators to manage and respond to those submissions efficiently.</p>
+
+  <hr class="divider" />
+
+  <!-- PART 1 -->
+  <h1>Part 1 — The Landing Page</h1>
+
+  <p class="action">Action: Open the browser. Show the Role Selection screen.</p>
+
+  <p>When a user visits the system, they are greeted by this landing page. The system serves three types of users — Administrator, Staff, and Citizen. Each role has a different level of access.</p>
+
+  <hr class="divider" />
+
+  <!-- PART 2 -->
+  <h1>Part 2 — Citizen Portal</h1>
+
+  <h2>Step 1 — Login as Citizen</h2>
+  <p class="action">Action: Click Citizen / User then login with a citizen account.</p>
+  <p>I'll log in as a citizen. Citizens register with their name, email, and address — no special credentials needed.</p>
+
+  <h2>Step 2 — Citizen Dashboard</h2>
+  <p class="action">Action: Show the Dashboard page.</p>
+  <p>After logging in, the citizen sees their personal dashboard. It shows a summary of their total submissions, how many are still pending, and how many have been resolved. Quick action buttons let them immediately file a complaint, give a suggestion, or submit feedback.</p>
+
+  <h2>Step 3 — Submit a Complaint with AI</h2>
+  <p class="action">Action: Click File a Complaint then start typing a description. Pause and let the AI suggestion panel appear.</p>
+  <p>Now I'll demonstrate one of the core features — AI-assisted department classification. As I type the description of the complaint, the system analyzes the text in real time. Watch the suggestion panel on the right.</p>
+  <p>The AI has detected keywords in the text and is suggesting the most likely department — for example, Municipal Engineering Office — with a confidence score. It also shows which keywords triggered the classification. The citizen can accept this suggestion or manually choose a different department.</p>
+  <p class="action">Action: Click Apply Suggestion, fill in the rest of the form, then click Submit.</p>
+  <p>Once submitted, the system assigns a unique Tracking ID to this submission so the citizen can follow up anytime.</p>
+
+  <h2>Step 4 — Track Submissions</h2>
+  <p class="action">Action: Navigate to My Submissions. Click on one submission to expand it.</p>
+  <p>The citizen can go to the My Submissions page to check the status of everything they have filed. They can filter by status — Pending, Reviewing, In Progress, Resolved — or by type. There is also a search bar.</p>
+  <p>Expanding a submission shows the full description, any attached photos, GPS location if provided, and a progress timeline showing exactly where in the process the submission is.</p>
+
+  <hr class="divider" />
+
+  <!-- PART 3 -->
+  <div class="page-break"></div>
+  <h1>Part 3 — Admin Portal</h1>
+
+  <p class="action">Action: Log out, select Administrator, then log in with admin credentials.</p>
+  <p>Now I'll switch to the Administrator side of the system.</p>
+
+  <h2>Step 5 — Admin Dashboard</h2>
+  <p class="action">Action: Show the Admin Dashboard.</p>
+  <p>The admin dashboard gives a real-time overview of the system. These KPI cards show the total number of submissions, how many are pending, resolved, currently being reviewed, and in progress. It also shows the response rate and average resolution time. At the bottom is a table of the most recent submissions across all departments.</p>
+
+  <h2>Step 6 — All Submissions</h2>
+  <p class="action">Action: Click All Submissions in the sidebar, then open one submission.</p>
+  <p>The All Submissions page shows every complaint, suggestion, and feedback in the system. Admins can filter by status, type, department, and date range. They can also search by tracking ID or citizen name.</p>
+  <p>Opening a submission shows the full detail view. The admin can see the citizen's information, description, location on a map, and any attached media. They can update the status — for example, moving it from Pending to In Progress. They can also reassign the department and are required to provide a reason, which is saved to the audit log.</p>
+  <p>This AI panel shows a comparison — what department the AI predicted, what the citizen originally selected, and what the final assigned department is. This helps the admin quickly verify if the submission was routed correctly.</p>
+
+  <h2>Step 7 — AI Review Page</h2>
+  <p class="action">Action: Click AI Review in the sidebar.</p>
+  <p>The AI Review page is dedicated to monitoring the accuracy of the AI classification engine. It shows overall accuracy, average confidence, and how many submissions were corrected by an admin. Below is a table of all submissions where the AI prediction can be compared to the final department, so we can continuously evaluate performance.</p>
+
+  <h2>Step 8 — Analytics</h2>
+  <p class="action">Action: Click Analytics in the sidebar.</p>
+  <p>The Analytics page provides visual insights — a bar chart of submissions by type, a breakdown by department, trends over time, and resolution time averages. This data helps the LGU identify which departments receive the most complaints and measure their responsiveness.</p>
+
+  <h2>Step 9 — Map View</h2>
+  <p class="action">Action: Click Map View in the sidebar.</p>
+  <p>Submissions that include GPS coordinates are plotted on this interactive map. The LGU can visually see where issues are concentrated — for example, which barangays are reporting the most road damage or garbage problems. Clicking a pin shows the submission details.</p>
+
+  <h2>Step 10 — Citizens and Personnel</h2>
+  <p class="action">Action: Briefly show the Citizens and Personnel pages.</p>
+  <p>The system also has a Citizens page where admins can view all registered residents. The Personnel page shows all staff accounts and their assigned departments.</p>
+
+  <hr class="divider" />
+
+  <!-- PART 4 -->
+  <h1>Part 4 — Staff Portal</h1>
+
+  <p class="action">Action: Log out, select Staff, then log in with a staff account.</p>
+  <p>Finally, the Staff portal. Staff members are assigned to a specific department. They only see submissions that have been assigned to their department.</p>
+  <p class="action">Action: Show the Assigned Complaints page.</p>
+  <p>The staff member can update the status of each submission — marking it as In Progress or Resolved — and add notes. This keeps the citizen informed as their concern is being addressed.</p>
+
+  <hr class="divider" />
+
+  <!-- PART 5 -->
+  <h1>Part 5 — Dark Mode</h1>
+
+  <p class="action">Action: Click the sun/moon toggle in the navigation.</p>
+  <p>The system also includes a Dark Mode option available across all portals — Citizen, Staff, and Admin — which persists across sessions. This improves usability, especially in low-light environments.</p>
+
+  <hr class="divider" />
+
+  <!-- CLOSING -->
+  <div class="page-break"></div>
+  <h1>Closing</h1>
+
+  <div class="closing-box">
+    <p>To summarize, CIVIX provides a complete digital feedback loop between residents and the local government. Citizens can file and track their concerns. Staff can manage their assigned workload. Administrators have full visibility through dashboards, analytics, and an AI-assisted classification engine that automatically routes submissions to the correct department — reducing manual work and improving response time. The system was built specifically for the Municipality of Cantilan and is ready for deployment.</p>
+    <p>Thank you. I am open for questions.</p>
+  </div>
+
+  <!-- TIPS -->
+  <div class="tips">
+    <h2>Reminders Before the Demo</h2>
+    <ul>
+      <li>Start both servers before the presentation using START-CIVIX.bat</li>
+      <li>Have test accounts ready: one citizen, one staff, one admin</li>
+      <li>Pre-type the complaint description so the AI suggestion appears quickly</li>
+      <li>Have at least 5 to 6 existing submissions so the dashboard and analytics look populated</li>
+      <li>Make sure XAMPP (Apache + MySQL) is running before starting the servers</li>
+    </ul>
+  </div>
+
+</body>
+</html>

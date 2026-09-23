@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CITIZEN
+  ADMIN
+  STAFF
+}
+
+enum SubmissionType {
+  COMPLAINT
+  SUGGESTION
+  FEEDBACK
+}
+
+enum SubmissionStatus {
+  PENDING
+  REVIEWING
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum Priority {
+  URGENT
+  STANDARD
+  LOW
+}
+
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+model User {
+  id            String         @id @default(cuid())
+  fullName      String
+  citizenId     String         @unique
+  email         String         @unique
+  gmail         String?
+  mobileNumber  String?
+  department    String?
+  avatar        String?
+  password      String
+  role          Role           @default(CITIZEN)
+  createdAt     DateTime       @default(now())
+  submissions   Submission[]
+  notifications Notification[]
+}
+
+model Submission {
+  id          String           @id @default(cuid())
+  trackingId  String           @unique
+  type        SubmissionType
+  status      SubmissionStatus @default(PENDING)
+  priority    Priority         @default(STANDARD)
+  description String           @db.Text
+  contactNumber String?
+  email       String?
+  address     String?
+  citizenDepartment String   @map("category")
+  department        String   @default("UNASSIGNED")
+  sentiment   Sentiment        @default(NEUTRAL)
+  rating      Int?
+  reaction    String?
+  feedbackTags String?         @db.Text
+  userId      String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  user             User?             @relation(fields: [userId], references: [id])
+  location         Location?
+  media            Media[]
+  aiClassification AIClassification?
+  statusLogs       StatusUpdateLog[]
+}
+
+model Location {
+  id           String     @id @default(cuid())
+  submissionId String     @unique
+  latitude     Float
+  longitude    Float
+  submission   Submission @relation(fields: [submissionId], references: [id])
+}
+
+model Media {
+  id           String     @id @default(cuid())
+  submissionId String
+  filePath     String
+  fileType     String
+  submission   Submission @relation(fields: [submissionId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model AIClassification {
+  id                  String     @id @default(cuid())
+  submissionId        String     @unique
+  predictedDepartment String
+  confidence          Float
+  matchedKeywords     String     @db.Text
+  citizenSelected     String?
+  adminCorrected      Boolean    @default(false)
+  createdAt           DateTime   @default(now())
+  submission          Submission @relation(fields: [submissionId], references: [id])
+}
+
+model DepartmentChangeLog {
+  id             String   @id @default(cuid())
+  submissionId   String
+  trackingId     String
+  changedById    String
+  changedByName  String
+  changedByRole  String
+  fromDepartment String
+  toDepartment   String
+  reason         String?
+  createdAt      DateTime @default(now())
+}
+
+model StatusUpdateLog {
+  id            String           @id @default(cuid())
+  submissionId  String
+  trackingId    String
+  status        SubmissionStatus
+  note          String?          @db.Text
+  updatedById   String
+  updatedByName String
+  updatedByRole String
+  createdAt     DateTime         @default(now())
+  submission    Submission       @relation(fields: [submissionId], references: [id])
+}
+
+model SystemSettings {
+  id               String   @id @default("default")
+  organizationName String   @default("CIVIX")
+  tagline          String   @default("Integrated Citizen Engagement Platform")
+  contactEmail     String   @default("admin@civix.gov")
+  contactPhone     String   @default("")
+  officeAddress    String   @default("") @db.Text
+  departmentsJson  String   @db.Text
+  updatedAt        DateTime @updatedAt
+}
