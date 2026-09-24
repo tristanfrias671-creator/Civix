@@ -15,7 +15,7 @@ TiDB Starter's documented free quota is up to 5 GiB row data, 5 GiB columnar dat
 ## 2. Deploy the API on Render
 
 1. In Render, create a Blueprint from `https://github.com/tristanfrias671-creator/Civix`, branch `main`. The repository contains `render.yaml`; select the Free plan and Singapore region.
-2. Enter the API user's TLS connection string as `DATABASE_URL` and the migration admin user's TLS connection string as `MIGRATION_DATABASE_URL`. Render generates `JWT_SECRET`; keep it secret. Do not add a payment method for this demo. Render notes that accounts with a payment method can be billed for overage bandwidth or build-pipeline usage.
+2. Enter the API user's TLS connection string as `DATABASE_URL`, the migration admin user's TLS connection string as `MIGRATION_DATABASE_URL`, and the exact Vercel production origin as `CLIENT_URL`. Render generates `JWT_SECRET`; keep it secret. Do not add a payment method for this demo. Render notes that accounts with a payment method can be billed for overage bandwidth or build-pipeline usage.
 3. The startup wrapper runs Prisma migrations with the admin URL, then removes that URL from the API process before loading the app. The API itself uses the read/write SQL user.
 4. After the API deploys, copy its `onrender.com` origin and visit `/api/health`. It should return JSON with `status: "ok"`.
 

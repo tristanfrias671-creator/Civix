@@ -17,5 +17,7 @@ services:
         sync: false
       - key: MIGRATION_DATABASE_URL
         sync: false
+      - key: CLIENT_URL
+        sync: false
       - key: JWT_SECRET
         generateValue: true
