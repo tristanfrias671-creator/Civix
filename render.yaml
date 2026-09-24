@@ -4,6 +4,7 @@ services:
     runtime: node
     region: singapore
     plan: free
+    repo: https://github.com/tristanfrias671-creator/Civix.git
     branch: main
     rootDir: server
     buildCommand: npm ci && npx prisma generate
