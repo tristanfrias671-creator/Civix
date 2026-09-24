@@ -4,6 +4,10 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to seed demo accounts and submissions in production.');
+  }
+
   console.log('Seeding database...');
 
   const adminPass = await bcrypt.hash('admin123', 12);
