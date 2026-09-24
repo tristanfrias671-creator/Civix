@@ -150,7 +150,7 @@ export default function CitizenPortalLayout({ children }) {
                 {item.label}
               </button>
             ))}
-            <button type="button" onClick={() => navigate('/')}
+            <button type="button" onClick={() => navigate('/portal-login')}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
               style={{ color: 'rgba(255,255,255,0.55)' }}
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
@@ -158,7 +158,7 @@ export default function CitizenPortalLayout({ children }) {
               <svg className="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
-              Staff / Admin
+              Staff / Admin Login
             </button>
           </div>
         </aside>

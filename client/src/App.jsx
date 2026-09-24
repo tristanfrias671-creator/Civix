@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 
 import RoleSelect from './pages/RoleSelect';
+import PortalLoginSelect from './pages/PortalLoginSelect';
 import Login from './pages/citizen/Login';
 import Submit from './pages/citizen/Submit';
 import Track from './pages/citizen/Track';
@@ -47,6 +48,7 @@ function AppRoutes() {
       <Route path="/" element={user ? <Navigate to={homeFor(user.role)} replace /> : <RoleSelect />} />
       <Route path="/admin-login" element={<Login role="ADMIN" />} />
       <Route path="/staff-login" element={<Login role="STAFF" />} />
+      <Route path="/portal-login" element={<PortalLoginSelect />} />
       <Route path="/login" element={<Login />} />
 
       {/* Public citizen routes — no auth required */}

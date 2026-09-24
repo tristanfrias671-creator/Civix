@@ -57,7 +57,7 @@ export default function CitizenNav() {
           <div className="flex items-center gap-2">
             <DarkModeToggle />
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/portal-login')}
               className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all text-gray-500 hover:text-gray-800 hover:bg-gray-100">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -87,7 +87,7 @@ export default function CitizenNav() {
                 {l.label}
               </Link>
             ))}
-            <button onClick={() => { setMenuOpen(false); navigate('/'); }}
+            <button onClick={() => { setMenuOpen(false); navigate('/portal-login'); }}
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg mx-1 text-sm font-medium text-gray-500 w-full">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />

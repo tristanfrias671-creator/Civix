@@ -267,8 +267,12 @@ export default function RoleSelect() {
 
       {/* ── Footer ── */}
       <div className="relative z-10" style={{ background: '#0b2f66' }}>
-        <div className="max-w-7xl mx-auto px-6 py-4 text-center text-white/50 text-xs">
-          © {new Date().getFullYear()} Municipality of Cantilan. All rights reserved.  |  Cantilan, Surigao del Sur
+        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-white/60 text-xs">
+          <span>© {new Date().getFullYear()} Municipality of Cantilan. All rights reserved.  |  Cantilan, Surigao del Sur</span>
+          <button type="button" onClick={() => navigate('/portal-login')}
+            className="font-semibold text-white/80 hover:text-white underline underline-offset-4">
+            Staff &amp; Admin Login
+          </button>
         </div>
         <div className="max-w-7xl mx-auto px-6 pb-3 text-center text-white/30 text-[10px]">
           Developed by BS Information Technology 4D students, North Eastern Mindanao State University – Cantilan Campus
