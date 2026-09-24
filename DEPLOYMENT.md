@@ -7,7 +7,7 @@ Vercel Hobby is limited to personal, non-commercial use. Render says its free se
 ## 1. Create the database
 
 1. Create a TiDB Cloud Starter instance and database named `civix`. Choose Singapore if available and appropriate for the demo.
-2. Create a database user and copy its TLS-enabled MySQL connection string. Keep it private. Percent-encode special characters in the username or password before putting them in a URL.
+2. Create a database named `civix`, a read/write SQL user for the API, and a separate admin SQL user for schema migrations. Use TLS-enabled MySQL connection strings and keep both private. Percent-encode special characters in usernames or passwords before putting them in URLs.
 3. Do not add real citizen data. First deployment runs `prisma migrate deploy` to create the tables.
 
 TiDB Starter's documented free quota is up to 5 GiB row data, 5 GiB columnar data, and 50 million request units per instance each month. TiDB supports the MySQL protocol and common MySQL syntax, but that does not by itself guarantee that this Prisma schema and migration set will work unchanged. Treat a successful deployment migration and health check as a required compatibility check.
@@ -15,8 +15,9 @@ TiDB Starter's documented free quota is up to 5 GiB row data, 5 GiB columnar dat
 ## 2. Deploy the API on Render
 
 1. In Render, create a Blueprint from `https://github.com/tristanfrias671-creator/Civix`, branch `main`. The repository contains `render.yaml`; select the Free plan and Singapore region.
-2. Enter the TiDB TLS connection string as the secret `DATABASE_URL`. Render generates `JWT_SECRET`; keep it secret. Do not add a payment method for this demo. Render notes that accounts with a payment method can be billed for overage bandwidth or build-pipeline usage.
-3. After the API deploys, copy its `onrender.com` origin and visit `/api/health`. It should return JSON with `status: "ok"`.
+2. Enter the API user's TLS connection string as `DATABASE_URL` and the migration admin user's TLS connection string as `MIGRATION_DATABASE_URL`. Render generates `JWT_SECRET`; keep it secret. Do not add a payment method for this demo. Render notes that accounts with a payment method can be billed for overage bandwidth or build-pipeline usage.
+3. The startup wrapper runs Prisma migrations with the admin URL, then removes that URL from the API process before loading the app. The API itself uses the read/write SQL user.
+4. After the API deploys, copy its `onrender.com` origin and visit `/api/health`. It should return JSON with `status: "ok"`.
 
 The Blueprint runs Prisma migrations on service startup because Render's separate pre-deploy command is not available on Free services. It does not run the demo seed script.
 
