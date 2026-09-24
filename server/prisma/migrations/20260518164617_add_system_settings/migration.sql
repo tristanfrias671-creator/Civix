@@ -5,7 +5,7 @@ CREATE TABLE `SystemSettings` (
     `tagline` VARCHAR(191) NOT NULL DEFAULT 'Integrated Citizen Engagement Platform',
     `contactEmail` VARCHAR(191) NOT NULL DEFAULT 'admin@civix.gov',
     `contactPhone` VARCHAR(191) NOT NULL DEFAULT '',
-    `officeAddress` TEXT NOT NULL DEFAULT '',
+    `officeAddress` VARCHAR(500) NOT NULL DEFAULT '',
     `departmentsJson` TEXT NOT NULL,
     `categoriesJson` TEXT NOT NULL,
     `updatedAt` DATETIME(3) NOT NULL,

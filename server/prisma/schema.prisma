@@ -150,7 +150,7 @@ model SystemSettings {
   tagline          String   @default("Integrated Citizen Engagement Platform")
   contactEmail     String   @default("admin@civix.gov")
   contactPhone     String   @default("")
-  officeAddress    String   @default("") @db.Text
+  officeAddress    String   @default("") @db.VarChar(500)
   departmentsJson  String   @db.Text
   updatedAt        DateTime @updatedAt
 }
