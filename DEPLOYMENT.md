@@ -1,43 +1,46 @@
-# CIVIX deployment
+# CIVIX demo deployment
 
-This repo is prepared for a demo deployment with Vercel (React client) and Railway (Express API + MySQL). Keep the Railway MySQL service private and place it in the same region as the API. The Railway MySQL template is unmanaged; configure backups and recovery before storing real citizen submissions.
+The no-cost demonstration route is a Vercel static client, a Render Free Express API, and a TiDB Cloud Starter MySQL-compatible database. This is for demos with synthetic data only. Render Free can sleep after 15 minutes without traffic, can take about a minute to wake, and has an ephemeral filesystem; uploaded files stored locally can disappear after a restart, sleep, or deploy. TiDB Starter has monthly free quotas and uses the MySQL protocol; Prisma compatibility must be confirmed by a successful migration before the demo is used.
 
-## 1. Deploy the API and database on Railway
+Vercel Hobby is limited to personal, non-commercial use. Render says its free services are not for production. Do not use this free route for an official government service or real citizen records. Use an organization-approved paid host with backups, access controls, and data-location approval for that purpose.
 
-1. Create a Railway project and add a MySQL service. Select Singapore if it is available for the account and meets the organization's data-location requirements.
-2. Add this GitHub repository as a service and set its root directory to `/server`.
-3. Configure the build command as `npm ci && npx prisma generate`, the pre-deploy command as `npx prisma migrate deploy`, the start command as `npm start`, and the health check path as `/api/health`.
-4. Set the API service variables in Railway:
-   - `DATABASE_URL`: a private variable reference to the MySQL service's `MYSQL_URL`.
-   - `NODE_ENV=production`.
-   - `JWT_SECRET`: a newly generated random secret; do not reuse a sample value.
-   - `CLIENT_URL`: the final Vercel origin, with no path or trailing slash.
-   - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`.
-   - `GOOGLE_CLIENT_ID` and mail provider variables only if those integrations are enabled.
-5. Enable scheduled database backups and document how to restore one. Do not expose MySQL through a public TCP proxy for application traffic.
+## 1. Create the database
 
-`PORT` is assigned by Railway. Cloudinary is the recommended image store. If you do not have Cloudinary credentials for a small single-instance demo, attach a Railway volume at `/app/uploads` and set `UPLOAD_DIR=/app/uploads`; do not rely on the service's ephemeral disk for uploaded files.
+1. Create a TiDB Cloud Starter instance and database named `civix`. Choose Singapore if available and appropriate for the demo.
+2. Create a database user and copy its TLS-enabled MySQL connection string. Keep it private. Percent-encode special characters in the username or password before putting them in a URL.
+3. Do not add real citizen data. First deployment runs `prisma migrate deploy` to create the tables.
 
-## 2. Deploy the client on Vercel
+TiDB Starter's documented free quota is up to 5 GiB row data, 5 GiB columnar data, and 50 million request units per instance each month. TiDB supports the MySQL protocol and common MySQL syntax, but that does not by itself guarantee that this Prisma schema and migration set will work unchanged. Treat a successful deployment migration and health check as a required compatibility check.
 
-1. Import the same GitHub repository into Vercel and set the project root directory to `client`.
-2. Use `npm run build` as the build command and `build` as the output directory. `client/vercel.json` sends client-side routes back to the React app.
-3. Set these Vercel build environment variables for Production (and Preview only if a preview API is configured):
-   - `REACT_APP_API_URL`: the Railway API origin followed by `/api`.
-   - `REACT_APP_SERVER_URL`: the Railway API origin, without `/api`.
-   - `REACT_APP_GOOGLE_CLIENT_ID`: only if Google sign-in is enabled.
-4. After Vercel assigns the final production domain, set the API's `CLIENT_URL` to that exact origin and redeploy the API.
+## 2. Deploy the API on Render
 
-## 3. Create the initial administrator
+1. In Render, create a Blueprint from `https://github.com/tristanfrias671-creator/Civix`, branch `main`. The repository contains `render.yaml`; select the Free plan and Singapore region.
+2. Enter the TiDB TLS connection string as the secret `DATABASE_URL`. Render generates `JWT_SECRET`; keep it secret. Do not add a payment method for this demo. Render notes that accounts with a payment method can be billed for overage bandwidth or build-pipeline usage.
+3. After the API deploys, copy its `onrender.com` origin and visit `/api/health`. It should return JSON with `status: "ok"`.
 
-Do not run `server/prisma/seed.js` against a public deployment. It inserts demo submissions and demo accounts, and now refuses to run when `NODE_ENV=production`.
+The Blueprint runs Prisma migrations on service startup because Render's separate pre-deploy command is not available on Free services. It does not run the demo seed script.
 
-To create the production administrator, temporarily set `CIVIX_ADMIN_NAME`, `CIVIX_ADMIN_EMAIL`, and `CIVIX_ADMIN_PASSWORD` as Railway service variables. Use a unique password of at least 16 characters. Open the API service shell and run `npm run admin:create` once; the script refuses to overwrite an existing account. Remove `CIVIX_ADMIN_PASSWORD` from Railway variables immediately afterward.
+## 3. Deploy the client on Vercel
 
-## 4. Production account safety
+1. Sign in to the intended Vercel account and import the CIVIX GitHub repository. Set the root directory to `client`, build command to `npm run build`, and output directory to `build`.
+2. Add Production environment variables:
+   - `REACT_APP_API_URL`: the Render API origin followed by `/api`.
+   - `REACT_APP_SERVER_URL`: the Render API origin, without `/api`.
+   - `REACT_APP_GOOGLE_CLIENT_ID`: only if Google sign-in is configured.
+3. Deploy the client and copy its production origin. Add that exact origin as `CLIENT_URL` in the Render API environment, then redeploy the API.
 
-The checked-in `.env` files are ignored by Git. Never commit provider credentials or paste them into chat; enter them directly in each provider's secret-variable screen.
+`client/vercel.json` sends client-side routes back to the React app.
 
-## 5. Provider access
+## 4. Create the administrator
 
-The project source is published to `https://github.com/tristanfrias671-creator/Civix` on branch `main`. Authenticated Railway and Vercel accounts are required to connect the repository, provision MySQL, and publish the API and client. Store all deployment secrets in the providers' secret-variable settings; do not commit them or send them in chat.
+Do not run `server/prisma/seed.js` against the public demo. It inserts sample accounts and submissions and refuses to run in production.
+
+For a Render Free service, create the first administrator from a trusted local checkout that can connect to the TiDB public endpoint. Allowlist only the developer's current IP in TiDB, set `DATABASE_URL`, `CIVIX_ADMIN_NAME`, `CIVIX_ADMIN_EMAIL`, and a unique `CIVIX_ADMIN_PASSWORD` of at least 16 characters in the local process environment, then run `npm run admin:create` from `server`. The command hashes the password and refuses to overwrite an existing account. Remove those temporary variables immediately and remove the IP allowlist entry after setup if remote administration is not needed.
+
+## 5. Uploaded files
+
+Without Cloudinary, CIVIX stores uploads on the API's local filesystem. Render Free does not preserve those files after a sleep, restart, or deployment. Do not rely on local uploads for this demo. To keep image uploads, configure a dedicated Cloudinary account by adding its three secret environment variables (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`) directly in Render. Never paste provider credentials into chat or commit them.
+
+## 6. Existing Railway project
+
+The Railway screenshot showed an expired trial for `shopelite-backend`, which is a different repository. It is paused and cannot host CIVIX unless that Railway account is upgraded. No plan upgrade or charge has been made.
