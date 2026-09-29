@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { SkeletonTable } from '../../components/common/Skeleton';
+import { SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 import { mediaUrl } from '../../utils/mediaUrl';
 
 const lightboxCss = `
@@ -281,6 +282,8 @@ export default function Monitor() {
   // Track-by-ID input
   const [trackId,     setTrackId]     = useState('');
   const [tracking,    setTracking]    = useState(false);
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   function fetchData(p = 1, s = search) {
     setLoading(true);
@@ -289,7 +292,7 @@ export default function Monitor() {
     if (typeFilter)   params.append('type',       typeFilter);
     if (deptFilter)   params.append('department', deptFilter);
     if (s)            params.append('search',     s);
-    api.get(`/staff/portal/monitor?${params}`)
+    gate(api.get(`/staff/portal/monitor?${params}`))
       .then(r => {
         setSubmissions(r.data.submissions);
         setTotal(r.data.total);
@@ -341,7 +344,7 @@ export default function Monitor() {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Track Submission by ID</p>
         <form onSubmit={handleTrack} className="flex gap-2">
           <input value={trackId} onChange={e => setTrackId(e.target.value)}
-            placeholder="Enter Tracking ID — e.g. CIVIX-20260523-ABC123"
+            placeholder="Enter Tracking ID — e.g. ENG-20240527-0001"
             className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
           <button type="submit" disabled={tracking || !trackId.trim()}
             className="px-5 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2">
@@ -398,7 +401,7 @@ export default function Monitor() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table ref={tableRef} className="mobile-cards w-full text-sm">
                 <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                   <tr>
                     {['Tracking ID', 'Citizen', 'Type', 'Department', 'Status', 'Date', 'Actions'].map(h => (

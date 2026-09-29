@@ -164,6 +164,78 @@ body {
   color: #e2e8f0 !important;
 }
 
+/* ── Skeleton shimmer ── */
+@keyframes skel-sweep {
+  100% { transform: translateX(100%); }
+}
+.skel-shimmer,
+.skel-shimmer-dark {
+  position: relative;
+  overflow: hidden;
+}
+.skel-shimmer { background-color: #e5e7eb; }
+.skel-shimmer-dark { background-color: rgba(255, 255, 255, 0.1); }
+.skel-shimmer::after,
+.skel-shimmer-dark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  animation: skel-sweep 1.4s ease-in-out infinite;
+}
+.skel-shimmer::after {
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.65) 50%, rgba(255,255,255,0) 100%);
+}
+.skel-shimmer-dark::after,
+.dark .skel-shimmer::after {
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.09) 50%, rgba(255,255,255,0) 100%);
+}
+.dark .skel-shimmer { background-color: #334155; }
+@media (prefers-reduced-motion: reduce) {
+  .skel-shimmer::after,
+  .skel-shimmer-dark::after { animation: none; }
+}
+
+/* ── Tables become stacked cards on phones (labels come from useMobileTable) ── */
+@media (max-width: 767px) {
+  table.mobile-cards,
+  table.mobile-cards tbody { display: block; width: 100%; }
+  table.mobile-cards thead { display: none; }
+  table.mobile-cards tr {
+    display: block;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  table.mobile-cards td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0 !important;
+    border: 0 !important;
+    max-width: none !important;
+    white-space: normal;
+    text-align: right;
+  }
+  table.mobile-cards td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    text-align: left;
+    color: #94a3b8;
+  }
+  table.mobile-cards td:not([data-label])::before,
+  table.mobile-cards td[data-label=""]::before { display: none; }
+  table.mobile-cards td > * { min-width: 0; }
+  .dark table.mobile-cards tr { border-bottom-color: rgba(255,255,255,0.06); }
+  .dark table.mobile-cards td::before { color: #64748b; }
+}
+
 /* ── Scrollbar ── */
 .dark ::-webkit-scrollbar { width: 6px; height: 6px; }
 .dark ::-webkit-scrollbar-track { background: #0f172a; }

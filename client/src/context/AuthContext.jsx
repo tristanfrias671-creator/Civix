@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
 
+// Last time the signed-in user did something; read by IdleSessionGuard.
+export const ACTIVITY_KEY = 'civix_last_activity';
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -18,12 +21,14 @@ export function AuthProvider({ children }) {
   function login(token, userData) {
     localStorage.setItem('civix_token', token);
     localStorage.setItem('civix_user', JSON.stringify(userData));
+    localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
     setUser(userData);
   }
 
   function logout() {
     localStorage.removeItem('civix_token');
     localStorage.removeItem('civix_user');
+    localStorage.removeItem(ACTIVITY_KEY);
     setUser(null);
   }
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { BrandImg } from '../context/BrandingContext';
 
 const FEATURE_CARDS = [
   {
@@ -38,7 +39,7 @@ const FEATURE_CARDS = [
     color: '#7c3aed',
     bg: 'rgba(245,243,255,0.55)',
     border: 'rgba(221,214,254,0.7)',
-    action: (nav) => nav('/submit'),
+    action: (nav) => nav('/guidelines'),
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -133,13 +134,13 @@ export default function RoleSelect() {
       <style>{popCss}</style>
 
       {/* ── Full-page fixed photo background (shows through below the hero too) ── */}
-      <img src="/town-hall.jpg" alt="" className="fixed inset-0 w-full h-full object-cover" />
+      <BrandImg kind="hero" className="fixed inset-0 w-full h-full object-cover" />
       <div className="fixed inset-0" style={{ background: 'linear-gradient(180deg, rgba(6,16,42,0.1) 0%, rgba(70,100,150,0.25) 30%, rgba(160,185,220,0.4) 48%, rgba(160,185,220,0.5) 100%)' }} />
 
       {/* ── Top Navbar ── */}
       <header className="relative z-20" style={{ background: 'linear-gradient(90deg, rgba(11,47,102,0.88), rgba(18,58,122,0.8))', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center gap-4">
-          <img src="/cantilan-seal.png" alt="Municipality of Cantilan" className="w-12 h-12 object-contain flex-shrink-0" />
+          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-12 h-12 object-contain flex-shrink-0" />
           <div className="min-w-0">
             <p className="text-white/60 text-[11px] font-semibold leading-none">Municipality of Cantilan</p>
             <h1 className="text-white text-sm sm:text-base font-extrabold leading-tight truncate">Surigao Del Sur - Philippines</h1>
@@ -165,6 +166,13 @@ export default function RoleSelect() {
                 <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
               </svg>
               Track My Report
+            </button>
+            <button onClick={() => navigate('/guidelines')}
+              className="rs-navlink flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-white/75 hover:text-white transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+              Guidelines
             </button>
           </nav>
         </div>

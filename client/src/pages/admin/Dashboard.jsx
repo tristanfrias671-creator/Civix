@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { Skel, SkeletonStatCards, SkeletonTable } from '../../components/common/Skeleton';
+import { Skel, SkeletonStatCards, SkeletonQuickLinks, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 const QUICK_LINKS = [
   { to: '/admin/complaints', label: 'Complaints', icon: 'complaint', color: '#dc2626', bg: '#fef2f2', darkBg: 'rgba(220,38,38,0.12)' },
@@ -33,20 +34,21 @@ const CARD_STYLES_DARK = [
   { bg:'rgba(2,132,199,0.12)',   iconBg:'rgba(2,132,199,0.2)',   iconColor:'#38bdf8' },
 ];
 
-function KPICard({ label, value, sub, icon, styleIdx = 0 }) {
+// `stack` puts the icon above the text on phones, for cards that sit two per row.
+function KPICard({ label, value, sub, icon, styleIdx = 0, stack = false }) {
   const { dark } = useTheme();
   const styles = dark ? CARD_STYLES_DARK : CARD_STYLES_LIGHT;
   const s = styles[styleIdx % styles.length];
   return (
-    <div className="rounded-2xl p-5 border hover:shadow-md transition-all hover:-translate-y-0.5"
+    <div className="rounded-2xl p-4 sm:p-5 border hover:shadow-md transition-all hover:-translate-y-0.5"
       style={{ background: s.bg, borderColor: dark ? 'rgba(255,255,255,0.06)' : 'transparent', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
-      <div className="flex justify-between items-start">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{label}</p>
-          <p className="text-3xl font-extrabold mt-1.5" style={{ color: dark ? '#f1f5f9' : '#111827' }}>{value}</p>
-          {sub && <p className="text-xs mt-0.5" style={{ color: dark ? '#64748b' : '#9ca3af' }}>{sub}</p>}
+      <div className={`flex justify-between gap-3 ${stack ? 'flex-col-reverse items-start sm:flex-row' : 'items-start'}`}>
+        <div className="min-w-0">
+          <p className="text-[13px] sm:text-sm font-semibold leading-snug" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{label}</p>
+          <p className="text-[28px] sm:text-[38px] font-bold leading-none tracking-tight tabular-nums mt-2.5" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{value}</p>
+          {sub && <p className="text-[12.5px] sm:text-[13px] font-medium mt-2" style={{ color: dark ? '#64748b' : '#6b7280' }}>{sub}</p>}
         </div>
-        <div className="p-2.5 rounded-xl" style={{ background: s.iconBg }}>
+        <div className="p-2.5 rounded-xl flex-shrink-0" style={{ background: s.iconBg }}>
           <Icon name={icon} className="w-6 h-6" style={{ color: s.iconColor }} />
         </div>
       </div>
@@ -60,38 +62,26 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   useEffect(() => {
-    Promise.all([
+    gate(Promise.all([
       api.get('/analytics/summary'),
       api.get('/submissions?limit=8'),
-    ]).then(([s, sub]) => {
+    ])).then(([s, sub]) => {
       setStats(s.data);
       setSubmissions(sub.data.submissions);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, []);
+  }, [gate]);
 
   if (loading) return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-7"><Skel className="h-3 w-32 mb-2" /><Skel className="h-6 w-64" /></div>
       <SkeletonStatCards count={4} className="mb-4" />
       <SkeletonStatCards count={3} className="mb-7" />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
-        {QUICK_LINKS.map(q => (
-          <Link key={q.to} to={q.to}
-            className="flex items-center gap-3 rounded-2xl p-4 border transition-all hover:-translate-y-0.5 hover:shadow-md"
-            style={{ background: q.bg, borderColor: 'transparent' }}>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white" style={{ background: q.color }}>
-              <Icon name={q.icon} className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold truncate text-gray-900">{q.label}</p>
-              <p className="text-xs text-gray-400">View all</p>
-            </div>
-          </Link>
-        ))}
-      </div>
+      <SkeletonQuickLinks count={QUICK_LINKS.length} className="grid-cols-2 lg:grid-cols-4 mb-7" />
       <div className="rounded-2xl border bg-white border-gray-100" style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
         <div className="px-6 py-4 border-b border-gray-100"><Skel className="h-4 w-44" /></div>
         <SkeletonTable cols={6} rows={8} />
@@ -105,10 +95,10 @@ export default function AdminDashboard() {
       {/* Header */}
       <div className="mb-7 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold" style={{ color: dark ? '#f1f5f9' : '#111827' }}>
+          <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight leading-tight" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
             Welcome back{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: dark ? '#64748b' : '#9ca3af' }}>
+          <p className="text-sm sm:text-[15px] mt-1" style={{ color: dark ? '#64748b' : '#6b7280' }}>
             {new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
           </p>
         </div>
@@ -124,10 +114,10 @@ export default function AdminDashboard() {
 
       {/* KPI row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <KPICard label="Total Submissions" value={stats?.total ?? 0}                styleIdx={0} icon="submissions" />
-        <KPICard label="Pending"           value={stats?.pending ?? 0}              styleIdx={1} icon="clock"       sub="Needs attention" />
-        <KPICard label="Resolved"          value={stats?.resolved ?? 0}             styleIdx={2} icon="check" />
-        <KPICard label="Response Rate"     value={`${stats?.responseRate ?? 0}%`}   styleIdx={3} icon="analytics"   sub={`${stats?.avgResolutionTime} days avg`} />
+        <KPICard stack label="Total Submissions" value={stats?.total ?? 0}                styleIdx={0} icon="submissions" />
+        <KPICard stack label="Pending"           value={stats?.pending ?? 0}              styleIdx={1} icon="clock"       sub="Needs attention" />
+        <KPICard stack label="Resolved"          value={stats?.resolved ?? 0}             styleIdx={2} icon="check" />
+        <KPICard stack label="Response Rate"     value={`${stats?.responseRate ?? 0}%`}   styleIdx={3} icon="analytics"   sub={`${stats?.avgResolutionTime} days avg`} />
       </div>
 
       {/* KPI row 2 */}
@@ -141,14 +131,19 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
         {QUICK_LINKS.map(q => (
           <Link key={q.to} to={q.to}
-            className="flex items-center gap-3 rounded-2xl p-4 border transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className="group flex items-center gap-3.5 rounded-2xl p-4 border transition-all hover:-translate-y-0.5 hover:shadow-md"
             style={{ background: dark ? q.darkBg : q.bg, borderColor: dark ? 'rgba(255,255,255,0.06)' : 'transparent' }}>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white" style={{ background: q.color }}>
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 text-white" style={{ background: q.color }}>
               <Icon name={q.icon} className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-bold truncate" style={{ color: dark ? '#f1f5f9' : '#111827' }}>{q.label}</p>
-              <p className="text-xs" style={{ color: dark ? '#64748b' : '#9ca3af' }}>View all</p>
+              <p className="text-[15px] sm:text-base font-semibold leading-tight truncate" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{q.label}</p>
+              <p className="flex items-center gap-1 text-[13px] font-medium mt-1" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>
+                View all
+                <svg className="w-3 h-3 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
+                </svg>
+              </p>
             </div>
           </Link>
         ))}
@@ -158,8 +153,8 @@ export default function AdminDashboard() {
       <div className="rounded-2xl border" style={{ background: dark ? '#1e293b' : 'white', borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
         <div className="flex justify-between items-center px-6 py-4 border-b" style={{ borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6' }}>
           <div>
-            <h2 className="font-bold" style={{ color: dark ? '#f1f5f9' : '#111827' }}>Recent Submissions</h2>
-            <p className="text-xs mt-0.5" style={{ color: dark ? '#64748b' : '#9ca3af' }}>Latest activity across all departments</p>
+            <h2 className="text-[17px] font-bold tracking-tight" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>Recent Submissions</h2>
+            <p className="text-[13px] mt-0.5" style={{ color: dark ? '#64748b' : '#6b7280' }}>Latest activity across all departments</p>
           </div>
           <Link to="/admin/submissions" className="text-sm font-bold flex items-center gap-1 transition-colors" style={{ color: '#2563eb' }}>
             View All
@@ -177,7 +172,7 @@ export default function AdminDashboard() {
           </div>
         ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table ref={tableRef} className="mobile-cards w-full text-sm">
             <thead>
               <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}` }}>
                 {['Tracking ID','Citizen','Type','Department','Status','Date'].map(h => (

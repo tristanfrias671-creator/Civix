@@ -1,7 +1,6 @@
+// Same-origin by default; uploads are proxied to the backend in development.
 function resolveServer() {
-  if (process.env.REACT_APP_SERVER_URL) return process.env.REACT_APP_SERVER_URL;
-  if (process.env.NODE_ENV === 'development') return 'http://localhost:5000';
-  return '';
+  return process.env.REACT_APP_SERVER_URL || '';
 }
 
 const SERVER = resolveServer();

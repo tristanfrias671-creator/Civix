@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Skel, SkeletonStatCards, SkeletonTable } from '../../components/common/Skeleton';
+import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 /* ─── Confidence Badge ───────────────────────────────────────────────────── */
 function ConfidenceBadge({ confidence, dark }) {
@@ -122,16 +123,19 @@ export default function AIClassification() {
   const [filter,  setFilter]  = useState('');
   const LIMIT = 15;
 
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
+
   useEffect(() => {
-    api.get('/classify/stats').then(r => setStats(r.data)).catch(() => {});
-  }, []);
+    gate(api.get('/classify/stats')).then(r => setStats(r.data)).catch(() => {});
+  }, [gate]);
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/classify/review?page=${page}&limit=${LIMIT}`)
+    gate(api.get(`/classify/review?page=${page}&limit=${LIMIT}`))
       .then(r => { setRecords(r.data.records || []); setTotal(r.data.total || 0); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [page]);
+  }, [page, gate]);
 
   const filtered = records.filter(r => {
     if (!filter) return true;
@@ -308,7 +312,7 @@ export default function AIClassification() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table ref={tableRef} className="mobile-cards w-full text-sm">
               <thead>
                 <tr style={{ background: table.head }}>
                   {['Tracking ID', 'Citizen', 'AI Prediction', 'Confidence', 'Final Department', 'Status', ''].map((h, i) => (

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { BrandImg } from '../../context/BrandingContext';
 
 const TEAM = [
   'Tristan M. Frias',
@@ -40,7 +41,7 @@ function AboutModal({ onClose }) {
           </svg>
         </button>
         <div className="px-6 py-6 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0b2f66, #2563eb)' }}>
-          <img src="/cantilan-seal.png" alt="" className="about-seal absolute -right-4 -bottom-4 w-24 h-24 object-contain opacity-15" />
+          <BrandImg kind="seal" className="about-seal absolute -right-4 -bottom-4 w-24 h-24 object-contain opacity-15" />
           <div className="relative">
             <p className="text-xs font-semibold uppercase tracking-wide text-white/70">About</p>
             <h2 className="text-xl font-bold">CIVIX</h2>
@@ -83,14 +84,14 @@ function AboutModal({ onClose }) {
 }
 
 const NAV_ITEMS = [
-  { to: '/submit', label: 'Home', icon: 'M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4a1 1 0 001-1v-5h2v5a1 1 0 001 1h4a1 1 0 001-1V10' },
+  { to: '/', label: 'Back to Home', icon: 'M19 12H5M11 18l-6-6 6-6' },
   { to: '/submit', label: 'Submit a Report', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
   { to: '/track', label: 'Track My Report', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+  { to: '/guidelines', label: 'Guidelines', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
 ];
 
 export default function CitizenPortalLayout({ children }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const [aboutOpen, setAboutOpen] = useState(false);
   const isActive = (to) => location.pathname === to;
 
@@ -104,10 +105,10 @@ export default function CitizenPortalLayout({ children }) {
     <div className="min-h-screen" style={{ background: '#eef2f9' }}>
       {/* Header banner */}
       <div className="relative overflow-hidden" style={{ height: 130 }}>
-        <img src="/town-hall.jpg" alt="" className="absolute inset-0 w-full h-full object-cover" />
+        <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(15,45,110,0.94) 0%, rgba(20,60,140,0.75) 45%, rgba(30,80,170,0.35) 100%)' }} />
-        <div className="relative z-10 h-full flex items-center px-8 gap-4">
-          <img src="/cantilan-seal.png" alt="Municipality of Cantilan" className="w-16 h-16 object-contain flex-shrink-0" />
+        <div className="relative z-10 h-full flex items-center px-4 sm:px-8 gap-3 sm:gap-4">
+          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-12 h-12 sm:w-16 sm:h-16 object-contain flex-shrink-0" />
           <div>
             <p className="text-white/70 text-xs font-semibold tracking-wide">Municipality of Cantilan</p>
             <h1 className="text-white text-lg sm:text-xl font-extrabold tracking-tight leading-tight">Surigao Del Sur - Philippines</h1>
@@ -119,6 +120,20 @@ export default function CitizenPortalLayout({ children }) {
           </div>
         </div>
       </div>
+
+      {/* Phone tab bar (the sidebar below is hidden under md) */}
+      <nav className="md:hidden flex gap-1 px-2 py-2" style={{ background: '#0b2f66' }}>
+        {NAV_ITEMS.map((item, i) => (
+          <Link key={i} to={item.to}
+            className="flex-1 min-w-0 flex flex-col items-center gap-1 px-1 py-2 rounded-lg text-[11px] font-semibold transition-colors"
+            style={isActive(item.to) ? { background: '#2563eb', color: '#fff' } : { color: 'rgba(255,255,255,0.75)' }}>
+            <svg className="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d={item.icon} />
+            </svg>
+            <span className="truncate max-w-full">{item.label}</span>
+          </Link>
+        ))}
+      </nav>
 
       <div className="flex">
         {/* Sidebar */}
@@ -150,16 +165,6 @@ export default function CitizenPortalLayout({ children }) {
                 {item.label}
               </button>
             ))}
-            <button type="button" onClick={() => navigate('/')}
-              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
-              style={{ color: 'rgba(255,255,255,0.55)' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <svg className="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-              Staff / Admin
-            </button>
           </div>
         </aside>
 
@@ -169,7 +174,7 @@ export default function CitizenPortalLayout({ children }) {
         </main>
       </div>
 
-      <div className="border-t bg-white px-8 py-3 flex items-center justify-between text-xs text-gray-400">
+      <div className="border-t bg-white px-4 sm:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-1 text-center sm:text-left text-xs text-gray-400">
         <span>© {new Date().getFullYear()} Municipality of Cantilan. All rights reserved.</span>
         <span>Cantilan Town Hall &nbsp;|&nbsp; Citizen Report and Concerns System</span>
       </div>

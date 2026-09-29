@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { Skel } from '../../components/common/Skeleton';
+import { Skel, useSkeletonGate } from '../../components/common/Skeleton';
 import api from '../../utils/api';
 
 // ── Color maps ──────────────────────────────────────────────────────────────
@@ -141,16 +141,17 @@ export default function MapView() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [typeFilter,   setTypeFilter]   = useState('ALL');
   const [mapStyle, setMapStyle] = useState('street');
+  const gate = useSkeletonGate();
 
   useEffect(() => {
-    api.get('/submissions?limit=500')
+    gate(api.get('/submissions?limit=500'))
       .then(r => {
         // Keep ALL submissions — those without GPS get a default center position
         setSubmissions(r.data.submissions);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [gate]);
 
   // Use real data if available, otherwise fall back to demo submissions
   const sourceData = submissions.length > 0 ? submissions : DEMO_SUBMISSIONS;

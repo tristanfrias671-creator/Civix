@@ -11,6 +11,7 @@ const reportRoutes = require('./src/routes/reports');
 const settingsRoutes = require('./src/routes/settings');
 const staffRoutes    = require('./src/routes/staff');
 const classifyRoutes = require('./src/routes/classify');
+const accessRequestRoutes = require('./src/routes/accessRequests');
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/staff',    staffRoutes);
 app.use('/api/classify', classifyRoutes);
+app.use('/api/access-requests', accessRequestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

@@ -119,4 +119,72 @@ function sendStatusUpdateEmail(submission, newStatus, note) {
   return sendMail({ to: submission.email, subject: `CIVIX — Status Update: ${label} (${submission.trackingId})`, html });
 }
 
-module.exports = { sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail };
+function adminNoteHtml(note) {
+  return note ? `
+    <div style="background:#eff6ff; border-left:3px solid ${BRAND}; border-radius:6px; padding:10px 14px; margin:12px 0;">
+      <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:2px;">Note from the administrator</div>
+      <div style="font-size:14px; color:#1f2937;">${escapeHtml(note)}</div>
+    </div>` : '';
+}
+
+const REQUEST_LABELS = { STAFF_ACCOUNT: 'a staff account', ADMIN_ACCESS: 'administrator access' };
+
+// Alerts an administrator that a request is waiting for them. The private admin
+// link is deliberately left out, since the administrator already has it.
+function sendAccessRequestAlertEmail(to, request) {
+  const row = (label, value) => `
+      <div style="font-size:12px; color:#6b7280; margin-top:8px;">${label}</div>
+      <div style="font-size:14px; color:#111827;">${escapeHtml(value)}</div>`;
+  const html = layout('New access request', `
+    <p style="color:#374151; font-size:14px; line-height:1.6;">
+      <strong>${escapeHtml(request.fullName)}</strong> requested ${REQUEST_LABELS[request.type]}.
+    </p>
+    <div style="background:#f1f5f9; border-radius:8px; padding:6px 16px 14px; margin:16px 0;">
+      ${row('Email', request.email)}
+      ${row('Department', request.department || '—')}
+      ${request.reason ? row('Reason', request.reason) : ''}
+    </div>
+    <p style="color:#374151; font-size:14px; line-height:1.6;">
+      Sign in to the CIVIX admin portal and open <strong>Access Requests</strong> to verify this person, then approve or reject the request.
+      Nothing is granted until an administrator approves it.
+    </p>
+  `);
+  return sendMail({ to, subject: `CIVIX — ${request.fullName} requested ${REQUEST_LABELS[request.type]}`, html });
+}
+
+// Tells a staff member the decision on their administrator access request. An
+// approval includes the private admin sign-in link so they can sign in right away.
+function sendAdminAccessDecisionEmail({ email, fullName }, approved, note, adminUrl) {
+  const html = approved
+    ? layout('Your administrator access is active', `
+      <p style="color:#374151; font-size:14px; line-height:1.6;">Hi ${escapeHtml(fullName)}, an administrator approved your request. Your CIVIX account now has administrator access.</p>
+      ${adminNoteHtml(note)}
+      <p style="color:#374151; font-size:14px; line-height:1.6;">Sign in with your usual email and password at this private address. Bookmark it and don't share it:</p>
+      <p style="font-size:14px;"><a href="${adminUrl}" style="color:${BRAND}; word-break:break-all;">${adminUrl}</a></p>
+      <p style="color:#6b7280; font-size:13px; line-height:1.6;">The Staff Login page no longer accepts this account.</p>`)
+    : layout('Your administrator access request', `
+      <p style="color:#374151; font-size:14px; line-height:1.6;">Hi ${escapeHtml(fullName)}, your request for administrator access was not approved. You keep your staff access.</p>
+      ${adminNoteHtml(note)}`);
+  return sendMail({ to: email, subject: approved ? 'CIVIX — Administrator access approved' : 'CIVIX — Administrator access request', html });
+}
+
+// Tells someone who asked for a staff account whether it was approved.
+function sendStaffAccountDecisionEmail({ email, fullName }, approved, note) {
+  const loginUrl = `${CLIENT_URL || 'http://localhost:3000'}/staff-login`;
+  const noteBlock = adminNoteHtml(note);
+  const html = approved
+    ? layout('Your staff account is approved', `
+      <p style="color:#374151; font-size:14px; line-height:1.6;">Hi ${escapeHtml(fullName)}, an administrator approved your CIVIX staff account.</p>
+      ${noteBlock}
+      <p style="color:#374151; font-size:14px; line-height:1.6;">You can now sign in at <a href="${loginUrl}" style="color:${BRAND};">${loginUrl}</a>.</p>`)
+    : layout('Your staff account request was not approved', `
+      <p style="color:#374151; font-size:14px; line-height:1.6;">Hi ${escapeHtml(fullName)}, your request for a CIVIX staff account was not approved.</p>
+      ${noteBlock}
+      <p style="color:#374151; font-size:14px; line-height:1.6;">If you think this is a mistake, please contact the CIVIX administrator at the municipal office.</p>`);
+  return sendMail({ to: email, subject: approved ? 'CIVIX — Staff account approved' : 'CIVIX — Staff account request', html });
+}
+
+module.exports = {
+  sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail,
+  sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail,
+};

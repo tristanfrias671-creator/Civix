@@ -38,6 +38,22 @@ enum Sentiment {
   NEGATIVE
 }
 
+enum AccountStatus {
+  PENDING
+  ACTIVE
+}
+
+enum AccessRequestType {
+  STAFF_ACCOUNT
+  ADMIN_ACCESS
+}
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id            String         @id @default(cuid())
   fullName      String
@@ -49,9 +65,14 @@ model User {
   avatar        String?
   password      String
   role          Role           @default(CITIZEN)
+  failedLoginAttempts Int      @default(0)
+  lockedUntil   DateTime?
+  // Self-registered staff stay PENDING until an administrator approves them
+  accountStatus AccountStatus  @default(ACTIVE)
   createdAt     DateTime       @default(now())
   submissions   Submission[]
   notifications Notification[]
+  accessRequests AccessRequest[]
 }
 
 model Submission {
@@ -151,5 +172,36 @@ model SystemSettings {
   contactPhone     String   @default("")
   officeAddress    String   @default("") @db.Text
   departmentsJson  String   @db.Text
+  // Login security
+  lockoutEnabled     Boolean @default(true)
+  maxLoginAttempts   Int     @default(5)
+  lockoutMinutes     Int     @default(15)
+  idleTimeoutEnabled Boolean @default(true)
+  idleTimeoutMinutes Int     @default(30)
+  // Branding images; null means the bundled default is used
+  sealUrl            String?
+  heroImageUrl       String?
+  // Private address (path segment) of the admin sign-in page
+  adminLoginPath     String?
   updatedAt        DateTime @updatedAt
+}
+
+// A staff account request (self-registration) or a staff member's request for
+// administrator access, reviewed by an existing administrator. The requester's
+// name and email are copied so the history survives if the account is removed.
+model AccessRequest {
+  id             String              @id @default(cuid())
+  type           AccessRequestType
+  status         AccessRequestStatus @default(PENDING)
+  userId         String?
+  fullName       String
+  email          String
+  department     String?
+  reason         String?             @db.Text
+  reviewNote     String?             @db.Text
+  reviewedById   String?
+  reviewedByName String?
+  reviewedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  user           User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
 }

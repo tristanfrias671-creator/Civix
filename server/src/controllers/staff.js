@@ -11,7 +11,7 @@ async function getStaff(req, res) {
     const staff = await prisma.$queryRaw`
       SELECT id, fullName, email, department, role, citizenId, createdAt
       FROM User
-      WHERE role = 'STAFF'
+      WHERE role = 'STAFF' AND accountStatus = 'ACTIVE'
       ORDER BY createdAt DESC
     `;
     res.json(staff);

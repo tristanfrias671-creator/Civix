@@ -218,7 +218,9 @@ async function trackSubmission(req, res) {
       },
     });
     if (!submission) return res.status(404).json({ error: 'Tracking code not found' });
-    const { userId, ...safe } = submission;
+    // Public endpoint and codes are sequential (DEPT-YYYYMMDD-0001, -0002…), so never
+    // return the citizen's contact details to whoever enters a code.
+    const { userId, contactNumber, email, ...safe } = submission;
     res.json(safe);
   } catch (err) {
     console.error(err);

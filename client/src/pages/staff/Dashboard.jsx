@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { Skel, SkeletonStatCards, SkeletonTable } from '../../components/common/Skeleton';
+import { Skel, SkeletonStatCards, SkeletonQuickLinks, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { BrandImg } from '../../context/BrandingContext';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 function greeting() {
   const h = new Date().getHours();
@@ -67,17 +69,19 @@ export default function StaffDashboard() {
   const [stats,   setStats]   = useState(null);
   const [recent,  setRecent]  = useState([]);
   const [loading, setLoading] = useState(true);
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   useEffect(() => {
-    Promise.all([
+    gate(Promise.all([
       api.get('/staff/portal/stats'),
       api.get('/staff/portal/submissions?limit=8'),
-    ]).then(([s, r]) => {
+    ])).then(([s, r]) => {
       setStats(s.data);
       setRecent(r.data.submissions);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, []);
+  }, [gate]);
 
   if (loading) return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -90,21 +94,7 @@ export default function StaffDashboard() {
       </div>
       <SkeletonStatCards count={4} className="mb-4" />
       <SkeletonStatCards count={3} className="mb-7" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-7">
-        {QUICK_LINKS.map(q => (
-          <Link key={q.to} to={q.to}
-            className="flex items-center gap-3 rounded-2xl p-4 border transition-all hover:-translate-y-0.5 hover:shadow-md"
-            style={{ background: q.bg, borderColor: 'transparent' }}>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white" style={{ background: q.color }}>
-              <Icon name={q.icon} className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold truncate text-gray-900">{q.label}</p>
-              <p className="text-xs text-gray-400">{q.desc}</p>
-            </div>
-          </Link>
-        ))}
-      </div>
+      <SkeletonQuickLinks count={QUICK_LINKS.length} className="grid-cols-1 sm:grid-cols-3 mb-7" />
       <div className="rounded-2xl border bg-white border-gray-100" style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
         <div className="px-6 py-4 border-b border-gray-100"><Skel className="h-4 w-48" /></div>
         <SkeletonTable cols={6} rows={8} />
@@ -126,7 +116,7 @@ export default function StaffDashboard() {
       {/* Header */}
       <div className="mb-7 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3.5">
-          <img src="/cantilan-seal.png" alt="Municipality of Cantilan" className="w-14 h-14 object-contain flex-shrink-0" />
+          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-14 h-14 object-contain flex-shrink-0" />
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: dark ? '#64748b' : '#9ca3af' }}>Municipality of Cantilan</p>
             <h1 className="text-2xl font-extrabold leading-tight" style={{ color: dark ? '#f1f5f9' : '#111827' }}>
@@ -208,7 +198,7 @@ export default function StaffDashboard() {
           </div>
         ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table ref={tableRef} className="mobile-cards w-full text-sm">
             <thead>
               <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}` }}>
                 {['Tracking ID','Citizen','Type','Status','Date','Actions'].map(h => (

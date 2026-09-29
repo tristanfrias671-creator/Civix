@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
-import { Skel, SkeletonTable } from '../../components/common/Skeleton';
+import { Skel, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import { mediaUrl } from '../../utils/mediaUrl';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 const STATUS_OPTIONS = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 const STATUS_CONFIG = {
@@ -375,6 +376,8 @@ export default function StaffSubmissions() {
   const [department, setDepartment]     = useState('');
   const [detailId, setDetailId]         = useState(null);
   const [sortByPriority, setSortByPriority] = useState(false);
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   function fetchSubmissions(p = 1) {
     setLoading(true);
@@ -382,7 +385,7 @@ export default function StaffSubmissions() {
     if (statusFilter) params.append('status', statusFilter);
     if (typeFilter)   params.append('type',   typeFilter);
     if (sortByPriority) params.append('sortBy', 'priority');
-    api.get(`/staff/portal/submissions?${params}`)
+    gate(api.get(`/staff/portal/submissions?${params}`))
       .then(r => {
         setSubmissions(r.data.submissions);
         setTotal(r.data.total);
@@ -475,7 +478,7 @@ export default function StaffSubmissions() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table ref={tableRef} className="mobile-cards w-full text-sm">
                 <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                   <tr>
                     {['Tracking ID', 'Citizen', 'Type', 'Priority', 'Description', 'Update Status', 'Date', 'Actions'].map(h => (

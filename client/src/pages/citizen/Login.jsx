@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../../context/AuthContext';
-import SystemLoader from '../../components/common/SystemLoader';
+import { BrandImg } from '../../context/BrandingContext';
 import api from '../../utils/api';
+import { signInCss } from '../../components/common/signInButtonCss';
 
 const ShieldCheckIcon = (p) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
@@ -73,6 +74,11 @@ const EyeOffIcon = (p) => (
   </svg>
 );
 
+const MIN_SPIN_MS = 800;
+const SUCCESS_MS = 700;
+const SHAKE_MS = 450;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 const ROLE_CONTENT = {
   ADMIN: {
     eyebrow: 'Administrator Portal',
@@ -122,7 +128,9 @@ const ROLE_CONTENT = {
   },
 };
 
-export default function Login({ role }) {
+// adminPath: the private address the admin sign-in page was opened at; the
+// server only accepts admin sign-ins that come with it.
+export default function Login({ role, adminPath }) {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -131,56 +139,62 @@ export default function Login({ role }) {
   const CardIcon = content.cardIcon;
 
   const [form, setForm] = useState({ email: '', password: '' });
-  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('idle'); // idle | loading | success | error
   const [showPassword, setShowPassword] = useState(false);
-  const [loaderInfo, setLoaderInfo] = useState(null); // { userName, role, dest }
+  const busy = status !== 'idle';
 
-  async function handleSubmit(e) {
+  // Google renders its button at a fixed pixel width, so fit it to the card
+  // (Google allows 200–400px).
+  const googleBoxRef = useRef(null);
+  const [googleWidth, setGoogleWidth] = useState(356);
+  useEffect(() => {
+    const box = googleBoxRef.current;
+    if (!box) return;
+    const fit = () => setGoogleWidth(Math.max(200, Math.min(356, Math.floor(box.clientWidth))));
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+
+  function destFor(role) {
+    return role === 'ADMIN' ? '/admin/dashboard'
+         : role === 'STAFF' ? '/staff/dashboard'
+         : '/dashboard';
+  }
+
+  // Spinner shows for at least MIN_SPIN_MS; on success the button turns into a
+  // checkmark for SUCCESS_MS before opening the dashboard. Errors surface
+  // immediately with a shake.
+  async function signIn(request, fallbackError) {
+    setStatus('loading');
+    try {
+      const [res] = await Promise.all([request, sleep(MIN_SPIN_MS)]);
+      setStatus('success');
+      await sleep(SUCCESS_MS);
+      login(res.data.token, res.data.user);
+      navigate(destFor(res.data.user.role), { replace: true });
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || fallbackError);
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), SHAKE_MS);
+    }
+  }
+
+  function handleSubmit(e) {
     e.preventDefault();
-    setLoading(true);
-    try {
-      const res = await api.post('/auth/login', form);
-      login(res.data.token, res.data.user);
-      const dest = res.data.user.role === 'ADMIN' ? '/admin/dashboard'
-                 : res.data.user.role === 'STAFF' ? '/staff/dashboard'
-                 : '/dashboard';
-      setLoaderInfo({ userName: res.data.user.fullName, role: res.data.user.role, dest });
-    } catch (err) {
-      toast.error(err.response?.data?.error || err.message || 'Login failed');
-      setLoading(false);
-    }
+    signIn(api.post('/auth/login', { ...form, portal: selectedRole, adminPath }), 'Login failed');
   }
 
-  async function handleGoogleSuccess(credentialResponse) {
-    setLoading(true);
-    try {
-      const res = await api.post('/auth/google', { credential: credentialResponse.credential });
-      login(res.data.token, res.data.user);
-      const dest = res.data.user.role === 'ADMIN' ? '/admin/dashboard'
-                 : res.data.user.role === 'STAFF' ? '/staff/dashboard'
-                 : '/dashboard';
-      setLoaderInfo({ userName: res.data.user.fullName, role: res.data.user.role, dest });
-    } catch (err) {
-      toast.error(err.response?.data?.error || err.message || 'Google sign-in failed');
-      setLoading(false);
-    }
-  }
-
-  if (loaderInfo) {
-    return (
-      <SystemLoader
-        userName={loaderInfo.userName}
-        role={loaderInfo.role}
-        onDone={() => navigate(loaderInfo.dest)}
-      />
-    );
+  function handleGoogleSuccess(credentialResponse) {
+    signIn(api.post('/auth/google', { credential: credentialResponse.credential, portal: selectedRole }), 'Google sign-in failed');
   }
 
   return (
     <div className="min-h-screen relative overflow-hidden">
 
       {/* ── Full-bleed background photo (spans the whole page, no seam) ── */}
-      <img src="/town-hall.jpg" alt="" className="fixed inset-0 w-full h-full object-cover" />
+      <BrandImg kind="hero" className="fixed inset-0 w-full h-full object-cover" />
       <div className="fixed inset-0" style={{ background: 'linear-gradient(100deg, rgba(6,16,42,0.78) 0%, rgba(6,16,42,0.5) 30%, rgba(20,50,100,0.28) 50%, rgba(180,205,235,0.55) 68%, rgba(219,234,254,0.88) 82%, rgba(219,234,254,0.96) 100%)' }} />
 
       <div className="relative z-10 min-h-screen flex flex-col lg:flex-row pb-10">
@@ -190,7 +204,7 @@ export default function Login({ role }) {
 
         <button onClick={() => navigate('/')}
           className="absolute top-8 left-8 z-10 flex items-center gap-4 text-left">
-          <img src="/cantilan-seal.png" alt="Municipality of Cantilan" className="w-14 h-14 object-contain flex-shrink-0" />
+          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-14 h-14 object-contain flex-shrink-0" />
           <div>
             <p className="text-white text-sm font-semibold" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>Municipality of Cantilan</p>
             <h2 className="text-white text-lg font-extrabold leading-tight" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>Surigao Del Sur - Philippines</h2>
@@ -248,7 +262,7 @@ export default function Login({ role }) {
             </button>
 
             <div className="flex flex-col items-center text-center mb-6">
-              <img src="/cantilan-seal.png" alt="Municipality of Cantilan" className="w-16 h-16 object-contain mb-3" />
+              <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-16 h-16 object-contain mb-3" />
               <h2 className="flex items-center gap-2 text-xl font-extrabold" style={{ color: '#0b2f66' }}>
                 {CardIcon && <CardIcon className="w-5 h-5" style={{ color: content.accent }} />}
                 {content.cardHeading}
@@ -265,7 +279,7 @@ export default function Login({ role }) {
                   <MailIcon className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input type="email" value={form.email}
                     onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
-                    placeholder="admin@civix.gov" required
+                    placeholder="you@example.com" required
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm outline-none transition-all border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
                 </div>
               </div>
@@ -287,56 +301,70 @@ export default function Login({ role }) {
                 </div>
               </div>
 
-              <button type="submit" disabled={loading}
-                className="w-full py-3 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-2 transition-all disabled:opacity-60 mt-1"
-                style={{ background: 'linear-gradient(135deg,#2563eb,#3b82f6)', boxShadow: '0 6px 20px rgba(37,99,235,0.35)' }}>
-                {loading
-                  ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                    </svg>Signing in...</>
-                  : <>
-                      Sign In
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 12h14M13 6l6 6-6 6" />
-                      </svg>
-                    </>}
+              <style>{signInCss}</style>
+              <button type="submit" disabled={busy} aria-busy={status === 'loading'}
+                className={`si-btn w-full py-3 rounded-xl font-bold text-sm text-white flex items-center justify-center mt-1 ${busy ? `is-${status}` : ''}`}>
+                <span className="si-success-bg" aria-hidden="true" />
+                <span className="si-core" aria-hidden="true" />
+                <span className="si-labels">
+                  <span className="si-label si-label-idle" aria-hidden={status === 'loading' || status === 'success'}>
+                    Sign In
+                    <svg className="si-arrow w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
+                  </span>
+                  <span className="si-label si-label-loading" aria-hidden={status !== 'loading'}>
+                    <svg className="si-spinner" viewBox="0 0 50 50" aria-hidden="true">
+                      <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="5" />
+                      <circle className="si-spinner-arc" cx="25" cy="25" r="20" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="round" />
+                    </svg>
+                    <span className="sr-only">Signing in</span>
+                  </span>
+                  <span className="si-label si-label-success" aria-hidden={status !== 'success'}>
+                    <svg className="si-check-icon w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path className="si-check" pathLength="1" d="M5 12.5l4.5 4.5L19 7.5" />
+                    </svg>
+                    <span className="sr-only">Signed in</span>
+                  </span>
+                </span>
               </button>
             </form>
 
-            <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs text-gray-400">OR</span>
-              <div className="flex-1 h-px bg-gray-200" />
-            </div>
-
-            {(selectedRole === 'ADMIN' || selectedRole === 'STAFF') ? (
-              <div className="flex justify-center mb-4 [&>div]:w-full">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => toast.error('Google sign-in failed')}
-                  theme="outline"
-                  shape="rectangular"
-                  size="large"
-                  width="356"
-                  text="signin_with"
-                />
-              </div>
-            ) : (
-              <p className="text-center text-xs text-gray-400 mb-4">Google sign-in is available for staff and admin accounts.</p>
+            {/* Administrators sign in with email and password only; Google sign-in is for staff. */}
+            {selectedRole === 'STAFF' && (
+              <>
+                <div className="flex items-center gap-3 my-5">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-xs text-gray-400">OR</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+                <div ref={googleBoxRef} className="flex justify-center mb-4">
+                  <GoogleLogin
+                    key={googleWidth}
+                    onSuccess={handleGoogleSuccess}
+                    onError={() => toast.error('Google sign-in failed')}
+                    theme="outline"
+                    shape="rectangular"
+                    size="large"
+                    width={String(googleWidth)}
+                    text="signin_with"
+                  />
+                </div>
+              </>
             )}
 
-            <div className="flex items-center justify-between text-xs">
+            <div className={`flex items-center justify-between text-xs ${selectedRole === 'STAFF' ? '' : 'mt-5'}`}>
               <button type="button"
                 onClick={() => toast('Please contact the system administrator to reset your password.')}
                 className="text-gray-500 hover:text-gray-700 font-medium transition-colors">
                 Forgot Password?
               </button>
-              <button type="button"
-                onClick={() => toast('No account needed — citizen reports are submitted anonymously.')}
-                className="font-semibold transition-colors" style={{ color: '#2563eb' }}>
-                Need an Account? <span className="underline">Register</span>
-              </button>
+              {selectedRole === 'STAFF' && (
+                <button type="button" onClick={() => navigate('/staff-register')}
+                  className="font-semibold transition-colors" style={{ color: '#2563eb' }}>
+                  Need an account? <span className="underline">Request one</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

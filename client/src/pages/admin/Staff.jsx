@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { SkeletonStatCards, SkeletonTable } from '../../components/common/Skeleton';
+import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 const DEPARTMENTS = ['HR'];
 
@@ -200,13 +201,15 @@ export default function Staff() {
   const [modalOpen, setModalOpen]     = useState(false);
   const [editing, setEditing]         = useState(null);
   const [deleting, setDeleting]       = useState(null);
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   useEffect(() => {
-    api.get('/staff')
+    gate(api.get('/staff'))
       .then(r => setStaff(r.data))
       .catch(() => toast.error('Failed to load staff accounts'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [gate]);
 
   const filtered = search
     ? staff.filter(s =>
@@ -310,7 +313,7 @@ export default function Staff() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table ref={tableRef} className="mobile-cards w-full text-sm">
               <thead className="bg-gray-50 dark:bg-slate-900/40 text-xs text-gray-500 dark:text-slate-400 uppercase">
                 <tr>
                   {['#', 'Full Name', 'Email / Username', 'Department', 'Role', 'Date Created', 'Actions'].map(h => (

@@ -1,13 +1,17 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { BrandingProvider } from './context/BrandingContext';
+import { SkeletonAppShell } from './components/common/Skeleton';
+import api from './utils/api';
 
 import RoleSelect from './pages/RoleSelect';
 import Login from './pages/citizen/Login';
 import Submit from './pages/citizen/Submit';
 import Track from './pages/citizen/Track';
+import Guidelines from './pages/citizen/Guidelines';
 
 import AdminLayout    from './pages/admin/AdminLayout';
 import StaffLayout    from './pages/staff/StaffLayout';
@@ -15,6 +19,8 @@ import StaffDashboard       from './pages/staff/Dashboard';
 import StaffSubmissions     from './pages/staff/Submissions';
 import StaffMonitor         from './pages/staff/Monitor';
 import StaffNotifications   from './pages/staff/Notifications';
+import StaffAdminAccess     from './pages/staff/AdminAccess';
+import StaffRegister        from './pages/staff/StaffRegister';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminSubmissions from './pages/admin/Submissions';
 import SubmissionDetail from './pages/admin/SubmissionDetail';
@@ -24,6 +30,7 @@ import Staff    from './pages/admin/Staff';
 import Settings from './pages/admin/Settings';
 import AIClassification from './pages/admin/AIClassification';
 import AuditLog from './pages/admin/AuditLog';
+import AccessRequests from './pages/admin/AccessRequests';
 
 function homeFor(role) {
   if (role === 'ADMIN') return '/admin/dashboard';
@@ -33,10 +40,35 @@ function homeFor(role) {
 
 function PrivateRoute({ children, role }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div></div>;
+  if (loading) return <SkeletonAppShell />;
   if (!user) return <Navigate to="/" replace />;
   if (role && user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
   return children;
+}
+
+// The admin sign-in page has no fixed address. Any address that isn't a known
+// page is checked with the server, and only the current private admin link
+// (Settings > Security) opens the sign-in form; everything else goes home.
+function PrivateAdminEntry() {
+  const { pathname } = useLocation();
+  const segment = pathname.replace(/^\/+|\/+$/g, '');
+  const [result, setResult] = useState({ segment: null, admin: false });
+
+  useEffect(() => {
+    let active = true;
+    if (!/^[\w-]{6,80}$/.test(segment)) {
+      setResult({ segment, admin: false });
+      return undefined;
+    }
+    api.post('/auth/portal', { path: segment })
+      .then(res => active && setResult({ segment, admin: !!res.data.admin }))
+      .catch(() => active && setResult({ segment, admin: false }));
+    return () => { active = false; };
+  }, [segment]);
+
+  if (result.segment !== segment) return null;
+  if (!result.admin) return <Navigate to="/" replace />;
+  return <Login role="ADMIN" adminPath={segment} />;
 }
 
 function AppRoutes() {
@@ -45,13 +77,14 @@ function AppRoutes() {
     <Routes>
       {/* Landing page */}
       <Route path="/" element={user ? <Navigate to={homeFor(user.role)} replace /> : <RoleSelect />} />
-      <Route path="/admin-login" element={<Login role="ADMIN" />} />
       <Route path="/staff-login" element={<Login role="STAFF" />} />
-      <Route path="/login" element={<Login />} />
+      <Route path="/staff-register" element={<StaffRegister />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
 
       {/* Public citizen routes — no auth required */}
       <Route path="/submit" element={<Submit />} />
       <Route path="/track" element={<Track />} />
+      <Route path="/guidelines" element={<Guidelines />} />
 
       {/* Admin portal */}
       <Route path="/admin" element={<PrivateRoute role="ADMIN"><AdminLayout /></PrivateRoute>}>
@@ -66,6 +99,7 @@ function AppRoutes() {
         <Route path="staff"            element={<Staff />} />
         <Route path="ai-classification" element={<AIClassification />} />
         <Route path="audit-log"        element={<AuditLog />} />
+        <Route path="access-requests"  element={<AccessRequests />} />
         <Route path="settings"         element={<Settings />} />
         <Route index element={<Navigate to="dashboard" replace />} />
       </Route>
@@ -76,10 +110,11 @@ function AppRoutes() {
         <Route path="submissions"   element={<StaffSubmissions />} />
         <Route path="monitor"       element={<StaffMonitor />} />
         <Route path="notifications" element={<StaffNotifications />} />
+        <Route path="admin-access"  element={<StaffAdminAccess />} />
         <Route index element={<Navigate to="dashboard" replace />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<PrivateAdminEntry />} />
     </Routes>
   );
 }
@@ -148,10 +183,12 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-          <AppToaster />
-        </BrowserRouter>
+        <BrandingProvider>
+          <BrowserRouter>
+            <AppRoutes />
+            <AppToaster />
+          </BrowserRouter>
+        </BrandingProvider>
       </AuthProvider>
     </ThemeProvider>
   );

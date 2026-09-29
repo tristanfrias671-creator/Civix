@@ -1,9 +1,9 @@
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const { PrismaClient } = require('@prisma/client');
+const { ensureSettings } = require('./settings');
+const { loadSealImage } = require('../utils/branding');
 const prisma = new PrismaClient();
 
 // ── Color constants (PDFKit accepts hex strings only — NO rgba()) ─────────────
@@ -372,16 +372,15 @@ async function generatePDF(req, res) {
     const titleWidth = doc.widthOfString(titleText);
     const SEAL_SIZE = 46;
     const SEAL_GAP = 14;
-    let sealPath = null;
-    try { sealPath = path.join(__dirname, '../../../client/public/cantilan-seal.png'); fs.accessSync(sealPath); } catch (_) { sealPath = null; }
-    const groupWidth = (sealPath ? SEAL_SIZE + SEAL_GAP : 0) + titleWidth;
+    const seal = await loadSealImage((await ensureSettings()).sealUrl);
+    const groupWidth = (seal ? SEAL_SIZE + SEAL_GAP : 0) + titleWidth;
     const groupX = (W - groupWidth) / 2;
     const titleY = 100;
-    if (sealPath) {
-      doc.image(sealPath, groupX, titleY + (25 - SEAL_SIZE) / 2 + 4, { width: SEAL_SIZE, height: SEAL_SIZE });
+    if (seal) {
+      doc.image(seal.buffer, groupX, titleY + (25 - SEAL_SIZE) / 2 + 4, { fit: [SEAL_SIZE, SEAL_SIZE], align: 'center', valign: 'center' });
     }
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(25)
-      .text(titleText, groupX + (sealPath ? SEAL_SIZE + SEAL_GAP : 0), titleY, { lineBreak: false });
+      .text(titleText, groupX + (seal ? SEAL_SIZE + SEAL_GAP : 0), titleY, { lineBreak: false });
 
     doc.fillColor('#bfdbfe').fontSize(11).font('Helvetica')
       .text('Integrated Citizen Engagement Platform', 0, 140, { align: 'center', width: W, lineBreak: false });
@@ -904,10 +903,11 @@ async function generateExcel(req, res) {
 
     // Embed the official municipal seal in the top-left corner of the banner.
     try {
-      const sealPath = path.join(__dirname, '../../../client/public/cantilan-seal.png');
-      const sealBuffer = fs.readFileSync(sealPath);
-      const sealImageId = workbook.addImage({ buffer: sealBuffer, extension: 'png' });
-      sSummary.addImage(sealImageId, { tl: { col: 0.12, row: 0.08 }, ext: { width: 30, height: 30 } });
+      const seal = await loadSealImage((await ensureSettings()).sealUrl);
+      if (seal) {
+        const sealImageId = workbook.addImage({ buffer: seal.buffer, extension: seal.extension });
+        sSummary.addImage(sealImageId, { tl: { col: 0.12, row: 0.08 }, ext: { width: 30, height: 30 } });
+      }
     } catch (imgErr) {
       console.warn('[reports] Could not embed municipal seal in Excel export:', imgErr.message);
     }

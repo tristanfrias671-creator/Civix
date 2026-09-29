@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { SkeletonStatCards, SkeletonTable } from '../../components/common/Skeleton';
+import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 const STATUS_OPTIONS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 const STATUS_LABELS  = { PENDING: 'Pending', REVIEWING: 'Reviewing', IN_PROGRESS: 'In Progress', RESOLVED: 'Resolved' };
@@ -25,12 +26,14 @@ export default function StaffNotifications() {
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter,   setTypeFilter]   = useState('');
   const [search, setSearch]             = useState('');
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   useEffect(() => {
-    api.get('/staff/portal/submissions?limit=30')
+    gate(api.get('/staff/portal/submissions?limit=30'))
       .then(r => { setSubmissions(r.data.submissions || []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [gate]);
 
   const pending    = submissions.filter(s => s.status === 'PENDING').length;
   const reviewing  = submissions.filter(s => s.status === 'REVIEWING').length;
@@ -143,7 +146,7 @@ export default function StaffNotifications() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table ref={tableRef} className="mobile-cards w-full text-sm">
               <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                 <tr>
                   {['', 'Tracking ID', 'Citizen', 'Type', 'Description', 'Status', 'Received', 'Action'].map(h => (

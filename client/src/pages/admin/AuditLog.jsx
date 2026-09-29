@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { SkeletonStatCards, SkeletonTable } from '../../components/common/Skeleton';
+import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 function RoleBadge({ role }) {
   const styles = {
@@ -33,16 +34,19 @@ export default function AuditLog() {
   const [search,  setSearch]  = useState('');
   const LIMIT = 20;
 
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
+
   useEffect(() => {
     setLoading(true);
-    api.get(`/classify/audit-log?page=${page}&limit=${LIMIT}`)
+    gate(api.get(`/classify/audit-log?page=${page}&limit=${LIMIT}`))
       .then(r => {
         setLogs(r.data.logs || []);
         setTotal(r.data.total || 0);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [page]);
+  }, [page, gate]);
 
   const filtered = logs.filter(l => {
     if (!search) return true;
@@ -118,7 +122,7 @@ export default function AuditLog() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table ref={tableRef} className="mobile-cards w-full text-sm">
               <thead className="bg-gray-50 dark:bg-slate-900/40 text-xs text-gray-500 dark:text-slate-400 uppercase">
                 <tr>
                   {['Date', 'Tracking ID', 'Changed By', 'Role', 'From Department', '', 'To Department', 'Reason', 'Action'].map((h, i) => (

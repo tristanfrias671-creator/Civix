@@ -10,7 +10,7 @@ const fileFilter = (req, file, cb) => {
   else cb(new Error('Only JPG and PNG images are allowed'), false);
 };
 
-let storage, avatarStorage;
+let storage, avatarStorage, brandingStorage;
 
 if (cloudinary.configured) {
   storage = new CloudinaryStorage({
@@ -20,6 +20,10 @@ if (cloudinary.configured) {
   avatarStorage = new CloudinaryStorage({
     cloudinary: cloudinary.instance,
     params: { folder: 'civix/avatars', allowed_formats: ['jpg', 'jpeg', 'png'] },
+  });
+  brandingStorage = new CloudinaryStorage({
+    cloudinary: cloudinary.instance,
+    params: { folder: 'civix/branding', allowed_formats: ['jpg', 'jpeg', 'png'] },
   });
 } else {
   console.warn('[upload] Cloudinary not configured — falling back to local disk storage (uploads/).');
@@ -39,9 +43,18 @@ if (cloudinary.configured) {
     destination: (req, file, cb) => cb(null, avatarDir),
     filename: (req, file, cb) => cb(null, `avatar-${req.user.id}-${Date.now()}.jpg`),
   });
+
+  // Seal and homepage photo; the file name starts with the kind (seal / hero).
+  const brandingDir = path.join(uploadDir, 'branding');
+  if (!fs.existsSync(brandingDir)) fs.mkdirSync(brandingDir, { recursive: true });
+  brandingStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, brandingDir),
+    filename: (req, file, cb) => cb(null, `${req.params.kind}-${Date.now()}${file.mimetype === 'image/png' ? '.png' : '.jpg'}`),
+  });
 }
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 const avatarUpload = multer({ storage: avatarStorage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const brandingUpload = multer({ storage: brandingStorage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
-module.exports = { upload, avatarUpload };
+module.exports = { upload, avatarUpload, brandingUpload };

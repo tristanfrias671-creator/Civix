@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { SkeletonTable } from '../../components/common/Skeleton';
+import { SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
+import useMobileTable from '../../utils/useMobileTable';
 
 const STATUS_OPTS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 const STATUS_LABELS = { '':'All Statuses', PENDING:'Pending', REVIEWING:'Reviewing', IN_PROGRESS:'In Progress', RESOLVED:'Resolved' };
@@ -18,19 +19,21 @@ export default function AdminSubmissions({ type: typeFilter }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const gate = useSkeletonGate();
+  const tableRef = useMobileTable();
 
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams({ page, limit: 15 });
     if (typeFilter) params.append('type', typeFilter);
     if (statusFilter) params.append('status', statusFilter);
-    api.get(`/submissions?${params}`).then(r => {
+    gate(api.get(`/submissions?${params}`)).then(r => {
       setSubmissions(r.data.submissions);
       setTotalPages(r.data.pages);
       setTotal(r.data.total ?? r.data.submissions.length);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [typeFilter, statusFilter, page]);
+  }, [typeFilter, statusFilter, page, gate]);
 
   const filtered = search
     ? submissions.filter(s =>
@@ -98,7 +101,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table ref={tableRef} className="mobile-cards w-full text-sm">
                 <thead>
                   <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${border}` }}>
                     {['Tracking ID','Citizen','Type','Status','Department','Date',''].map(h => (

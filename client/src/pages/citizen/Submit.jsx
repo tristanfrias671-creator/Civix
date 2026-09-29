@@ -269,7 +269,7 @@ export default function Submit() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           <span>
-            In compliance with the <strong>Data Privacy Act of 2012 (Republic Act No. 10173)</strong>, any information you voluntarily provide (such as an optional contact number) will be used solely for processing and following up on your report, and will not be shared with unauthorized third parties.
+            In compliance with the <strong>Data Privacy Act of 2012 (Republic Act No. 10173)</strong>, any information you provide (such as your contact number and email) will be used solely for processing and following up on your report, and will not be shared with unauthorized third parties.
           </span>
         </div>
 
@@ -372,7 +372,7 @@ export default function Submit() {
               onChange={e => setForm(p => ({ ...p, contactNumber: e.target.value }))}
               placeholder="e.g. 09XX XXX XXXX"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-            <p className="text-xs text-gray-400 mt-1">Used so the concerned office can follow up with you and send SMS updates on your report's status.</p>
+            <p className="text-xs text-gray-400 mt-1">Used so the concerned office can contact you about your report.</p>
           </div>
 
           {/* EMAIL (REQUIRED) */}
@@ -552,7 +552,7 @@ export default function Submit() {
               Already submitted a report? Check the status using your tracking code.
             </p>
             <input type="text" value={trackInput} onChange={e => setTrackInput(e.target.value)}
-              placeholder="Enter your tracking code (e.g. CIVIX-2025-0418)"
+              placeholder="Enter your tracking code (e.g. ENG-20240527-0001)"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-primary" />
             <button type="button"
               onClick={() => navigate('/track', { state: { prefill: trackInput } })}

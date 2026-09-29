@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import Icon from '../../components/common/Icons';
 import ProfileModal from '../../components/common/ProfileModal';
+import IdleSessionGuard from '../../components/common/IdleSessionGuard';
+import AdminNotificationBell from '../../components/common/AdminNotificationBell';
+import { BrandImg } from '../../context/BrandingContext';
 import { mediaUrl } from '../../utils/mediaUrl';
+import api from '../../utils/api';
 
 const NAV_SECTIONS = [
   {
@@ -28,6 +33,7 @@ const NAV_SECTIONS = [
     label: 'Management',
     items: [
       { to: '/admin/staff',             label: 'Personnel',    icon: 'citizens'  },
+      { to: '/admin/access-requests',   label: 'Access Requests', icon: 'lock'   },
       { to: '/admin/ai-classification', label: 'AI Review',    icon: 'ai'        },
       { to: '/admin/audit-log',         label: 'Audit Log',    icon: 'auditlog'  },
       { to: '/admin/settings',          label: 'Settings',     icon: 'settings'  },
@@ -45,6 +51,43 @@ export default function AdminLayout() {
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [topSearch, setTopSearch] = useState('');
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const lastPending = useRef(null);
+
+  // Count for the bell and the "Access Requests" badge, checked every 30 seconds;
+  // a new request while an administrator is signed in also pops up an alert.
+  useEffect(() => {
+    let active = true;
+    const load = () => api.get('/access-requests/pending-count')
+      .then(res => {
+        if (!active) return;
+        const { count, latest } = res.data;
+        if (lastPending.current !== null && count > lastPending.current && latest) {
+          const what = latest.type === 'ADMIN_ACCESS' ? 'requested administrator access' : 'requested a staff account';
+          toast(t => (
+            <span className="flex items-center gap-3">
+              <span><strong>{latest.fullName}</strong> {what}.</span>
+              <button type="button" className="font-semibold text-primary whitespace-nowrap"
+                onClick={() => { toast.dismiss(t.id); navigate('/admin/access-requests'); }}>
+                Review
+              </button>
+            </span>
+          ), { id: 'access-request-alert', duration: 10000 });
+        }
+        lastPending.current = count;
+        setPendingRequests(count);
+      })
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, 30000);
+    window.addEventListener('civix:access-requests-changed', load);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener('civix:access-requests-changed', load);
+    };
+  }, [location.pathname, navigate]);
+
   const isMapPage = location.pathname.startsWith('/admin/map');
   const activeItem = navItems.find(i => i.to === '/admin/dashboard'
     ? location.pathname === i.to
@@ -52,7 +95,7 @@ export default function AdminLayout() {
 
   function handleLogout() {
     logout();
-    navigate('/admin-login');
+    navigate('/');
   }
 
   function handleTopSearch(e) {
@@ -70,7 +113,7 @@ export default function AdminLayout() {
       <aside className={`fixed inset-y-0 left-0 z-30 w-64 flex flex-col transform transition-transform duration-200 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
         style={{ background: 'linear-gradient(180deg, #0b2f66 0%, #081d40 100%)' }}>
         <div className="flex items-center gap-3 px-5 py-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <img src="/cantilan-seal.png" alt="Municipality of Cantilan" className="w-10 h-10 object-contain flex-shrink-0" />
+          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-10 h-10 object-contain flex-shrink-0" />
           <div className="min-w-0">
             <p className="text-white font-extrabold text-sm leading-tight truncate">CIVIX</p>
             <p className="text-white/50 text-[11px] font-medium leading-tight truncate">Administrator Portal</p>
@@ -95,6 +138,12 @@ export default function AdminLayout() {
                       {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full bg-white/80" />}
                       <Icon name={item.icon} className="w-5 h-5 flex-shrink-0" />
                       {item.label}
+                      {item.to === '/admin/access-requests' && pendingRequests > 0 && (
+                        <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center text-[11px] font-bold text-white bg-red-500"
+                          aria-label={`${pendingRequests} pending`}>
+                          {pendingRequests > 9 ? '9+' : pendingRequests}
+                        </span>
+                      )}
                     </>
                   )}
                 </NavLink>
@@ -124,13 +173,21 @@ export default function AdminLayout() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile header */}
-        <header className="bg-white shadow-sm border-b border-gray-200 flex items-center px-4 py-3 md:hidden">
-          <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-600">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <header className="bg-white border-b border-gray-200 flex items-center px-4 py-3 md:hidden"
+          style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-500 hover:text-gray-800 rounded-lg transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <img src="/civix-logo.png" alt="CIVIX" className="ml-3 h-7 w-auto" />
+          <div className="flex items-center gap-2 ml-3">
+            <BrandImg kind="seal" className="w-6 h-6 object-contain" />
+            <span className="font-extrabold text-gray-900 text-sm">CIVIX</span>
+            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">Admin</span>
+          </div>
+          <div className="ml-auto">
+            <AdminNotificationBell count={pendingRequests} dark={dark} />
+          </div>
         </header>
 
         {/* Desktop topbar */}
@@ -159,16 +216,7 @@ export default function AdminLayout() {
           </form>
 
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-            <button onClick={() => navigate('/admin/audit-log')}
-              className="relative p-2 rounded-lg transition-colors"
-              style={{ color: dark ? '#94a3b8' : '#6b7280' }}
-              onMouseEnter={e => e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              title="Audit Log">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
-              </svg>
-            </button>
+            <AdminNotificationBell count={pendingRequests} dark={dark} />
             <button onClick={toggleDark}
               className="p-2 rounded-lg transition-colors"
               style={{ color: dark ? '#94a3b8' : '#6b7280' }}
@@ -196,11 +244,12 @@ export default function AdminLayout() {
         </header>
 
         <main className={`flex-1 min-h-0 ${isMapPage ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
-          <Outlet />
+          <Outlet key={location.key} />
         </main>
       </div>
 
       <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <IdleSessionGuard loginPath="/" />
     </div>
   );
 }

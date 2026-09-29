@@ -1,9 +1,10 @@
 import axios from 'axios';
 
+// Same-origin by default: in development the CRA dev server proxies /api to the
+// backend (see "proxy" in package.json), so the app also works when opened from
+// a phone on the local network.
 function resolveApiBase() {
-  if (process.env.REACT_APP_API_URL) return process.env.REACT_APP_API_URL;
-  if (process.env.NODE_ENV === 'development') return 'http://localhost:5000/api';
-  return '/api';
+  return process.env.REACT_APP_API_URL || '/api';
 }
 
 const api = axios.create({
@@ -23,7 +24,9 @@ api.interceptors.response.use(
     if (err.response?.status === 401 && !isAuthRoute) {
       localStorage.removeItem('civix_token');
       localStorage.removeItem('civix_user');
-      window.location.href = '/login';
+      const path = window.location.pathname;
+      // The admin sign-in page is private, so admins go back to the homepage.
+      window.location.href = path.startsWith('/staff') ? '/staff-login' : '/';
     }
     if (!err.response) {
       err.message = 'Cannot reach the server. Start the backend (port 5000) and try again.';

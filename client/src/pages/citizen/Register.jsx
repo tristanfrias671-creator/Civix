@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../../utils/api';
+import { BrandImg, DEFAULT_BRANDING, useBranding } from '../../context/BrandingContext';
 
 const css = `
 @keyframes floatA { 0%,100%{transform:translate(0,0)} 50%{transform:translate(18px,-14px)} }
@@ -67,6 +68,7 @@ const btnBack = {
 
 export default function Register() {
   const navigate = useNavigate();
+  const { hero } = useBranding();
   const [step, setStep]             = useState(0);
   const [form, setForm]             = useState({ fullName:'', email:'', gmail:'', mobileNumber:'', password:'', confirm:'' });
   const [loading, setLoading]       = useState(false);
@@ -104,7 +106,8 @@ export default function Register() {
       <style>{css}</style>
       <div className="glass-page min-h-screen w-screen flex flex-col items-center justify-center overflow-auto py-10 px-4 relative"
         style={{
-          backgroundImage: 'url(/town-hall.jpg)',
+          // The default photo sits underneath in case the uploaded one fails to load.
+          backgroundImage: `url(${hero}), url(${DEFAULT_BRANDING.hero})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
@@ -117,7 +120,7 @@ export default function Register() {
         {/* ── Logos ── */}
         <div className="fade-up flex items-center justify-center relative z-10"
           style={{ background: 'transparent', marginBottom: '-20px', gap: '2px' }}>
-          <img src="/cantilan-seal.png" alt="Municipality of Cantilan"
+          <BrandImg kind="seal" alt="Municipality of Cantilan"
             style={{ width: 95, height: 95, objectFit: 'contain', objectPosition: 'center', display: 'block' }} />
           <img src="/civix-logo.png" alt="CIVIX"
             style={{ width: 200, height: 200, objectFit: 'contain', objectPosition: 'center', display: 'block' }} />
