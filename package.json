@@ -1,0 +1,15 @@
+{
+  "name": "civix",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CIVIX - Citizen Complaint and Feedback Management System, Municipality of Cantilan",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "npm install --prefix server --include=dev && npm run prisma:generate --prefix server",
+    "build": "node scripts/build-client.js",
+    "start": "node server/index.js"
+  }
+}

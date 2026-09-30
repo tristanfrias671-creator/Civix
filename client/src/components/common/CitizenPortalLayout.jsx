@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { BrandImg } from '../../context/BrandingContext';
+import { useTheme } from '../../context/ThemeContext';
 
 const TEAM = [
   'Tristan M. Frias',
@@ -92,6 +93,7 @@ const NAV_ITEMS = [
 
 export default function CitizenPortalLayout({ children }) {
   const location = useLocation();
+  const { dark } = useTheme();
   const [aboutOpen, setAboutOpen] = useState(false);
   const isActive = (to) => location.pathname === to;
 
@@ -102,7 +104,7 @@ export default function CitizenPortalLayout({ children }) {
   ];
 
   return (
-    <div className="min-h-screen" style={{ background: '#eef2f9' }}>
+    <div className="min-h-screen" style={{ background: dark ? '#0f172a' : '#eef2f9' }}>
       {/* Header banner */}
       <div className="relative overflow-hidden" style={{ height: 130 }}>
         <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />

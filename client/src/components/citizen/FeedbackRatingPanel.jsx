@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
+// `code` names the animated emoji in public/emoji/<code>.json (`rest` is the frame
+// shown while it is paused, the one that best shows its expression) — Noto Animated Emoji
+// by Google, CC BY 4.0 (https://googlefonts.github.io/noto-emoji-animation/).
 export const REACTIONS = [
-  { id: 'EXCELLENT', label: 'Excellent', emoji: '😄', rating: 5, ring: 'ring-emerald-400', bg: 'bg-emerald-50', text: 'text-emerald-700' },
-  { id: 'GOOD', label: 'Good', emoji: '🙂', rating: 4, ring: 'ring-green-400', bg: 'bg-green-50', text: 'text-green-700' },
-  { id: 'OKAY', label: 'Okay', emoji: '😐', rating: 3, ring: 'ring-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
-  { id: 'POOR', label: 'Poor', emoji: '😞', rating: 2, ring: 'ring-orange-400', bg: 'bg-orange-50', text: 'text-orange-700' },
-  { id: 'TERRIBLE', label: 'Terrible', emoji: '😠', rating: 1, ring: 'ring-red-400', bg: 'bg-red-50', text: 'text-red-700' },
+  { id: 'EXCELLENT', label: 'Excellent', emoji: '😄', code: '1f604', rest: 60, rating: 5, color: '#059669', ring: 'ring-emerald-400', bg: 'bg-emerald-50', text: 'text-emerald-700',
+    message: "Thank you! We're glad you had a great experience." },
+  { id: 'GOOD', label: 'Good', emoji: '🙂', code: '1f642', rest: 0, rating: 4, color: '#16a34a', ring: 'ring-green-400', bg: 'bg-green-50', text: 'text-green-700',
+    message: 'Thank you! Good to hear things went well.' },
+  { id: 'OKAY', label: 'Okay', emoji: '😐', code: '1f610', rest: 0, rating: 3, color: '#d97706', ring: 'ring-amber-400', bg: 'bg-amber-50', text: 'text-amber-700',
+    message: 'Thanks. Tell us below what could make it better.' },
+  { id: 'POOR', label: 'Poor', emoji: '😞', code: '1f61e', rest: 100, rating: 2, color: '#ea580c', ring: 'ring-orange-400', bg: 'bg-orange-50', text: 'text-orange-700',
+    message: "Sorry it wasn't better. Your feedback helps us improve." },
+  { id: 'TERRIBLE', label: 'Terrible', emoji: '😠', code: '1f620', rest: 90, rating: 1, color: '#dc2626', ring: 'ring-red-400', bg: 'bg-red-50', text: 'text-red-700',
+    message: "We're sorry. Please tell us what went wrong so we can fix it." },
 ];
 
 export const EXPERIENCE_TAGS = [
@@ -21,17 +29,100 @@ export function getReactionMeta(reactionId) {
   return REACTIONS.find(r => r.id === reactionId) || null;
 }
 
-function Star({ filled, onClick, onHover, size = 'lg' }) {
-  const sizeClass = size === 'lg' ? 'w-9 h-9' : 'w-6 h-6';
+const panelCss = `
+@keyframes rxPop { 0% { transform: scale(1); } 40% { transform: scale(1.08); } 100% { transform: scale(1.03); } }
+@keyframes rxBadge { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes rxStarPop { 0% { transform: scale(.6) rotate(-15deg); } 60% { transform: scale(1.25) rotate(6deg); } 100% { transform: scale(1) rotate(0); } }
+@keyframes rxFadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes rxBounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.rx-card { transition: transform .25s cubic-bezier(.22,1,.36,1), opacity .25s ease, filter .25s ease, box-shadow .25s ease, border-color .25s ease; }
+.rx-card:hover { transform: translateY(-3px); }
+.rx-card.rx-active { animation: rxPop .45s cubic-bezier(.34,1.56,.64,1) both; }
+.rx-card.rx-dim { opacity: .55; filter: grayscale(.55); }
+.rx-card.rx-dim:hover, .rx-card.rx-dim:focus-visible { opacity: 1; filter: none; }
+.rx-badge { animation: rxBadge .35s cubic-bezier(.34,1.56,.64,1) both; }
+.rx-star-pop { animation: rxStarPop .45s cubic-bezier(.34,1.56,.64,1) both; }
+.rx-fade-up { animation: rxFadeUp .35s ease both; }
+.rx-fallback-play { animation: rxBounce 1s ease-in-out infinite; }
+.rx-tint { color: var(--rx-c); }
+.dark .rx-tint { color: #f1f5f9; }
+.dark .rx-tint-soft { color: #cbd5e1; }
+@media (prefers-reduced-motion: reduce) {
+  .rx-card, .rx-card.rx-active, .rx-badge, .rx-star-pop, .rx-fade-up, .rx-fallback-play { animation: none !important; transition: none !important; }
+}
+`;
+
+const reduceMotion = typeof window !== 'undefined'
+  && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// The animation player is only downloaded when this panel is shown.
+let lottiePromise = null;
+function loadLottie() {
+  if (!lottiePromise) lottiePromise = import('lottie-web/build/player/lottie_light').then(m => m.default);
+  return lottiePromise;
+}
+
+// An animated emoji that plays while `playing` is true and rests on frame `rest`
+// otherwise. Shows the regular emoji until the animation loads, or if it can't.
+function AnimatedEmoji({ code, rest = 0, fallback, playing, className }) {
+  const box = useRef(null);
+  const anim = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadLottie().then(lottie => {
+      if (cancelled || !box.current) return;
+      const a = lottie.loadAnimation({
+        container: box.current, renderer: 'svg', loop: true, autoplay: false,
+        path: `${process.env.PUBLIC_URL}/emoji/${code}.json`,
+      });
+      a.addEventListener('DOMLoaded', () => { if (!cancelled) setReady(true); });
+      a.addEventListener('data_failed', () => { if (!cancelled) setFailed(true); });
+      anim.current = a;
+    }).catch(() => { if (!cancelled) setFailed(true); });
+    return () => {
+      cancelled = true;
+      if (anim.current) anim.current.destroy();
+      anim.current = null;
+    };
+  }, [code]);
+
+  useEffect(() => {
+    const a = anim.current;
+    if (!a || !ready) return;
+    if (playing && !reduceMotion) a.play();
+    else a.goToAndStop(rest, true);
+  }, [playing, ready, rest]);
+
+  if (failed) {
+    return (
+      <span className={`${className} flex items-center justify-center text-3xl sm:text-4xl leading-none ${playing ? 'rx-fallback-play' : ''}`} aria-hidden>
+        {fallback}
+      </span>
+    );
+  }
+  return (
+    <span className={`${className} relative`} aria-hidden>
+      {!ready && <span className="absolute inset-0 flex items-center justify-center text-3xl sm:text-4xl leading-none">{fallback}</span>}
+      <span ref={box} className="block w-full h-full" style={{ opacity: ready ? 1 : 0 }} />
+    </span>
+  );
+}
+
+function Star({ n, filled, pop, onClick, onHover }) {
   return (
     <button
       type="button"
       onClick={onClick}
       onMouseEnter={onHover}
-      className={`${sizeClass} transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-primary/30 rounded`}
-      aria-label="Rate star"
+      onFocus={onHover}
+      className="w-10 h-10 transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-lg"
+      aria-label={`${n} star${n === 1 ? '' : 's'}`}
     >
-      <svg viewBox="0 0 24 24" className={filled ? 'text-amber-400 fill-amber-400' : 'text-gray-300 fill-gray-200'}>
+      <svg viewBox="0 0 24 24" className={`w-full h-full ${pop ? 'rx-star-pop' : ''} ${filled ? 'text-amber-400 fill-amber-400' : 'text-gray-300 fill-gray-200 dark:text-slate-600 dark:fill-slate-600'}`}
+        style={pop ? { animationDelay: `${(n - 1) * 60}ms`, filter: 'drop-shadow(0 2px 4px rgba(245,158,11,0.35))' } : undefined}>
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
       </svg>
     </button>
@@ -39,9 +130,21 @@ function Star({ filled, onClick, onHover, size = 'lg' }) {
 }
 
 export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingChange, onReactionChange, onTagsChange }) {
-  const [hoverStar, setHoverStar] = React.useState(0);
+  const [hoverStar, setHoverStar] = useState(0);
+  const [hoverReaction, setHoverReaction] = useState(null);
+  const [visible, setVisible] = useState(true);
+  const gridRef = useRef(null);
   const displayStars = hoverStar || rating || 0;
   const selectedReaction = getReactionMeta(reaction);
+  const starReaction = REACTIONS.find(r => r.rating === displayStars);
+
+  // Pause the faces while the panel is scrolled out of view.
+  useEffect(() => {
+    if (!gridRef.current || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+    io.observe(gridRef.current);
+    return () => io.disconnect();
+  }, []);
 
   function selectReaction(r) {
     onReactionChange(r.id);
@@ -54,28 +157,44 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
   }
 
   return (
-    <div className="rounded-2xl border border-green-200 bg-gradient-to-br from-green-50 via-white to-emerald-50/40 p-5 space-y-5">
+    <div className="rounded-2xl border border-green-200 bg-gradient-to-br from-green-50 via-white to-emerald-50/40 dark:border-emerald-800/60 dark:from-emerald-950/40 dark:via-slate-800 dark:to-slate-800 p-5 space-y-5">
+      <style>{panelCss}</style>
       <div>
-        <h3 className="text-sm font-semibold text-gray-800">How was your experience?</h3>
-        <p className="text-xs text-gray-500 mt-0.5">Your reaction helps the government improve services</p>
+        <h3 className="text-base font-bold text-gray-800">How was your experience?</h3>
+        <p className="text-sm text-gray-500 mt-0.5">Tap a face. Your reaction helps the government improve services.</p>
       </div>
 
-      <div className="grid grid-cols-5 gap-2 sm:gap-3">
+      <div ref={gridRef} className="grid grid-cols-5 gap-2 sm:gap-3" role="radiogroup" aria-label="Your reaction">
         {REACTIONS.map(r => {
           const active = reaction === r.id;
+          // Before a choice, every face animates; after it, only the chosen one
+          // (and whichever the pointer is over).
+          const playing = visible && (active || hoverReaction === r.id || !reaction);
           return (
             <button
               key={r.id}
               type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={`${r.label}, ${r.rating} out of 5`}
               onClick={() => selectReaction(r)}
-              className={`flex flex-col items-center gap-1.5 p-2 sm:p-3 rounded-xl border-2 transition-all ${
-                active
-                  ? `${r.bg} border-transparent ring-2 ${r.ring} scale-[1.02] shadow-sm`
-                  : 'bg-white border-gray-100 hover:border-gray-200 hover:shadow-sm'
+              onMouseEnter={() => setHoverReaction(r.id)}
+              onMouseLeave={() => setHoverReaction(null)}
+              onFocus={() => setHoverReaction(r.id)}
+              onBlur={() => setHoverReaction(null)}
+              className={`rx-card relative flex flex-col items-center gap-1.5 px-1 py-3 sm:p-3 rounded-xl border-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                active ? 'rx-active' : `bg-white border-gray-100 hover:shadow-md ${reaction ? 'rx-dim' : ''}`
               }`}
+              style={active ? { background: `${r.color}14`, borderColor: r.color, boxShadow: `0 10px 24px -10px ${r.color}88` } : undefined}
             >
-              <span className="text-2xl sm:text-3xl leading-none" role="img" aria-hidden>{r.emoji}</span>
-              <span className={`text-[10px] sm:text-xs font-semibold ${active ? r.text : 'text-gray-500'}`}>
+              {active && (
+                <span className="rx-badge absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center text-white shadow"
+                  style={{ background: r.color }}>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                </span>
+              )}
+              <AnimatedEmoji code={r.code} rest={r.rest} fallback={r.emoji} playing={playing} className="w-10 h-10 sm:w-14 sm:h-14" />
+              <span className={`text-[11px] sm:text-sm font-semibold ${active ? 'rx-tint' : 'text-gray-600'}`} style={active ? { '--rx-c': r.color } : undefined}>
                 {r.label}
               </span>
             </button>
@@ -83,13 +202,15 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
         })}
       </div>
 
-      <div className="flex flex-col items-center py-2 border-y border-green-100/80">
-        <p className="text-xs font-medium text-gray-500 mb-2">Overall rating</p>
+      <div className="flex flex-col items-center py-3 border-y border-green-100/80 dark:border-slate-700">
+        <p className="text-sm font-medium text-gray-500 mb-1.5">Overall rating</p>
         <div className="flex gap-1" onMouseLeave={() => setHoverStar(0)}>
           {[1, 2, 3, 4, 5].map(star => (
             <Star
-              key={star}
+              key={`${star}-${rating}`}
+              n={star}
               filled={star <= displayStars}
+              pop={!hoverStar && star <= (rating || 0)}
               onClick={() => {
                 onRatingChange(star);
                 const match = REACTIONS.find(r => r.rating === star);
@@ -99,13 +220,15 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
             />
           ))}
         </div>
-        <p className="text-sm font-semibold text-gray-700 mt-2 min-h-[1.25rem]">
-          {displayStars > 0 ? `${displayStars} out of 5` : 'Tap a star or reaction above'}
+        <p className="text-base font-semibold text-gray-700 mt-1.5 min-h-[1.5rem]">
+          {displayStars > 0
+            ? <>{displayStars} out of 5{starReaction && <span style={{ color: starReaction.color }}> · {starReaction.label}</span>}</>
+            : 'Tap a face or a star'}
         </p>
       </div>
 
       <div>
-        <p className="text-xs font-medium text-gray-600 mb-2">What stood out? <span className="text-gray-400 font-normal">(optional)</span></p>
+        <p className="text-sm font-medium text-gray-600 mb-2">What stood out? <span className="text-gray-400 font-normal">(optional)</span></p>
         <div className="flex flex-wrap gap-2">
           {EXPERIENCE_TAGS.map(tag => {
             const on = tags.includes(tag);
@@ -113,8 +236,9 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
               <button
                 key={tag}
                 type="button"
+                aria-pressed={on}
                 onClick={() => toggleTag(tag)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                className={`px-3.5 py-1.5 rounded-full text-sm font-medium border ${
                   on
                     ? 'bg-primary text-white border-primary'
                     : 'bg-white text-gray-600 border-gray-200 hover:border-primary/40'
@@ -128,11 +252,15 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
       </div>
 
       {selectedReaction && (
-        <div className={`text-center text-xs font-medium px-3 py-2 rounded-lg ${selectedReaction.bg} ${selectedReaction.text}`}>
-          You selected: {selectedReaction.label} ({rating}/5)
+        <div key={selectedReaction.id} className="rx-fade-up rx-tint flex items-center gap-3 text-sm font-medium px-4 py-3 rounded-xl"
+          style={{ '--rx-c': selectedReaction.color, background: `${selectedReaction.color}1a`, border: `1px solid ${selectedReaction.color}33` }}>
+          <span className="text-2xl leading-none" aria-hidden>{selectedReaction.emoji}</span>
+          <span>
+            {selectedReaction.message}
+            <span className="rx-tint-soft block text-xs font-semibold opacity-80 mt-0.5">You rated: {selectedReaction.label} ({rating}/5)</span>
+          </span>
         </div>
       )}
     </div>
   );
 }
-

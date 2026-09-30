@@ -2,7 +2,10 @@ const { PrismaClient } = require('@prisma/client');
 const { generateTrackingId } = require('../utils/trackingId');
 const { analyzeSentiment } = require('../utils/sentiment');
 const { classifyText } = require('../utils/classifier');
-const { sendSubmissionReceivedEmail, sendStatusUpdateEmail } = require('../utils/mailer');
+const { sendSubmissionReceivedEmail } = require('../utils/mailer');
+const { normalizePhMobile, sendReportReceivedSms } = require('../utils/sms');
+const { addWorkingDays, deadlineDays } = require('../utils/deadline');
+const { ensureSettings } = require('./settings');
 const { configured: cloudinaryConfigured } = require('../utils/cloudinary');
 
 const prisma = new PrismaClient();
@@ -21,6 +24,11 @@ async function createSubmission(req, res) {
     }
     if (!contactNumber?.trim()) {
       return res.status(400).json({ error: 'Contact number is required' });
+    }
+    // Status updates are texted to this number, so it must be a PH mobile number.
+    const mobile = normalizePhMobile(contactNumber);
+    if (!mobile) {
+      return res.status(400).json({ error: 'Please enter a valid mobile number, e.g. 09171234567' });
     }
     if (!email?.trim()) {
       return res.status(400).json({ error: 'Email address is required' });
@@ -65,6 +73,8 @@ async function createSubmission(req, res) {
       && citizenDepartment !== aiResult.department;
 
     const trackingId = await generateTrackingId(prisma, finalDepartment);
+    // Resolve-by date: working days for this report type, fixed at submission.
+    const dueAt = addWorkingDays(new Date(), deadlineDays(await ensureSettings(), type));
 
     const submission = await prisma.submission.create({
       data: {
@@ -72,7 +82,7 @@ async function createSubmission(req, res) {
         type,
         citizenDepartment: citizenDepartment || 'UNASSIGNED',
         description,
-        contactNumber: contactNumber || null,
+        contactNumber: mobile,
         email: email || null,
         address: address || null,
         sentiment,
@@ -80,6 +90,7 @@ async function createSubmission(req, res) {
         reaction: parsedReaction,
         feedbackTags: parsedTags,
         department: finalDepartment,
+        dueAt,
         media: req.files?.length
           ? {
               create: req.files.map(f => ({
@@ -103,6 +114,7 @@ async function createSubmission(req, res) {
     res.status(201).json({ trackingId: submission.trackingId, submission });
 
     if (submission.email) sendSubmissionReceivedEmail(submission);
+    sendReportReceivedSms(submission);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create submission' });
@@ -157,53 +169,6 @@ async function getSubmission(req, res) {
   }
 }
 
-async function updateSubmission(req, res) {
-  try {
-    const { priority, department, status, changeReason } = req.body;
-    const existing = await prisma.submission.findUnique({ where: { id: req.params.id } });
-    if (!existing) return res.status(404).json({ error: 'Submission not found' });
-
-    if (department && department !== existing.department) {
-      await prisma.departmentChangeLog.create({
-        data: {
-          submissionId: existing.id,
-          trackingId: existing.trackingId,
-          changedById: req.user.id,
-          changedByName: req.user.fullName || req.user.email || req.user.id,
-          changedByRole: req.user.role,
-          fromDepartment: existing.department,
-          toDepartment: department,
-          reason: changeReason || null,
-        },
-      });
-
-      await prisma.aIClassification.updateMany({
-        where: { submissionId: existing.id },
-        data: { adminCorrected: true },
-      });
-    }
-
-    const updated = await prisma.submission.update({
-      where: { id: req.params.id },
-      data: {
-        ...(priority && { priority }),
-        ...(department && { department }),
-        ...(status && { status }),
-      },
-      include: { location: true, media: true, aiClassification: true },
-    });
-
-    res.json(updated);
-
-    if (status && status !== existing.status && updated.email) {
-      sendStatusUpdateEmail(updated, status);
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update submission' });
-  }
-}
-
 async function trackSubmission(req, res) {
   try {
     const submission = await prisma.submission.findUnique({
@@ -242,4 +207,4 @@ async function getSubmissionsByUser(req, res) {
   }
 }
 
-module.exports = { createSubmission, getSubmissions, getSubmission, updateSubmission, trackSubmission, getSubmissionsByUser };
+module.exports = { createSubmission, getSubmissions, getSubmission, trackSubmission, getSubmissionsByUser };

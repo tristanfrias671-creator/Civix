@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfileModal from '../../components/common/ProfileModal';
 import IdleSessionGuard from '../../components/common/IdleSessionGuard';
+import { announceNewAlerts } from '../../components/common/alerts';
 import { mediaUrl } from '../../utils/mediaUrl';
 import api from '../../utils/api';
 
@@ -50,6 +51,22 @@ function ShieldIcon() {
   );
 }
 
+// Staff pop-ups: reports in their own office that are urgent, overdue or newly received.
+const STAFF_ALERT_KINDS = {
+  urgent: {
+    noun: 'urgent report',
+    describe: item => <>Urgent report <strong>{item.trackingId}</strong> needs attention.</>,
+  },
+  overdue: {
+    noun: 'overdue report',
+    describe: item => <><strong>{item.trackingId}</strong> is now overdue.</>,
+  },
+  newReports: {
+    noun: 'new report',
+    describe: item => <>New report <strong>{item.trackingId}</strong> was sent to your office.</>,
+  },
+};
+
 const sidebarCss = `
 @keyframes sbFadeIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
 .sb-item { position: relative; animation: sbFadeIn .35s cubic-bezier(.22,1,.36,1) both; }
@@ -93,14 +110,31 @@ export default function StaffLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  useEffect(() => {
-    api.get('/staff/portal/stats')
-      .then(r => setUnreadCount((r.data.pending || 0) + (r.data.reviewing || 0)))
-      .catch(() => {});
-  }, [location.pathname]);
+  const [alerts, setAlerts] = useState(null);
+  const alertCount = alerts?.total || 0;
   const [profileOpen, setProfileOpen] = useState(false);
+
+  // Reports in this staff member's office that need attention, refreshed every
+  // 30 seconds, on each page change and after they update a report. Items that
+  // newly appear pop up an alert once per browser session.
+  useEffect(() => {
+    let active = true;
+    const load = () => api.get('/staff/portal/alerts')
+      .then(res => {
+        if (!active) return;
+        setAlerts(res.data);
+        announceNewAlerts(res.data, STAFF_ALERT_KINDS, () => navigate('/staff/notifications'));
+      })
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, 30000);
+    window.addEventListener('civix:alerts-changed', load);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener('civix:alerts-changed', load);
+    };
+  }, [location.pathname, navigate]);
 
   function handleLogout() { logout(); navigate('/staff-login'); }
 
@@ -199,10 +233,11 @@ export default function StaffLayout() {
             })}>
             <BellIcon />
             Notifications
-            {unreadCount > 0 && (
+            {alertCount > 0 && (
               <span className="sb-bell-badge ml-auto min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
-                {unreadCount > 9 ? '9+' : unreadCount}
+                style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+                title={`${alertCount} need attention`}>
+                {alertCount > 9 ? '9+' : alertCount}
               </span>
             )}
           </NavLink>
@@ -300,10 +335,19 @@ export default function StaffLayout() {
             <span className="font-extrabold text-gray-900 text-sm">CIVIX</span>
             <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">Staff</span>
           </div>
+          <NavLink to="/staff/notifications" className="relative ml-auto p-2 text-gray-500 hover:text-gray-800 rounded-lg transition-colors"
+            aria-label={alertCount > 0 ? `Notifications, ${alertCount} need attention` : 'Notifications'}>
+            <BellIcon />
+            {alertCount > 0 && (
+              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center">
+                {alertCount > 9 ? '9+' : alertCount}
+              </span>
+            )}
+          </NavLink>
         </header>
 
         <main className="flex-1 overflow-y-auto">
-          <Outlet key={location.key} />
+          <Outlet key={location.key} context={{ alerts }} />
         </main>
       </div>
 

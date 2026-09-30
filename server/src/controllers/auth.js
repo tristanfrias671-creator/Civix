@@ -5,6 +5,7 @@ const path   = require('path');
 const { PrismaClient } = require('@prisma/client');
 const { OAuth2Client } = require('google-auth-library');
 const { configured: cloudinaryConfigured } = require('../utils/cloudinary');
+const UPLOAD_ROOT = require('../utils/uploadRoot');
 const { ensureSettings, getDepartmentList, isAdminLoginPath } = require('./settings');
 const { notifyAdmins } = require('./accessRequests');
 
@@ -333,9 +334,8 @@ async function uploadAvatar(req, res) {
 
     // Delete old local avatar file if it exists (raw SQL — avatar not in Prisma client)
     const existing = await prisma.$queryRaw`SELECT avatar FROM User WHERE id = ${req.user.id} LIMIT 1`;
-    if (existing[0]?.avatar && !existing[0].avatar.startsWith('http')) {
-      const oldFile = path.join(__dirname, '../../..', existing[0].avatar);
-      fs.unlink(oldFile, () => {});
+    if (existing[0]?.avatar?.startsWith('/uploads/avatars/')) {
+      fs.unlink(path.join(UPLOAD_ROOT, 'avatars', path.basename(existing[0].avatar)), () => {});
     }
 
     const avatarPath = cloudinaryConfigured ? req.file.path : `/uploads/avatars/${req.file.filename}`;

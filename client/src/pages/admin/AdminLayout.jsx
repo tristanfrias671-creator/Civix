@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import Icon from '../../components/common/Icons';
 import ProfileModal from '../../components/common/ProfileModal';
 import IdleSessionGuard from '../../components/common/IdleSessionGuard';
-import AdminNotificationBell from '../../components/common/AdminNotificationBell';
+import AdminNotificationBell, { openAlerts } from '../../components/common/AdminNotificationBell';
+import { announceNewAlerts } from '../../components/common/alerts';
 import { BrandImg } from '../../context/BrandingContext';
 import { mediaUrl } from '../../utils/mediaUrl';
 import api from '../../utils/api';
@@ -43,6 +43,22 @@ const NAV_SECTIONS = [
 
 const navItems = NAV_SECTIONS.flatMap(s => s.items);
 
+// Admin pop-ups: urgent and overdue reports, and new access requests.
+const ADMIN_ALERT_KINDS = {
+  urgent: {
+    noun: 'urgent report',
+    describe: item => <>Urgent report <strong>{item.trackingId}</strong> ({item.department}) needs attention.</>,
+  },
+  overdue: {
+    noun: 'overdue report',
+    describe: item => <><strong>{item.trackingId}</strong> ({item.department}) is now overdue.</>,
+  },
+  accessRequests: {
+    noun: 'access request',
+    describe: r => <><strong>{r.fullName}</strong> {r.type === 'ADMIN_ACCESS' ? 'requested administrator access' : 'requested a staff account'}.</>,
+  },
+};
+
 export default function AdminLayout() {
   const { user, logout } = useAuth();
   const { dark, toggle: toggleDark } = useTheme();
@@ -51,31 +67,19 @@ export default function AdminLayout() {
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [topSearch, setTopSearch] = useState('');
-  const [pendingRequests, setPendingRequests] = useState(0);
-  const lastPending = useRef(null);
+  const [alerts, setAlerts] = useState(null);
+  const pendingRequests = alerts?.accessRequests?.length || 0;
 
-  // Count for the bell and the "Access Requests" badge, checked every 30 seconds;
-  // a new request while an administrator is signed in also pops up an alert.
+  // What needs attention (urgent, overdue and due-soon reports; pending access
+  // requests), refreshed every 30 seconds and on each page change. Items that newly
+  // appear pop up an alert once per browser session.
   useEffect(() => {
     let active = true;
-    const load = () => api.get('/access-requests/pending-count')
+    const load = () => api.get('/analytics/alerts')
       .then(res => {
         if (!active) return;
-        const { count, latest } = res.data;
-        if (lastPending.current !== null && count > lastPending.current && latest) {
-          const what = latest.type === 'ADMIN_ACCESS' ? 'requested administrator access' : 'requested a staff account';
-          toast(t => (
-            <span className="flex items-center gap-3">
-              <span><strong>{latest.fullName}</strong> {what}.</span>
-              <button type="button" className="font-semibold text-primary whitespace-nowrap"
-                onClick={() => { toast.dismiss(t.id); navigate('/admin/access-requests'); }}>
-                Review
-              </button>
-            </span>
-          ), { id: 'access-request-alert', duration: 10000 });
-        }
-        lastPending.current = count;
-        setPendingRequests(count);
+        setAlerts(res.data);
+        announceNewAlerts(res.data, ADMIN_ALERT_KINDS, openAlerts);
       })
       .catch(() => {});
     load();
@@ -86,7 +90,7 @@ export default function AdminLayout() {
       clearInterval(timer);
       window.removeEventListener('civix:access-requests-changed', load);
     };
-  }, [location.pathname, navigate]);
+  }, [location.pathname]);
 
   const isMapPage = location.pathname.startsWith('/admin/map');
   const activeItem = navItems.find(i => i.to === '/admin/dashboard'
@@ -186,7 +190,7 @@ export default function AdminLayout() {
             <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">Admin</span>
           </div>
           <div className="ml-auto">
-            <AdminNotificationBell count={pendingRequests} dark={dark} />
+            <AdminNotificationBell alerts={alerts} dark={dark} />
           </div>
         </header>
 
@@ -216,7 +220,7 @@ export default function AdminLayout() {
           </form>
 
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-            <AdminNotificationBell count={pendingRequests} dark={dark} />
+            <AdminNotificationBell alerts={alerts} dark={dark} />
             <button onClick={toggleDark}
               className="p-2 rounded-lg transition-colors"
               style={{ color: dark ? '#94a3b8' : '#6b7280' }}

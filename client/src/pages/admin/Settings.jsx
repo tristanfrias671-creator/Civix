@@ -341,6 +341,7 @@ export default function Settings() {
     officeAddress: '',
   });
   const [departments, setDepartments] = useState([]);
+  const [deadlines, setDeadlines] = useState({ COMPLAINT: 7, SUGGESTION: 15, FEEDBACK: 3 });
   const [newDept, setNewDept] = useState('');
 
   const [profile, setProfile] = useState({ fullName: '', email: '', citizenId: '' });
@@ -368,6 +369,7 @@ export default function Settings() {
           officeAddress: s.data.officeAddress,
         });
         setDepartments(s.data.departments);
+        if (s.data.deadlines) setDeadlines(s.data.deadlines);
         if (s.data.security) setSecurity(s.data.security);
         setBrandingUrls({ sealUrl: s.data.sealUrl, heroImageUrl: s.data.heroImageUrl });
         setProfile({
@@ -382,6 +384,20 @@ export default function Settings() {
         setLoading(false);
       });
   }, [gate]);
+
+  async function saveDeadlines(e) {
+    e.preventDefault();
+    setSaving('deadlines');
+    try {
+      const res = await api.patch('/settings/deadlines', deadlines);
+      setDeadlines(res.data.deadlines);
+      toast.success('Deadlines saved. They apply to new reports.');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save deadlines');
+    } finally {
+      setSaving('');
+    }
+  }
 
   async function saveSystem(e) {
     e.preventDefault();
@@ -581,44 +597,76 @@ export default function Settings() {
       </div>
 
       {tab === 'system' && (
-        <form onSubmit={saveSystem}>
-          <SectionCard
-            title="Change System Profile"
-            description="Public-facing organization details shown across the CIVIX portal"
-            footer={
-              <button type="submit" disabled={saving === 'system'}
-                className="px-6 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
-                {saving === 'system' ? 'Saving...' : 'Save System Profile'}
-              </button>
-            }
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field label="Organization Name *" hint="Displayed on login and portal headers">
-                <input className={inputClass} value={system.organizationName}
-                  onChange={e => setSystem(p => ({ ...p, organizationName: e.target.value }))} required />
-              </Field>
-              <Field label="Tagline" hint="Short description under the organization name">
-                <input className={inputClass} value={system.tagline}
-                  onChange={e => setSystem(p => ({ ...p, tagline: e.target.value }))} />
-              </Field>
-              <Field label="Contact Email">
-                <input type="email" className={inputClass} value={system.contactEmail}
-                  onChange={e => setSystem(p => ({ ...p, contactEmail: e.target.value }))} />
-              </Field>
-              <Field label="Contact Phone">
-                <input className={inputClass} value={system.contactPhone}
-                  onChange={e => setSystem(p => ({ ...p, contactPhone: e.target.value }))} placeholder="+63 ..." />
-              </Field>
-              <div className="md:col-span-2">
-                <Field label="Office Address">
-                  <textarea className={`${inputClass} resize-none`} rows={3} value={system.officeAddress}
-                    onChange={e => setSystem(p => ({ ...p, officeAddress: e.target.value }))}
-                    placeholder="City hall or main office address" />
+        <div className="space-y-6">
+          <form onSubmit={saveSystem}>
+            <SectionCard
+              title="Change System Profile"
+              description="Public-facing organization details shown across the CIVIX portal"
+              footer={
+                <button type="submit" disabled={saving === 'system'}
+                  className="px-6 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
+                  {saving === 'system' ? 'Saving...' : 'Save System Profile'}
+                </button>
+              }
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <Field label="Organization Name *" hint="Displayed on login and portal headers">
+                  <input className={inputClass} value={system.organizationName}
+                    onChange={e => setSystem(p => ({ ...p, organizationName: e.target.value }))} required />
                 </Field>
+                <Field label="Tagline" hint="Short description under the organization name">
+                  <input className={inputClass} value={system.tagline}
+                    onChange={e => setSystem(p => ({ ...p, tagline: e.target.value }))} />
+                </Field>
+                <Field label="Contact Email">
+                  <input type="email" className={inputClass} value={system.contactEmail}
+                    onChange={e => setSystem(p => ({ ...p, contactEmail: e.target.value }))} />
+                </Field>
+                <Field label="Contact Phone">
+                  <input className={inputClass} value={system.contactPhone}
+                    onChange={e => setSystem(p => ({ ...p, contactPhone: e.target.value }))} placeholder="+63 ..." />
+                </Field>
+                <div className="md:col-span-2">
+                  <Field label="Office Address">
+                    <textarea className={`${inputClass} resize-none`} rows={3} value={system.officeAddress}
+                      onChange={e => setSystem(p => ({ ...p, officeAddress: e.target.value }))}
+                      placeholder="City hall or main office address" />
+                  </Field>
+                </div>
               </div>
-            </div>
-          </SectionCard>
-        </form>
+            </SectionCard>
+          </form>
+
+          <form onSubmit={saveDeadlines}>
+            <SectionCard
+              title="Resolution Deadlines"
+              description="How many working days (Monday–Friday) the assigned office has to resolve each type of report"
+              footer={
+                <button type="submit" disabled={saving === 'deadlines'}
+                  className="px-6 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
+                  {saving === 'deadlines' ? 'Saving...' : 'Save Deadlines'}
+                </button>
+              }
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                {[['COMPLAINT', 'Complaints'], ['SUGGESTION', 'Suggestions'], ['FEEDBACK', 'Feedback']].map(([key, label]) => (
+                  <Field key={key} label={label} hint="Working days, 1–60">
+                    <div className="relative">
+                      <input type="number" min={1} max={60} step={1} required className={`${inputClass} pr-24`}
+                        value={deadlines[key]}
+                        onChange={e => setDeadlines(p => ({ ...p, [key]: e.target.value === '' ? '' : Number(e.target.value) }))} />
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">working days</span>
+                    </div>
+                  </Field>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 dark:text-slate-500 mt-4">
+                The deadline is set when a citizen submits a report and shown to them, to staff and on the dashboards.
+                Changes apply to new reports; existing reports keep the deadline they were given.
+              </p>
+            </SectionCard>
+          </form>
+        </div>
       )}
 
       {tab === 'account' && (
@@ -858,6 +906,7 @@ export default function Settings() {
               ['Authentication', 'JWT Bearer Token'],
               ['Maps', 'Leaflet + OpenStreetMap'],
               ['Charts', 'Recharts'],
+              ['Animated emoji', 'Google Noto Emoji (CC BY 4.0)'],
               ['Signed in as', profile.email],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between items-center px-4 py-3 bg-gray-50 dark:bg-slate-900/40 rounded-lg text-sm">

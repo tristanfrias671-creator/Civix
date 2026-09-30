@@ -3,7 +3,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const { upload } = require('../middleware/upload');
 const {
   createSubmission, getSubmissions, getSubmission,
-  updateSubmission, trackSubmission, getSubmissionsByUser,
+  trackSubmission, getSubmissionsByUser,
 } = require('../controllers/submissions');
 
 // Public routes (no auth required)
@@ -15,6 +15,6 @@ router.use(authenticate);
 router.get('/', getSubmissions);
 router.get('/user/:userId', requireAdmin, getSubmissionsByUser);
 router.get('/:id', getSubmission);
-router.patch('/:id', requireAdmin, updateSubmission);
+// No edit route here: admins only view reports; staff update them through /api/staff/portal.
 
 module.exports = router;

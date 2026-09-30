@@ -81,8 +81,8 @@ const STEPS = [
 const FORM_FIELDS = [
   { label: 'Type of Concern',      required: true,  sample: 'Complaint',                                 note: 'Complaint, Suggestion, or Feedback.' },
   { label: 'Department Concerned', required: true,  sample: 'Select department / office…',               note: 'CIVIX suggests an office from your description. You can change it.' },
-  { label: 'Location',             required: false, sample: 'e.g. Barangay, landmark, or address',       note: 'Suggestions are limited to Cantilan barangays and landmarks.' },
-  { label: 'Contact Number',       required: true,  sample: 'e.g. 09XX XXX XXXX',                        note: 'So the concerned office can contact you about your report.' },
+  { label: 'Location',             required: false, sample: 'Choose or type your barangay',              note: 'Pick your barangay from the list, then add a purok, street or landmark if you can.' },
+  { label: 'Contact Number',       required: true,  sample: 'e.g. 09XX XXX XXXX',                        note: 'Your mobile number. We text you your tracking code and each status update.' },
   { label: 'Email Address',        required: true,  sample: 'e.g. juandelacruz@gmail.com',               note: 'We email you when your report is received and whenever its status changes.' },
   { label: 'Description',          required: true,  sample: 'There is a broken streetlight in front of…', note: 'At least 20 characters. Include what happened, where, when, and any other helpful details.' },
   { label: 'File Attachment',      required: false, sample: 'Click to upload or drag and drop',          note: 'Up to 5 photos, JPG or PNG, each up to 5 MB.' },
@@ -116,7 +116,7 @@ const HIGHLIGHT = {
 const STRONG_EXAMPLE = [
   { text: 'The streetlight', tag: 'what' },
   { text: ' in front of ' },
-  { text: 'Brgy. Hall, Hayanggabon, Cantilan', tag: 'where' },
+  { text: 'Brgy. Hall, Parang, Cantilan', tag: 'where' },
   { text: ' has been broken ' },
   { text: 'for 2 weeks', tag: 'when' },
   { text: '. ' },
@@ -162,7 +162,7 @@ const POLICIES = [
 const FAQS = [
   { q: 'Do I need an account to submit a report?', a: 'No. You do not need to register. You only provide a contact number and email so the concerned office can reach you about your report.' },
   { q: 'How do I check the status of my report?', a: 'Open Track My Report and enter your tracking code. It looks like DEPT-YYYYMMDD-XXXX, for example ENG-20240527-0001.' },
-  { q: 'What if I lose my tracking code?', a: 'Check your email. The tracking code is in the confirmation email we send after you submit, and in every status update email.' },
+  { q: 'What if I lose my tracking code?', a: 'Check your text messages or email. The tracking code is in the confirmation we send after you submit, and in every status update.' },
   { q: 'Who can see my report?', a: 'The office your report is routed to and the CIVIX administrators. Your information is handled according to the Data Privacy Act.' },
   { q: 'Can I attach videos or documents?', a: 'Not at the moment. You can attach up to 5 photos in JPG or PNG format, each up to 5 MB.' },
 ];
@@ -172,7 +172,7 @@ const QUICK_FACTS = [
   { label: 'Description',    value: 'At least 20 characters' },
   { label: 'Photos',         value: 'Up to 5 · JPG/PNG · 5 MB each' },
   { label: 'Tracking code',  value: 'DEPT-YYYYMMDD-XXXX' },
-  { label: 'Updates',        value: 'Sent to your email' },
+  { label: 'Updates',        value: 'By text and email' },
 ];
 
 /* ─── Page-level hooks ─────────────────────────────────────────────────────── */
@@ -426,7 +426,7 @@ export default function Guidelines() {
           <Section id="types" icon={ICONS.tag} title="Which report type should I use?">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {REPORT_TYPES.map(t => (
-                <div key={t.type} className="rounded-xl border border-gray-100 bg-gray-50/60 p-4" style={{ borderTop: `3px solid ${t.accent}` }}>
+                <div key={t.type} className="rounded-xl border border-gray-100 bg-gray-50/60 dark:bg-slate-900/40 p-4" style={{ borderTop: `3px solid ${t.accent}` }}>
                   <TypeBadge type={t.type} />
                   <p className="text-sm font-semibold text-gray-800 mt-3">{t.when}</p>
                   <ul className="mt-2.5 space-y-1.5">
@@ -461,7 +461,7 @@ export default function Guidelines() {
               <ul className="space-y-3">
                 {[
                   { icon: ICONS.ticket, text: 'Write down or copy your code. You need it to check your report.' },
-                  { icon: ICONS.inbox, text: 'The same code is in the confirmation email we send you.' },
+                  { icon: ICONS.inbox, text: 'The same code is in the confirmation text and email we send you.' },
                   { icon: ICONS.search, text: 'Enter it on Track My Report any time to see the latest status.' },
                 ].map(item => (
                   <li key={item.text} className="flex items-start gap-3">
@@ -475,7 +475,7 @@ export default function Guidelines() {
             <p className="text-sm font-semibold text-gray-800 mb-3">What your status means</p>
             <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {STATUSES.map((s, i) => (
-                <li key={s.status} className="relative rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+                <li key={s.status} className="relative rounded-xl border border-gray-100 bg-gray-50/60 dark:bg-slate-900/40 p-4">
                   <div className="flex items-center justify-between mb-2.5">
                     <StatusBadge status={s.status} />
                     <span className="text-xs font-bold text-gray-300">{i + 1}/4</span>
@@ -484,7 +484,7 @@ export default function Guidelines() {
                 </li>
               ))}
             </ol>
-            <p className="text-xs text-gray-400 mt-3">We email you each time your report moves to a new status.</p>
+            <p className="text-xs text-gray-400 mt-3">We text and email you each time your report moves to a new status.</p>
           </Section>
 
           <Section id="checklist" icon={ICONS.shield} title="Are you ready?"
@@ -511,7 +511,7 @@ export default function Guidelines() {
           <Section id="faq" icon={ICONS.question} title="Frequently asked questions">
             <div className="space-y-2.5">
               {FAQS.map(f => (
-                <details key={f.q} className="gl-faq rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3.5 open:bg-white open:shadow-sm transition-colors">
+                <details key={f.q} className="gl-faq rounded-xl border border-gray-100 bg-gray-50/60 dark:bg-slate-900/40 px-4 py-3.5 open:bg-white dark:open:bg-slate-800 open:shadow-sm transition-colors">
                   <summary className="flex items-center justify-between gap-4 cursor-pointer list-none text-sm font-semibold text-gray-900">
                     {f.q}
                     <span className="gl-plus w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0">

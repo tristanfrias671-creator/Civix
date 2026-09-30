@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useLocation } from 'react-router-dom';
 import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
 import { StatusBadge, TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
+import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
 import { Skel } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
@@ -254,7 +255,8 @@ export default function Track() {
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
   useEffect(() => {
-    const prefill = routerLocation.state?.prefill;
+    // From the Submit page, or a /track?id=... link in a CIVIX email.
+    const prefill = routerLocation.state?.prefill || new URLSearchParams(routerLocation.search).get('id');
     if (!prefill) return;
     setCode(prefill);
     setLoading(true);
@@ -269,7 +271,7 @@ export default function Track() {
         }
       })
       .finally(() => setLoading(false));
-  }, []); // runs once on mount to handle prefill from Submit page
+  }, []); // runs once on mount
 
   async function lookupCode(overrideCode) {
     const target = (overrideCode || code).trim().toUpperCase();
@@ -440,7 +442,7 @@ export default function Track() {
                     <p className="font-bold text-sm" style={{ color: tone.color }}>{tone.title}</p>
                     <p className="text-sm text-gray-700 mt-0.5">{tone.message}</p>
                     {latestNote && (
-                      <div className="mt-2.5 rounded-lg bg-white/80 border border-white px-3 py-2">
+                      <div className="mt-2.5 rounded-lg bg-white/80 border border-white dark:bg-slate-900/50 dark:border-slate-700 px-3 py-2">
                         <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Note from the concerned office</p>
                         <p className="text-sm text-gray-800 mt-0.5">{latestNote}</p>
                       </div>
@@ -449,11 +451,21 @@ export default function Track() {
                 </div>
 
                 {/* Details */}
-                <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
                     { label: 'Location', value: result.address || 'Not specified', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' },
                     { label: 'Filed', value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
                     { label: 'Last updated', value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+                    ...(result.dueAt ? [{
+                      label: 'Resolve by',
+                      value: (
+                        <span className="flex flex-wrap items-center gap-2">
+                          {formatDueDate(result.dueAt, true)}
+                          <DeadlineBadge submission={result} />
+                        </span>
+                      ),
+                      icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+                    }] : []),
                   ].map(d => (
                     <div key={d.label} className="rounded-xl bg-gray-50 px-3.5 py-3">
                       <dt className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400">
@@ -468,7 +480,7 @@ export default function Track() {
                 {/* Description */}
                 <div>
                   <h4 className={sectionTitle}>Description</h4>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line break-words rounded-xl border-l-4 border-gray-200 bg-gray-50/70 px-4 py-3">
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line break-words rounded-xl border-l-4 border-gray-200 bg-gray-50/70 dark:bg-slate-900/40 px-4 py-3">
                     {result.description}
                   </p>
                 </div>

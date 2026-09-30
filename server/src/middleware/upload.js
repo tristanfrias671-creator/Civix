@@ -27,7 +27,7 @@ if (cloudinary.configured) {
   });
 } else {
   console.warn('[upload] Cloudinary not configured — falling back to local disk storage (uploads/).');
-  const uploadDir = process.env.UPLOAD_DIR || './uploads';
+  const uploadDir = require('../utils/uploadRoot');
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
   storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),

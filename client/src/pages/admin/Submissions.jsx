@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
+import DeadlineBadge from '../../components/common/DeadlineBadge';
 import { SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
@@ -97,14 +98,14 @@ export default function AdminSubmissions({ type: typeFilter }) {
         </div>
 
         {loading ? (
-          <div className="overflow-x-auto"><SkeletonTable cols={7} rows={10} /></div>
+          <div className="overflow-x-auto"><SkeletonTable cols={8} rows={10} /></div>
         ) : (
           <>
             <div className="overflow-x-auto">
               <table ref={tableRef} className="mobile-cards w-full text-sm">
                 <thead>
                   <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${border}` }}>
-                    {['Tracking ID','Citizen','Type','Status','Department','Date',''].map(h => (
+                    {['Tracking ID','Citizen','Type','Status','Deadline','Department','Date',''].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: dark ? '#64748b' : '#6b7280' }}>{h}</th>
                     ))}
                   </tr>
@@ -112,7 +113,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-14 text-center">
+                      <td colSpan={8} className="px-4 py-14 text-center">
                         <div className="flex flex-col items-center gap-2">
                           <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: dark ? 'rgba(255,255,255,0.05)' : '#f9fafb' }}>
                             <svg className="w-6 h-6" style={{ color: dark ? '#475569' : '#d1d5db' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
@@ -134,6 +135,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
                       <td className="px-4 py-3.5 font-semibold whitespace-nowrap" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: dark ? '#64748b' : '#9ca3af', fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
                       <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
                       <td className="px-4 py-3.5"><StatusBadge status={s.status} /></td>
+                      <td className="px-4 py-3.5"><DeadlineBadge submission={s} /></td>
                       <td className="px-4 py-3.5 text-xs font-medium max-w-36 truncate" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{s.department}</td>
                       <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: textMuted }}>{new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
                       <td className="px-4 py-3.5">

@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import api from '../utils/api';
 import { mediaUrl } from '../utils/mediaUrl';
 
-export const DEFAULT_BRANDING = { seal: '/cantilan-seal.png', hero: '/town-hall.jpg' };
+export const DEFAULT_BRANDING = { seal: '/cantilan-seal.png', hero: '/cantilan-tribunal.jpg' };
 const CACHE_KEY = 'civix_branding';
 
 const BrandingContext = createContext({ ...DEFAULT_BRANDING, setBranding: () => {} });

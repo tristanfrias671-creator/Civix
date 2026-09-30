@@ -3,7 +3,7 @@ const router  = express.Router();
 const { authenticate, requireAdmin, requireStaff } = require('../middleware/auth');
 const {
   getStaff, createStaff, updateStaff, deleteStaff,
-  getMyStats, getMySubmissions, getMySubmissionDetail, updateMySubmission,
+  getMyStats, getMyAlerts, getMySubmissions, getMySubmissionDetail, updateMySubmission,
   monitorSubmissions, assignSubmission, trackByTrackingId,
 } = require('../controllers/staff');
 
@@ -15,6 +15,7 @@ router.delete('/:id', authenticate, requireAdmin, deleteStaff);
 
 // ── Staff portal: own department ──────────────────────────────────────────────
 router.get('/portal/stats',             authenticate, requireStaff, getMyStats);
+router.get('/portal/alerts',            authenticate, requireStaff, getMyAlerts);
 router.get('/portal/submissions',       authenticate, requireStaff, getMySubmissions);
 router.get('/portal/submission/:id',    authenticate, requireStaff, getMySubmissionDetail);
 router.patch('/portal/submission/:id',  authenticate, requireStaff, updateMySubmission);

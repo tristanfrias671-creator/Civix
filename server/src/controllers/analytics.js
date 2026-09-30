@@ -1,14 +1,49 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// GET /api/analytics/alerts — what needs an administrator's attention right now:
+// unresolved reports that are urgent, overdue or due within 2 days, plus pending
+// access requests. Worked out live, so an item disappears as soon as it's handled.
+async function getAlerts(req, res) {
+  try {
+    const now = new Date();
+    const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    const open = { status: { not: 'RESOLVED' } };
+    const select = {
+      id: true, trackingId: true, type: true, department: true, status: true,
+      priority: true, dueAt: true, createdAt: true, updatedAt: true,
+    };
+    const [urgent, overdue, dueSoon, accessRequests] = await Promise.all([
+      prisma.submission.findMany({ where: { ...open, priority: 'URGENT' }, select, orderBy: { createdAt: 'asc' }, take: 50 }),
+      prisma.submission.findMany({ where: { ...open, priority: { not: 'URGENT' }, dueAt: { lt: now } }, select, orderBy: { dueAt: 'asc' }, take: 50 }),
+      prisma.submission.findMany({ where: { ...open, priority: { not: 'URGENT' }, dueAt: { gte: now, lt: soon } }, select, orderBy: { dueAt: 'asc' }, take: 50 }),
+      prisma.accessRequest.findMany({
+        where: { status: 'PENDING' },
+        select: { id: true, type: true, fullName: true, department: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+    res.json({
+      urgent, overdue, dueSoon, accessRequests,
+      total: urgent.length + overdue.length + dueSoon.length + accessRequests.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load alerts' });
+  }
+}
+
 async function getSummary(req, res) {
   try {
-    const [total, pending, reviewing, inProgress, resolved] = await Promise.all([
+    const [total, pending, reviewing, inProgress, resolved, overdue] = await Promise.all([
       prisma.submission.count(),
       prisma.submission.count({ where: { status: 'PENDING' } }),
       prisma.submission.count({ where: { status: 'REVIEWING' } }),
       prisma.submission.count({ where: { status: 'IN_PROGRESS' } }),
       prisma.submission.count({ where: { status: 'RESOLVED' } }),
+      // Past their resolve-by date and not yet resolved.
+      prisma.submission.count({ where: { status: { not: 'RESOLVED' }, dueAt: { lt: new Date() } } }),
     ]);
 
     const resolvedSubmissions = await prisma.submission.findMany({
@@ -28,7 +63,7 @@ async function getSummary(req, res) {
 
     const citizens = await prisma.user.count({ where: { role: 'CITIZEN' } });
 
-    res.json({ total, pending, reviewing, inProgress, resolved, avgResolutionTime, responseRate, citizens });
+    res.json({ total, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate, citizens });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch analytics summary' });
@@ -187,6 +222,7 @@ async function getCitizens(req, res) {
 }
 
 module.exports = {
+  getAlerts,
   getSummary,
   getQuarterly,
   getSentiment,

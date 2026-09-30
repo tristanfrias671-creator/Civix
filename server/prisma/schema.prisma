@@ -92,6 +92,8 @@ model Submission {
   reaction    String?
   feedbackTags String?         @db.Text
   userId      String?
+  // Resolve-by date, fixed when the report is submitted (working days per type, see SystemSettings)
+  dueAt       DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   user             User?             @relation(fields: [userId], references: [id])
@@ -178,6 +180,10 @@ model SystemSettings {
   lockoutMinutes     Int     @default(15)
   idleTimeoutEnabled Boolean @default(true)
   idleTimeoutMinutes Int     @default(30)
+  // Working days to resolve a report, by type (sets Submission.dueAt at submission)
+  deadlineComplaintDays  Int @default(7)
+  deadlineSuggestionDays Int @default(15)
+  deadlineFeedbackDays   Int @default(3)
   // Branding images; null means the bundled default is used
   sealUrl            String?
   heroImageUrl       String?

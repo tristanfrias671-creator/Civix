@@ -86,6 +86,15 @@ function formatSecurity(row) {
   };
 }
 
+// Working days to resolve each report type.
+function formatDeadlines(row) {
+  return {
+    COMPLAINT: row.deadlineComplaintDays,
+    SUGGESTION: row.deadlineSuggestionDays,
+    FEEDBACK: row.deadlineFeedbackDays,
+  };
+}
+
 function formatSettings(row) {
   return {
     organizationName: row.organizationName,
@@ -95,6 +104,7 @@ function formatSettings(row) {
     officeAddress: row.officeAddress,
     departments: parseJsonArray(row.departmentsJson, DEFAULT_DEPARTMENTS),
     security: formatSecurity(row),
+    deadlines: formatDeadlines(row),
     ...formatBranding(row),
     updatedAt: row.updatedAt,
   };
@@ -111,6 +121,7 @@ async function getPublicProfile(req, res) {
       organizationName: settings.organizationName,
       tagline: settings.tagline,
       departments: parseJsonArray(settings.departmentsJson, DEFAULT_DEPARTMENTS),
+      deadlines: formatDeadlines(settings),
       ...formatBranding(settings),
     });
   } catch (err) {
@@ -261,6 +272,29 @@ async function resetBranding(req, res) {
   }
 }
 
+// PATCH /api/settings/deadlines { COMPLAINT, SUGGESTION, FEEDBACK } — working days.
+// Applies to reports submitted from now on; existing deadlines stay as promised.
+async function updateDeadlines(req, res) {
+  try {
+    const fields = { COMPLAINT: 'deadlineComplaintDays', SUGGESTION: 'deadlineSuggestionDays', FEEDBACK: 'deadlineFeedbackDays' };
+    const data = {};
+    for (const [type, column] of Object.entries(fields)) {
+      if (req.body[type] === undefined) continue;
+      const n = Number(req.body[type]);
+      if (!Number.isInteger(n) || n < 1 || n > 60) {
+        return res.status(400).json({ error: 'Deadlines must be whole numbers from 1 to 60 working days' });
+      }
+      data[column] = n;
+    }
+    const settings = await ensureSettings();
+    const updated = await prisma.systemSettings.update({ where: { id: settings.id }, data });
+    res.json(formatSettings(updated));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update deadlines' });
+  }
+}
+
 async function getAdminLink(req, res) {
   try {
     const settings = await ensureSettings();
@@ -288,7 +322,7 @@ async function rotateAdminLink(req, res) {
 
 module.exports = {
   ensureSettings, getDepartmentList, isAdminLoginPath, BRANDING_FIELDS,
-  getAdminLink, rotateAdminLink,
+  getAdminLink, rotateAdminLink, updateDeadlines,
   getPublicProfile, getSettings, updateSystemProfile, updateLists,
   updateSecurity, getLockedAccounts, unlockAccount, getSessionPolicy,
   uploadBranding, resetBranding,

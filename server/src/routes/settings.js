@@ -15,6 +15,7 @@ const {
   resetBranding,
   getAdminLink,
   rotateAdminLink,
+  updateDeadlines,
 } = require('../controllers/settings');
 
 // Rejects unknown kinds before anything is written to disk.
@@ -40,6 +41,7 @@ router.get('/', getSettings);
 router.patch('/system', updateSystemProfile);
 router.patch('/lists', updateLists);
 router.patch('/security', updateSecurity);
+router.patch('/deadlines', updateDeadlines);
 router.get('/security/locked', getLockedAccounts);
 router.post('/security/unlock/:id', unlockAccount);
 router.post('/branding/:kind', brandingKind, brandingFile, uploadBranding);

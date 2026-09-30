@@ -1,7 +1,14 @@
-require('dotenv').config();
+const path = require('path');
+// Settings: server/.env locally. Hostinger writes the environment variables set in
+// hPanel to a .env file in the app's top folder, so that one is read too.
+// Variables already set in the environment are never overridden.
+for (const file of [path.join(__dirname, '.env'), path.join(__dirname, '..', '.env')]) {
+  require('dotenv').config({ path: file });
+}
+const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
+const UPLOAD_ROOT = require('./src/utils/uploadRoot');
 
 const authRoutes = require('./src/routes/auth');
 const submissionRoutes = require('./src/routes/submissions');
@@ -22,7 +29,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(UPLOAD_ROOT));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/submissions', submissionRoutes);
@@ -36,6 +43,19 @@ app.use('/api/access-requests', accessRequestRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 
+// Online, this server also serves the built website (client/build). Every other
+// address returns the app's index.html so the website's own router can show the
+// right page, including the private admin sign-in link. Locally the website runs
+// separately on port 3000, and client/build usually doesn't exist.
+const CLIENT_BUILD = path.join(__dirname, '../client/build');
+if (fs.existsSync(path.join(CLIENT_BUILD, 'index.html'))) {
+  app.use(express.static(CLIENT_BUILD, { index: false }));
+  app.get(/^\/(?!api\/|uploads\/).*/, (req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(path.join(CLIENT_BUILD, 'index.html'));
+  });
+}
+
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
@@ -43,3 +63,8 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`CIVIX server running on port ${PORT}`));
+
+// Give reports filed before deadlines existed a resolve-by date.
+require('./src/utils/deadline').backfillDeadlines()
+  .then(n => { if (n) console.log(`[deadlines] Added deadlines to ${n} existing report(s).`); })
+  .catch(err => console.error('[deadlines] Backfill failed:', err.message));

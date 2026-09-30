@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
 import { Skel, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import { mediaUrl } from '../../utils/mediaUrl';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
@@ -209,8 +211,12 @@ function DetailModal({ id, onClose, onUpdated, onReassigned }) {
                   <span className="font-mono text-xs text-gray-400">{detail.trackingId}</span>
                   <TypeBadge type={detail.type} />
                   <PriorityBadge priority={detail.priority} />
+                  <DeadlineBadge submission={detail} />
                 </div>
                 <h2 className="text-lg font-bold text-gray-800">{detail.department}</h2>
+                {detail.dueAt && (
+                  <p className="text-xs text-gray-500 mt-0.5">Resolve by {formatDueDate(detail.dueAt, true)}</p>
+                )}
               </div>
               <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors flex-shrink-0">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -374,8 +380,10 @@ export default function StaffSubmissions() {
   const [totalPages, setTotalPages]     = useState(1);
   const [total, setTotal]               = useState(0);
   const [department, setDepartment]     = useState('');
-  const [detailId, setDetailId]         = useState(null);
-  const [sortByPriority, setSortByPriority] = useState(false);
+  const location = useLocation();
+  // Opened from an alert on the Notifications page.
+  const [detailId, setDetailId]         = useState(() => location.state?.openId || null);
+  const [sortBy, setSortBy] = useState(''); // '' (newest) | 'priority' | 'due'
   const gate = useSkeletonGate();
   const tableRef = useMobileTable();
 
@@ -384,7 +392,7 @@ export default function StaffSubmissions() {
     const params = new URLSearchParams({ page: p, limit: 15 });
     if (statusFilter) params.append('status', statusFilter);
     if (typeFilter)   params.append('type',   typeFilter);
-    if (sortByPriority) params.append('sortBy', 'priority');
+    if (sortBy) params.append('sortBy', sortBy);
     gate(api.get(`/staff/portal/submissions?${params}`))
       .then(r => {
         setSubmissions(r.data.submissions);
@@ -396,15 +404,20 @@ export default function StaffSubmissions() {
       .catch(() => setLoading(false));
   }
 
-  useEffect(() => { fetchSubmissions(1); setPage(1); }, [statusFilter, typeFilter, sortByPriority]);
+  useEffect(() => { fetchSubmissions(1); setPage(1); }, [statusFilter, typeFilter, sortBy]);
+
+  // The sidebar's alert count refreshes when a report is updated or moved.
+  const alertsChanged = () => window.dispatchEvent(new Event('civix:alerts-changed'));
 
   function handleUpdated(updated) {
     setSubmissions(prev => prev.map(s => s.id === updated.id ? updated : s));
+    alertsChanged();
   }
 
   function handleReassigned(id) {
     setSubmissions(prev => prev.filter(s => s.id !== id));
     setTotal(prev => Math.max(0, prev - 1));
+    alertsChanged();
   }
 
   const filtered = search
@@ -455,19 +468,21 @@ export default function StaffSubmissions() {
             <option value="SUGGESTION">Suggestion</option>
             <option value="FEEDBACK">Feedback</option>
           </select>
-          <button type="button" onClick={() => { setSortByPriority(v => !v); setPage(1); }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
-              sortByPriority ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-            }`}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9M3 12h5m6-4l4-4m0 0l4 4m-4-4v16"/>
-            </svg>
-            Sort by Priority
-          </button>
+          {[['priority', 'Sort by Priority'], ['due', 'Sort by Deadline']].map(([key, label]) => (
+            <button key={key} type="button" onClick={() => { setSortBy(v => (v === key ? '' : key)); setPage(1); }}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                sortBy === key ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9M3 12h5m6-4l4-4m0 0l4 4m-4-4v16"/>
+              </svg>
+              {label}
+            </button>
+          ))}
         </div>
 
         {loading ? (
-          <div className="overflow-x-auto"><SkeletonTable cols={8} rows={10} /></div>
+          <div className="overflow-x-auto"><SkeletonTable cols={9} rows={10} /></div>
         ) : filtered.length === 0 ? (
           <div className="py-14 text-center text-gray-400">
             <svg className="w-10 h-10 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
@@ -481,11 +496,14 @@ export default function StaffSubmissions() {
               <table ref={tableRef} className="mobile-cards w-full text-sm">
                 <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                   <tr>
-                    {['Tracking ID', 'Citizen', 'Type', 'Priority', 'Description', 'Update Status', 'Date', 'Actions'].map(h => (
-                      <th key={h} className={`px-4 py-3 text-left font-semibold whitespace-nowrap ${h === 'Priority' && sortByPriority ? 'text-indigo-600' : ''}`}>
-                        {h}{h === 'Priority' && sortByPriority && ' ↓'}
-                      </th>
-                    ))}
+                    {['Tracking ID', 'Citizen', 'Type', 'Priority', 'Deadline', 'Description', 'Update Status', 'Date', 'Actions'].map(h => {
+                      const sorted = (h === 'Priority' && sortBy === 'priority') || (h === 'Deadline' && sortBy === 'due');
+                      return (
+                        <th key={h} className={`px-4 py-3 text-left font-semibold whitespace-nowrap ${sorted ? 'text-indigo-600' : ''}`}>
+                          {h}{sorted && ' ↓'}
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -513,6 +531,7 @@ export default function StaffSubmissions() {
                           </span>
                         </td>
                         <td className="px-4 py-3"><PriorityBadge priority={s.priority} /></td>
+                        <td className="px-4 py-3"><DeadlineBadge submission={s} showDate /></td>
                         <td className="px-4 py-3 text-gray-600 text-xs max-w-xs">
                           <p className="truncate" style={{ maxWidth: 200 }}>
                             {s.description}

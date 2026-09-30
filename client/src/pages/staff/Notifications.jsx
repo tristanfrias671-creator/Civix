@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useTheme } from '../../context/ThemeContext';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import { AlertSections } from '../../components/common/alerts';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
 
@@ -18,9 +20,50 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// Reports in the staff member's office that are urgent, overdue, due soon or new
+// (from StaffLayout, which keeps them up to date).
+function AttentionPanel({ alerts, dark, onOpen }) {
+  const count = alerts?.total || 0;
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-5">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-bold text-gray-800">Needs your attention</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Urgent, overdue, due soon and new reports{alerts?.department ? ` in ${alerts.department}` : ''}.
+          </p>
+        </div>
+        {count > 0 && (
+          <span className="px-2.5 py-0.5 bg-red-100 text-red-600 text-xs font-bold rounded-full flex-shrink-0">{count}</span>
+        )}
+      </div>
+      {!alerts ? (
+        <div className="px-5 py-4 space-y-3">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="flex items-center gap-3">
+              <Skel className="w-8 h-8 rounded-full" />
+              <div className="flex-1"><Skel className="h-3 w-40 mb-2" /><Skel className="h-3 w-56" /></div>
+            </div>
+          ))}
+        </div>
+      ) : count === 0 ? (
+        <div className="px-5 py-6 text-center">
+          <p className="text-sm font-medium text-gray-700">You're all caught up</p>
+          <p className="text-xs text-gray-400 mt-0.5">No urgent, overdue or new reports in your office.</p>
+        </div>
+      ) : (
+        <div className="max-h-[420px] overflow-y-auto pb-2">
+          <AlertSections alerts={alerts} dark={dark} showDepartment={false} onSelect={item => onOpen(item.id)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StaffNotifications() {
   const navigate = useNavigate();
   const { dark } = useTheme();
+  const { alerts } = useOutletContext() || {};
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading]         = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
@@ -28,6 +71,9 @@ export default function StaffNotifications() {
   const [search, setSearch]             = useState('');
   const gate = useSkeletonGate();
   const tableRef = useMobileTable();
+
+  // This page lists the same items as the pop-up alert, which would cover them.
+  useEffect(() => { toast.dismiss('civix-alert'); }, [alerts]);
 
   useEffect(() => {
     gate(api.get('/staff/portal/submissions?limit=30'))
@@ -70,6 +116,9 @@ export default function StaffNotifications() {
           Stay updated on your assigned cases and citizen submissions.
         </p>
       </div>
+
+      <AttentionPanel alerts={alerts} dark={dark}
+        onOpen={id => navigate('/staff/submissions', { state: { openId: id } })} />
 
       {/* ── Summary row ── */}
       {loading ? <SkeletonStatCards count={4} className="mb-5" /> : (

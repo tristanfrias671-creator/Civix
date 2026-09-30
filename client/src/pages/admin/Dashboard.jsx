@@ -23,6 +23,7 @@ const CARD_STYLES_LIGHT = [
   { bg:'#faf5ff', iconBg:'#f3e8ff', iconColor:'#9333ea' },
   { bg:'#fefce8', iconBg:'#fef9c3', iconColor:'#ca8a04' },
   { bg:'#f0f9ff', iconBg:'#e0f2fe', iconColor:'#0284c7' },
+  { bg:'#fef2f2', iconBg:'#fee2e2', iconColor:'#dc2626' },
 ];
 const CARD_STYLES_DARK = [
   { bg:'rgba(124,58,237,0.12)',  iconBg:'rgba(124,58,237,0.2)',  iconColor:'#a78bfa' },
@@ -32,6 +33,7 @@ const CARD_STYLES_DARK = [
   { bg:'rgba(147,51,234,0.12)',  iconBg:'rgba(147,51,234,0.2)',  iconColor:'#c084fc' },
   { bg:'rgba(202,138,4,0.12)',   iconBg:'rgba(202,138,4,0.2)',   iconColor:'#facc15' },
   { bg:'rgba(2,132,199,0.12)',   iconBg:'rgba(2,132,199,0.2)',   iconColor:'#38bdf8' },
+  { bg:'rgba(220,38,38,0.12)',   iconBg:'rgba(220,38,38,0.2)',   iconColor:'#f87171' },
 ];
 
 // `stack` puts the icon above the text on phones, for cards that sit two per row.
@@ -80,7 +82,7 @@ export default function AdminDashboard() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-7"><Skel className="h-3 w-32 mb-2" /><Skel className="h-6 w-64" /></div>
       <SkeletonStatCards count={4} className="mb-4" />
-      <SkeletonStatCards count={3} className="mb-7" />
+      <SkeletonStatCards count={4} className="mb-7" />
       <SkeletonQuickLinks count={QUICK_LINKS.length} className="grid-cols-2 lg:grid-cols-4 mb-7" />
       <div className="rounded-2xl border bg-white border-gray-100" style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
         <div className="px-6 py-4 border-b border-gray-100"><Skel className="h-4 w-44" /></div>
@@ -121,10 +123,11 @@ export default function AdminDashboard() {
       </div>
 
       {/* KPI row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-7">
-        <KPICard label="In Review"      value={stats?.reviewing  ?? 0} styleIdx={4} icon="search" />
-        <KPICard label="In Progress"    value={stats?.inProgress ?? 0} styleIdx={5} icon="activity" />
-        <KPICard label="Total Citizens" value={stats?.citizens   ?? 0} styleIdx={6} icon="citizens" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
+        <KPICard stack label="In Review"      value={stats?.reviewing  ?? 0} styleIdx={4} icon="search" />
+        <KPICard stack label="In Progress"    value={stats?.inProgress ?? 0} styleIdx={5} icon="activity" />
+        <KPICard stack label="Overdue"        value={stats?.overdue    ?? 0} styleIdx={7} icon="complaint" sub="Past their deadline" />
+        <KPICard stack label="Total Citizens" value={stats?.citizens   ?? 0} styleIdx={6} icon="citizens" />
       </div>
 
       {/* Quick links */}

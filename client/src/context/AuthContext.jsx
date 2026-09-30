@@ -29,6 +29,8 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('civix_token');
     localStorage.removeItem('civix_user');
     localStorage.removeItem(ACTIVITY_KEY);
+    // Alerts already shown this session (admin bell); the next sign-in starts fresh.
+    try { sessionStorage.removeItem('civix_seen_alerts'); } catch { /* storage unavailable */ }
     setUser(null);
   }
 

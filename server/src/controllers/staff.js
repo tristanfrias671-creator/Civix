@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const { sendStatusUpdateEmail } = require('../utils/mailer');
+const { sendStatusUpdateSms } = require('../utils/sms');
 const prisma = new PrismaClient();
 
 // Use raw SQL to bypass Prisma's stale enum cache (STAFF was added after client generation)
@@ -145,7 +146,8 @@ async function getMyStats(req, res) {
         SUM(CASE WHEN type='COMPLAINT'     THEN 1 ELSE 0 END) as complaints,
         SUM(CASE WHEN type='SUGGESTION'    THEN 1 ELSE 0 END) as suggestions,
         SUM(CASE WHEN type='FEEDBACK'      THEN 1 ELSE 0 END) as feedbacks,
-        SUM(CASE WHEN DATE(createdAt)=CURDATE() THEN 1 ELSE 0 END) as todayCount
+        SUM(CASE WHEN DATE(createdAt)=CURDATE() THEN 1 ELSE 0 END) as todayCount,
+        SUM(CASE WHEN status<>'RESOLVED' AND dueAt < ${new Date()} THEN 1 ELSE 0 END) as overdue
       FROM Submission
       WHERE department = ${dept}
     `;
@@ -162,6 +164,7 @@ async function getMyStats(req, res) {
       suggestions: n(totals.suggestions),
       feedbacks:   n(totals.feedbacks),
       todayCount:  n(totals.todayCount),
+      overdue:     n(totals.overdue),
     });
   } catch (err) {
     console.error(err);
@@ -170,6 +173,40 @@ async function getMyStats(req, res) {
 }
 
 // GET /api/staff/portal/submissions — submissions for the staff's department
+// GET /api/staff/portal/alerts — what needs this staff member's office now:
+// urgent, overdue and due-within-2-days reports, plus new (still Pending) ones.
+// Each report appears once, in its most serious group.
+async function getMyAlerts(req, res) {
+  try {
+    const [user] = await prisma.$queryRaw`SELECT department FROM User WHERE id = ${req.user.id} LIMIT 1`;
+    if (!user?.department) return res.status(400).json({ error: 'No department assigned to your account' });
+    const now = new Date();
+    const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    const open = { department: user.department, status: { not: 'RESOLVED' } };
+    const notUrgent = { priority: { not: 'URGENT' } };
+    const select = {
+      id: true, trackingId: true, type: true, department: true, status: true,
+      priority: true, dueAt: true, createdAt: true, updatedAt: true,
+    };
+    const [urgent, overdue, dueSoon, newReports] = await Promise.all([
+      prisma.submission.findMany({ where: { ...open, priority: 'URGENT' }, select, orderBy: { createdAt: 'asc' }, take: 50 }),
+      prisma.submission.findMany({ where: { ...open, ...notUrgent, dueAt: { lt: now } }, select, orderBy: { dueAt: 'asc' }, take: 50 }),
+      prisma.submission.findMany({ where: { ...open, ...notUrgent, dueAt: { gte: now, lt: soon } }, select, orderBy: { dueAt: 'asc' }, take: 50 }),
+      prisma.submission.findMany({
+        where: { ...open, ...notUrgent, status: 'PENDING', OR: [{ dueAt: null }, { dueAt: { gte: soon } }] },
+        select, orderBy: { createdAt: 'desc' }, take: 50,
+      }),
+    ]);
+    res.json({
+      department: user.department, urgent, overdue, dueSoon, newReports,
+      total: urgent.length + overdue.length + dueSoon.length + newReports.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load alerts' });
+  }
+}
+
 async function getMySubmissions(req, res) {
   try {
     const [user] = await prisma.$queryRaw`SELECT department FROM User WHERE id = ${req.user.id} LIMIT 1`;
@@ -186,8 +223,8 @@ async function getMySubmissions(req, res) {
 
     // Priority enum is declared URGENT/STANDARD/LOW, so MySQL sorts ENUM columns
     // by that declaration order (not alphabetically) — 'asc' naturally puts urgent cases first.
-    const orderBy = sortBy === 'priority'
-      ? [{ priority: 'asc' }, { createdAt: 'desc' }]
+    const orderBy = sortBy === 'priority' ? [{ priority: 'asc' }, { createdAt: 'desc' }]
+      : sortBy === 'due' ? [{ dueAt: 'asc' }, { createdAt: 'desc' }]
       : { createdAt: 'desc' };
 
     const [submissions, total] = await Promise.all([
@@ -284,6 +321,7 @@ async function updateMySubmission(req, res) {
         await prisma.notification.create({ data: { userId: submission.userId, message: fullMessage } });
       }
       if (updated.email) sendStatusUpdateEmail(updated, status, note?.trim());
+      sendStatusUpdateSms(updated, status);
     }
 
     res.json(updated);
@@ -386,6 +424,7 @@ async function assignSubmission(req, res) {
           await prisma.notification.create({ data: { userId: existing.userId, message: fullMessage } });
         }
         if (updated.email) sendStatusUpdateEmail(updated, status, note?.trim());
+        sendStatusUpdateSms(updated, status);
       }
     }
 
@@ -417,6 +456,7 @@ async function trackByTrackingId(req, res) {
 }
 
 module.exports = {
+  getMyAlerts,
   getStaff, createStaff, updateStaff, deleteStaff,
   getMyStats, getMySubmissions, getMySubmissionDetail, updateMySubmission,
   monitorSubmissions, assignSubmission, trackByTrackingId,

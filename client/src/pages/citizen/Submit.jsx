@@ -3,10 +3,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
 import Icon from '../../components/common/Icons';
+import { formatDueDate } from '../../components/common/DeadlineBadge';
 import FeedbackRatingPanel from '../../components/citizen/FeedbackRatingPanel';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
-import { CANTILAN_LOCATIONS } from '../../data/cantilanLocations';
+import { suggestLocations, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
 
 const fadeCss = `
 @keyframes submitFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
@@ -50,6 +51,7 @@ export default function Submit() {
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trackingId, setTrackingId] = useState(null);
+  const [dueAt, setDueAt] = useState(null);
   const [feedbackRating, setFeedbackRating]     = useState(0);
   const [feedbackReaction, setFeedbackReaction] = useState('');
   const [feedbackTags, setFeedbackTags]         = useState([]);
@@ -60,6 +62,8 @@ export default function Submit() {
 
   const [locationSuggestions, setLocationSuggestions] = useState([]);
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
+  // True while the list is the full set of barangays (nothing specific typed yet).
+  const [listingBarangays, setListingBarangays] = useState(false);
   const locationFieldRef = useRef(null);
 
   const [deptOpen, setDeptOpen] = useState(false);
@@ -103,22 +107,32 @@ export default function Submit() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  function handleAddressChange(value) {
-    setForm(p => ({ ...p, address: value }));
-    if (value.trim().length < 1) {
-      setLocationSuggestions([]);
-      setShowLocationSuggestions(false);
-      return;
-    }
-    const q = value.toLowerCase();
-    const matches = CANTILAN_LOCATIONS.filter(loc => loc.toLowerCase().includes(q)).slice(0, 6);
+  // Opens the list for what is typed: every barangay while the field is empty,
+  // otherwise the matching barangays and landmarks.
+  function showLocationSuggestionsFor(value) {
+    const found = suggestLocations(value);
+    const matches = found.filter(loc => loc !== value.trim());
+    setListingBarangays(found === CANTILAN_BARANGAY_OPTIONS);
     setLocationSuggestions(matches);
     setShowLocationSuggestions(matches.length > 0);
+  }
+
+  function handleAddressChange(value) {
+    setForm(p => ({ ...p, address: value }));
+    showLocationSuggestionsFor(value);
   }
 
   function selectLocationSuggestion(loc) {
     setForm(p => ({ ...p, address: loc }));
     setShowLocationSuggestions(false);
+  }
+
+  // The arrow in the field: shows the whole barangay list, or closes it.
+  function toggleBarangayList() {
+    if (showLocationSuggestions) return setShowLocationSuggestions(false);
+    setListingBarangays(true);
+    setLocationSuggestions(CANTILAN_BARANGAY_OPTIONS);
+    setShowLocationSuggestions(true);
   }
 
   useEffect(() => {
@@ -165,6 +179,10 @@ export default function Submit() {
     if (!form.department) return toast.error('Please select a department / office');
     if (form.description.length < 20) return toast.error('Description must be at least 20 characters');
     if (!form.contactNumber.trim()) return toast.error('Contact number is required');
+    // Same rule as the server: a PH mobile number (09…, +639… or 639…), since updates are texted.
+    if (!/^(09\d{9}|639\d{9}|9\d{9})$/.test(form.contactNumber.replace(/\D/g, ''))) {
+      return toast.error('Please enter a valid mobile number, e.g. 09171234567');
+    }
     if (!form.email.trim()) return toast.error('Email address is required');
     if (form.type === 'FEEDBACK') {
       if (!feedbackRating) return toast.error('Please rate your experience (1–5 stars)');
@@ -188,6 +206,7 @@ export default function Submit() {
 
       const res = await api.post('/submissions', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setTrackingId(res.data.trackingId);
+      setDueAt(res.data.submission?.dueAt || null);
       toast.success('Submission received!');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Submission failed');
@@ -198,6 +217,7 @@ export default function Submit() {
 
   function resetForm() {
     setTrackingId(null);
+    setDueAt(null);
     setForm({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
     setPhotos([]);
     setFeedbackRating(0);
@@ -223,6 +243,12 @@ export default function Submit() {
               style={{ color: dark ? '#60a5fa' : '#2563eb' }}>
               {trackingId}
             </div>
+            {dueAt && (
+              <div className="flex items-center justify-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 mb-3 text-sm">
+                <Icon name="clock" className="w-4 h-4 flex-shrink-0" />
+                <span className="text-gray-700">Target resolution: <strong className="text-gray-900">{formatDueDate(dueAt, true)}</strong></span>
+              </div>
+            )}
             <p className="text-sm text-gray-500 mb-1 font-medium">
               Save this code to track the status of your submission.
             </p>
@@ -341,15 +367,30 @@ export default function Submit() {
               </svg>
               <input type="text" value={form.address}
                 onChange={e => handleAddressChange(e.target.value)}
-                onFocus={() => { if (locationSuggestions.length > 0) setShowLocationSuggestions(true); }}
-                placeholder="e.g. Barangay, landmark, or address"
+                onFocus={() => showLocationSuggestionsFor(form.address)}
+                onKeyDown={e => { if (e.key === 'Escape') setShowLocationSuggestions(false); }}
+                placeholder="Choose or type your barangay"
                 autoComplete="off"
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
+                role="combobox" aria-expanded={showLocationSuggestions} aria-controls="location-suggestions" aria-autocomplete="list"
+                className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
+              <button type="button" onClick={toggleBarangayList} tabIndex={-1}
+                aria-label={showLocationSuggestions ? 'Close the list' : 'Show the barangay list'}
+                className="absolute right-0 top-0 h-full px-3 flex items-center text-gray-400 hover:text-gray-600">
+                <svg className={`w-4 h-4 transition-transform ${showLocationSuggestions ? 'rotate-180' : ''}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
 
               {showLocationSuggestions && (
-                <div className="absolute z-20 left-0 right-0 mt-1.5 bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden">
+                <div id="location-suggestions" role="listbox"
+                  className="absolute z-20 left-0 right-0 mt-1.5 bg-white rounded-lg border border-gray-200 shadow-lg overflow-y-auto"
+                  style={{ maxHeight: '16rem' }}>
+                  {listingBarangays && (
+                    <p className="px-4 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Barangays of Cantilan</p>
+                  )}
                   {locationSuggestions.map(loc => (
-                    <button key={loc} type="button"
+                    <button key={loc} type="button" role="option" aria-selected={false}
                       onClick={() => selectLocationSuggestion(loc)}
                       className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-blue-50 transition-colors">
                       <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -362,7 +403,7 @@ export default function Submit() {
                 </div>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-1">Suggestions are limited to Cantilan barangays and landmarks.</p>
+            <p className="text-xs text-gray-400 mt-1">Choose your barangay from the list. You can then add a purok, street or landmark after it.</p>
           </div>
 
           {/* CONTACT NUMBER (REQUIRED) */}
@@ -372,7 +413,7 @@ export default function Submit() {
               onChange={e => setForm(p => ({ ...p, contactNumber: e.target.value }))}
               placeholder="e.g. 09XX XXX XXXX"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-            <p className="text-xs text-gray-400 mt-1">Used so the concerned office can contact you about your report.</p>
+            <p className="text-xs text-gray-400 mt-1">Mobile number. We'll text you your tracking code and each status update.</p>
           </div>
 
           {/* EMAIL (REQUIRED) */}
@@ -404,7 +445,7 @@ export default function Submit() {
               <textarea value={form.description} onChange={handleDescriptionChange} rows={5}
                 placeholder={form.type === 'FEEDBACK'
                   ? 'Share what went well or what could be improved...'
-                  : 'Example: There is a broken streetlight in front of Brgy. Hall, Hayanggabon, Cantilan. It has been broken for 2 weeks and is dangerous at night...'}
+                  : 'Example: There is a broken streetlight in front of Brgy. Hall, Parang, Cantilan. It has been broken for 2 weeks and is dangerous at night...'}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
               {aiLoading && (
                 <div className="absolute bottom-3 right-3 flex items-center gap-1.5 text-xs text-gray-400">

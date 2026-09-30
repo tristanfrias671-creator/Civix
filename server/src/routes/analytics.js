@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const {
+  getAlerts,
   getSummary,
   getQuarterly,
   getSentiment,
@@ -10,6 +11,7 @@ const {
 } = require('../controllers/analytics');
 
 router.use(authenticate, requireAdmin);
+router.get('/alerts', getAlerts);
 router.get('/summary', getSummary);
 router.get('/quarterly', getQuarterly);
 router.get('/sentiment', getSentiment);

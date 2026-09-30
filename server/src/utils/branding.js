@@ -1,9 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_SEAL = path.join(__dirname, '../../../client/public/cantilan-seal.png');
-// Same folder multer writes to (see middleware/upload.js).
-const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || './uploads');
+const UPLOAD_ROOT = require('./uploadRoot');
+// The built website (client/build) when deployed, the source files (client/public) locally.
+const DEFAULT_SEAL = ['build', 'public']
+  .map(dir => path.join(__dirname, '../../../client', dir, 'cantilan-seal.png'))
+  .find(file => fs.existsSync(file)) || '';
 
 // Disk path of a locally stored branding image (/uploads/branding/<file>), else null.
 function localBrandingPath(url) {

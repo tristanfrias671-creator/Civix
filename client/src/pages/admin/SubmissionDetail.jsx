@@ -1,26 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import toast from 'react-hot-toast';
 import { StatusBadge, TypeBadge, PriorityBadge, SentimentBadge } from '../../components/common/StatusBadge';
 import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
+import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import { SkeletonDetail } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import api from '../../utils/api';
 import { mediaUrl } from '../../utils/mediaUrl';
-
-const DEPARTMENTS = [
-  'UNASSIGNED',
-  "Mayor's Office – CRMO", 'HR', 'Tourism', 'Motorpool', 'Traffic',
-  'CSDO', 'OSCA', 'MDRRMO',
-  'Municipal Budget Office', 'Municipal Accountant Office',
-  'Municipal Agriculture Office', 'Municipal Health Office',
-  'Municipal Civil Registry Office',
-  'Municipal Social Welfare & Development Office',
-  'Municipal Economic & Natural Resource Office',
-  'Municipal Treasurer Office', 'Municipal Engineering Office',
-  'Municipal Planning & Development Office',
-  'Sangguniang Bayan Office', 'Office of the Vice Mayor',
-];
 
 function ConfidenceBadge({ confidence }) {
   const color = confidence >= 70 ? '#16a34a' : confidence >= 40 ? '#d97706' : '#dc2626';
@@ -45,9 +31,6 @@ export default function SubmissionDetail() {
   const { id } = useParams();
   const [submission,  setSubmission]  = useState(null);
   const [loading,     setLoading]     = useState(true);
-  const [saving,      setSaving]      = useState(false);
-  const [form,        setForm]        = useState({ priority: '', department: '', status: '' });
-  const [changeReason, setChangeReason] = useState('');
   const [changeLogs,  setChangeLogs]  = useState([]);
   const mapRef         = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -58,7 +41,6 @@ export default function SubmissionDetail() {
       api.get(`/classify/audit-log?limit=100`),
     ]).then(([sub, logs]) => {
       setSubmission(sub.data);
-      setForm({ priority: sub.data.priority, department: sub.data.department, status: sub.data.status });
       // Filter logs for this submission
       const filtered = (logs.data.logs || []).filter(l => l.submissionId === id);
       setChangeLogs(filtered);
@@ -94,24 +76,6 @@ export default function SubmissionDetail() {
       if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
     };
   }, [submission]);
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      const updated = await api.patch(`/submissions/${id}`, { ...form, changeReason: changeReason.trim() || undefined });
-      setSubmission(updated.data);
-      toast.success('Submission updated! Citizen has been notified.');
-      setChangeReason('');
-
-      // Refresh logs
-      const logs = await api.get('/classify/audit-log?limit=100');
-      setChangeLogs((logs.data.logs || []).filter(l => l.submissionId === id));
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Update failed');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   if (loading) return <div className="p-6 max-w-5xl mx-auto"><SkeletonDetail /></div>;
   if (!submission) return <div className="p-6 text-gray-500 dark:text-slate-400">Submission not found.</div>;
@@ -326,62 +290,43 @@ export default function SubmissionDetail() {
             )}
           </div>
 
-          {/* Manage Submission */}
+          {/* Case status (view only: the assigned office's staff update reports) */}
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
-            <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-4">Manage Submission</h3>
-            <div className="space-y-4">
-              {[
-                { label: 'Priority', key: 'priority', options: [['URGENT','Urgent'],['STANDARD','Standard'],['LOW','Low']] },
-                { label: 'Status', key: 'status', options: [['PENDING','Pending'],['REVIEWING','Reviewing'],['IN_PROGRESS','In Progress'],['RESOLVED','Resolved']] },
-              ].map(f => (
-                <div key={f.key}>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">{f.label}</label>
-                  <select value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary">
-                    {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </div>
-              ))}
-
-              {/* Department with AI badge */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">Department</label>
-                  {ai && (
-                    <span className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                      </svg>
-                      AI: {ai.predictedDepartment}
-                    </span>
-                  )}
-                </div>
-                <select value={form.department} onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary">
-                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+            <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-4">Case Status</h3>
+            <dl className="space-y-3.5 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-gray-500 dark:text-slate-400 text-xs">Status</dt>
+                <dd><StatusBadge status={submission.status} /></dd>
               </div>
-
-              {/* Change reason (shown when dept differs) */}
-              {form.department !== submission.department && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
-                    Reason for Department Change
-                    <span className="ml-1 text-xs text-gray-400 dark:text-slate-500">(optional but recommended)</span>
-                  </label>
-                  <textarea value={changeReason}
-                    onChange={e => setChangeReason(e.target.value)}
-                    placeholder="e.g. Reassigned to correct department after review..."
-                    rows={2}
-                    className="w-full px-3 py-2 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
-                </div>
-              )}
-
-              <button onClick={handleSave} disabled={saving}
-                className="w-full bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 mt-2">
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-gray-500 dark:text-slate-400 text-xs">Priority</dt>
+                <dd><PriorityBadge priority={submission.priority} /></dd>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <dt className="text-gray-500 dark:text-slate-400 text-xs pt-0.5">Assigned office</dt>
+                <dd className="font-medium text-right text-gray-800 dark:text-slate-100">
+                  {submission.department}
+                  {ai && ai.predictedDepartment !== submission.department && (
+                    <span className="block text-[11px] font-normal text-blue-600 dark:text-blue-400 mt-0.5">AI suggested: {ai.predictedDepartment}</span>
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <dt className="text-gray-500 dark:text-slate-400 text-xs pt-0.5">Resolve by</dt>
+                <dd className="text-right">
+                  {submission.dueAt ? (
+                    <>
+                      <DeadlineBadge submission={submission} />
+                      <span className="block text-xs text-gray-500 dark:text-slate-400 mt-1">{formatDueDate(submission.dueAt, true)}</span>
+                    </>
+                  ) : <span className="text-xs text-gray-400">No deadline</span>}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-5 flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-900/40 text-gray-500 dark:text-slate-400">
+              <Icon name="citizens" className="w-4 h-4 mt-px flex-shrink-0" />
+              View only. The assigned office's staff update this report's status, priority and department.
+            </p>
           </div>
         </div>
       </div>
