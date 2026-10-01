@@ -1,18 +1,114 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
 
-const DEPARTMENTS = ['HR'];
-
 const EMPTY_FORM = { fullName: '', email: '', password: '', department: '' };
+
+// ── Department dropdown ───────────────────────────────────────────────────────
+// Always opens below the field (a native <select> opens upward when there is more
+// room above). Arrow keys, Enter, Escape and typing a letter work as in a select.
+function DepartmentPicker({ value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const [maxHeight, setMaxHeight] = useState(224);
+  const boxRef = useRef(null);
+  const buttonRef = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = e => { if (!boxRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  // Keep the highlighted office in view.
+  useEffect(() => {
+    if (open && active >= 0) listRef.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+  }, [open, active]);
+
+  function openList() {
+    // Fit the list in the space under the field.
+    const { bottom } = buttonRef.current.getBoundingClientRect();
+    setMaxHeight(Math.max(140, Math.min(224, window.innerHeight - bottom - 16)));
+    setActive(Math.max(0, options.indexOf(value)));
+    setOpen(true);
+  }
+
+  function choose(option) {
+    onChange(option);
+    setOpen(false);
+    buttonRef.current?.focus();
+  }
+
+  function onKeyDown(e) {
+    if (!open) {
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); openList(); }
+      return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(options.length - 1, i + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(0, i - 1)); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (options[active]) choose(options[active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+    else if (e.key === 'Tab') setOpen(false);
+    else if (e.key.length === 1) {
+      const i = options.findIndex(o => o.toLowerCase().startsWith(e.key.toLowerCase()));
+      if (i >= 0) setActive(i);
+    }
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button ref={buttonRef} type="button" onClick={() => (open ? setOpen(false) : openList())} onKeyDown={onKeyDown}
+        aria-haspopup="listbox" aria-expanded={open}
+        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all flex items-center justify-between gap-2 text-left">
+        <span className={`truncate ${value ? 'text-gray-900' : 'text-gray-400'}`}>{value || 'Select department...'}</span>
+        <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <ul ref={listRef} role="listbox"
+          className="absolute z-30 left-0 right-0 top-full mt-1.5 py-1 bg-white rounded-xl border border-gray-200 shadow-lg overflow-y-auto"
+          style={{ maxHeight }}>
+          {options.length === 0 && <li className="px-4 py-2.5 text-sm text-gray-400">Loading departments...</li>}
+          {options.map((o, i) => (
+            // Hover has its own highlight and doesn't move the keyboard one, so a mouse
+            // resting over the list can't change what Enter picks.
+            <li key={o} role="option" aria-selected={o === value}
+              onMouseDown={e => e.preventDefault()} onClick={() => choose(o)}
+              className={`px-4 py-2.5 text-sm cursor-pointer ${o === value ? 'text-primary font-semibold' : 'text-gray-700'} ${i === active ? 'bg-blue-50' : 'hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
+              {o}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function StaffModal({ open, onClose, onSaved, editing }) {
   const [form, setForm]       = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [departments, setDepartments] = useState([]);
+
+  // The offices managed in Settings > Departments.
+  useEffect(() => {
+    if (!open) return;
+    api.get('/settings/public')
+      .then(res => setDepartments(res.data.departments || []))
+      .catch(() => toast.error('Could not load the department list'));
+  }, [open]);
+
+  // Keep a staff member's current office selectable even if it was removed from Settings.
+  const departmentOptions = editing?.department && !departments.includes(editing.department)
+    ? [editing.department, ...departments]
+    : departments;
 
   useEffect(() => {
     if (open) {
@@ -59,9 +155,9 @@ function StaffModal({ open, onClose, onSaved, editing }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-50 flex justify-center p-4 overflow-y-auto"
       style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(3px)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-auto" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -100,11 +196,7 @@ function StaffModal({ open, onClose, onSaved, editing }) {
           {/* Department */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1.5">Department *</label>
-            <select value={form.department} onChange={e => set('department', e.target.value)} required
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
-              <option value="">Select department...</option>
-              {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
+            <DepartmentPicker value={form.department} options={departmentOptions} onChange={v => set('department', v)} />
           </div>
 
           {/* Password */}

@@ -1,6 +1,14 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// Year and month (1-12) on the Philippine calendar. The server clock may be UTC,
+// where a report filed early on the 1st (PH time) still falls in the month before.
+const PH_MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: 'numeric' });
+function phYearMonth(date) {
+  const parts = Object.fromEntries(PH_MONTH.formatToParts(date).map(p => [p.type, p.value]));
+  return { year: Number(parts.year), month: Number(parts.month) };
+}
+
 // GET /api/analytics/alerts — what needs an administrator's attention right now:
 // unresolved reports that are urgent, overdue or due within 2 days, plus pending
 // access requests. Worked out live, so an item disappears as soon as it's handled.
@@ -79,8 +87,8 @@ async function getQuarterly(req, res) {
 
     const quarterly = {};
     for (const s of submissions) {
-      const year = s.createdAt.getFullYear();
-      const q = Math.ceil((s.createdAt.getMonth() + 1) / 3);
+      const { year, month } = phYearMonth(s.createdAt);
+      const q = Math.ceil(month / 3);
       const key = `${year} Q${q}`;
       if (!quarterly[key]) quarterly[key] = { label: key, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
       quarterly[key][s.type]++;
@@ -119,17 +127,19 @@ async function getMonthly(req, res) {
       orderBy: { createdAt: 'asc' },
     });
 
+    // The last 12 months on the Philippine calendar, oldest first, keyed "2026-10".
     const months = {};
-    const now = new Date();
+    const now = phYearMonth(new Date());
     for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = d.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      const d = new Date(Date.UTC(now.year, now.month - 1 - i, 1));
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleString('en-US', { timeZone: 'UTC', month: 'short', year: 'numeric' });
       months[key] = { label, key, total: 0, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0 };
     }
 
     for (const s of submissions) {
-      const key = `${s.createdAt.getFullYear()}-${String(s.createdAt.getMonth() + 1).padStart(2, '0')}`;
+      const { year, month } = phYearMonth(s.createdAt);
+      const key = `${year}-${String(month).padStart(2, '0')}`;
       if (!months[key]) continue;
       months[key].total++;
       months[key][s.type]++;

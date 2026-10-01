@@ -124,6 +124,125 @@ function CropStep({ imgSrc, onDone, onBack }) {
   );
 }
 
+const PASSWORD_INPUT = 'w-full px-3.5 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-gray-50 focus:bg-white transition-all';
+
+function PasswordField({ label, value, onChange, show, autoComplete, autoFocus }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1.5">{label}</label>
+      <input type={show ? 'text' : 'password'} value={value} onChange={e => onChange(e.target.value)}
+        autoComplete={autoComplete} autoFocus={autoFocus} className={PASSWORD_INPUT} />
+    </div>
+  );
+}
+
+// ── Change password: its own window, opened from Edit Profile ──
+function ChangePasswordModal({ open, onClose }) {
+  const [form, setForm] = useState({ current: '', next: '', confirm: '' });
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Start empty each time it opens.
+  React.useEffect(() => {
+    if (open) {
+      setForm({ current: '', next: '', confirm: '' });
+      setShow(false);
+    }
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const set = key => value => setForm(p => ({ ...p, [key]: value }));
+  const tooShort = form.next.length > 0 && form.next.length < 6;
+  const mismatch = form.confirm.length > 0 && form.confirm !== form.next;
+  const matches = form.confirm.length > 0 && form.confirm === form.next && !tooShort;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.current || !form.next) return toast.error('Please enter your current and new password');
+    if (form.next.length < 6) return toast.error('New password must be at least 6 characters');
+    if (form.next !== form.confirm) return toast.error('New passwords do not match');
+    if (form.next === form.current) return toast.error('Choose a new password that is different from your current one');
+    setSaving(true);
+    try {
+      await api.patch('/auth/password', { currentPassword: form.current, newPassword: form.next });
+      toast.success('Password changed successfully');
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to change password');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-center p-4 overflow-y-auto"
+      style={{ background: 'rgba(15,23,42,0.55)' }}
+      onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full my-auto" style={{ maxWidth: 400 }}
+        role="dialog" aria-modal="true" aria-labelledby="change-password-title"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-xl bg-blue-50 text-primary flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+              </svg>
+            </span>
+            <div>
+              <h2 id="change-password-title" className="text-base font-bold text-gray-900">Change Password</h2>
+              <p className="text-xs text-gray-500">Use at least 6 characters.</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close"
+            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          <PasswordField label="Current Password" value={form.current} onChange={set('current')}
+            show={show} autoComplete="current-password" autoFocus />
+          <div>
+            <PasswordField label="New Password" value={form.next} onChange={set('next')}
+              show={show} autoComplete="new-password" />
+            {tooShort && <p className="text-xs text-red-600 mt-1.5">Use at least 6 characters.</p>}
+          </div>
+          <div>
+            <PasswordField label="Confirm New Password" value={form.confirm} onChange={set('confirm')}
+              show={show} autoComplete="new-password" />
+            {mismatch && <p className="text-xs text-red-600 mt-1.5">The passwords don't match.</p>}
+            {matches && <p className="text-xs text-green-600 mt-1.5">✓ The passwords match.</p>}
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+            <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} className="w-4 h-4 rounded accent-blue-600" />
+            Show passwords
+          </label>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
+              {saving ? 'Updating...' : 'Update Password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 export default function ProfileModal({ open, onClose }) {
   const { user, updateUser } = useAuth();
@@ -136,9 +255,8 @@ export default function ProfileModal({ open, onClose }) {
   const [fullName,   setFullName]   = useState(user?.fullName || '');
   const [saving, setSaving] = useState(false);
 
-  const [showPassword, setShowPassword] = useState(false);
-  const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
-  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const closePassword = useCallback(() => setPasswordOpen(false), []);
 
   const fileRef = useRef(null);
 
@@ -150,8 +268,7 @@ export default function ProfileModal({ open, onClose }) {
       setPreviewUrl(null);
       setCropBlob(null);
       setFullName(user?.fullName || '');
-      setShowPassword(false);
-      setPasswords({ current: '', next: '', confirm: '' });
+      setPasswordOpen(false);
     }
   }, [open, user]);
 
@@ -206,40 +323,20 @@ export default function ProfileModal({ open, onClose }) {
     } finally { setSaving(false); }
   }
 
-  // ── Change password (separate action from profile save) ──
-  async function handleChangePassword(e) {
-    e.preventDefault();
-    if (!passwords.current || !passwords.next) return toast.error('Please fill in both password fields');
-    if (passwords.next.length < 6) return toast.error('New password must be at least 6 characters');
-    if (passwords.next !== passwords.confirm) return toast.error('New passwords do not match');
-    setChangingPassword(true);
-    try {
-      await api.patch('/auth/password', {
-        currentPassword: passwords.current,
-        newPassword: passwords.next,
-      });
-      toast.success('Password changed successfully');
-      setPasswords({ current: '', next: '', confirm: '' });
-      setShowPassword(false);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to change password');
-    } finally {
-      setChangingPassword(false);
-    }
-  }
-
   const currentAvatar = previewUrl || (user?.avatar ? mediaUrl(user.avatar) : null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <>
+    {/* Never taller than the screen: the header stays put and the rest scrolls. */}
+    <div className="fixed inset-0 z-50 flex justify-center p-4 overflow-y-auto"
       style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}
       onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full overflow-hidden"
-        style={{ maxWidth: step === 'crop' ? 360 : 420 }}
+      <div className="bg-white rounded-2xl shadow-2xl w-full my-auto flex flex-col overflow-hidden"
+        style={{ maxWidth: step === 'crop' ? 360 : 420, maxHeight: 'calc(100vh - 2rem)' }}
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <h2 className="text-base font-bold text-gray-900">
             {step === 'crop' ? 'Crop Profile Photo' : 'Edit Profile'}
           </h2>
@@ -251,7 +348,7 @@ export default function ProfileModal({ open, onClose }) {
           </button>
         </div>
 
-        <div className="px-6 py-6">
+        <div className="px-6 py-6 overflow-y-auto">
 
           {/* ── CROP STEP ── */}
           {step === 'crop' && rawImgSrc && (
@@ -320,47 +417,19 @@ export default function ProfileModal({ open, onClose }) {
                 </div>
               </div>
 
-              {/* Change password (collapsible) */}
-              <div className="border border-gray-100 rounded-xl overflow-hidden">
-                <button type="button" onClick={() => setShowPassword(v => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
-                  <span className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                    </svg>
-                    Change Password
-                  </span>
-                  <svg className={`w-4 h-4 text-gray-400 transition-transform ${showPassword ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
+              {/* Change password: opens its own window */}
+              <button type="button" onClick={() => setPasswordOpen(true)}
+                className="w-full flex items-center justify-between px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
+                <span className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                   </svg>
-                </button>
-                {showPassword && (
-                  <form onSubmit={handleChangePassword} className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Current Password</label>
-                      <input type="password" value={passwords.current}
-                        onChange={e => setPasswords(p => ({ ...p, current: e.target.value }))}
-                        className="w-full px-3.5 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-gray-50 focus:bg-white transition-all" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">New Password</label>
-                      <input type="password" value={passwords.next} minLength={6}
-                        onChange={e => setPasswords(p => ({ ...p, next: e.target.value }))}
-                        className="w-full px-3.5 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-gray-50 focus:bg-white transition-all" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Confirm New Password</label>
-                      <input type="password" value={passwords.confirm}
-                        onChange={e => setPasswords(p => ({ ...p, confirm: e.target.value }))}
-                        className="w-full px-3.5 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-gray-50 focus:bg-white transition-all" />
-                    </div>
-                    <button type="submit" disabled={changingPassword}
-                      className="w-full py-2.5 bg-slate-800 text-white rounded-lg text-sm font-semibold hover:bg-slate-900 transition-colors disabled:opacity-50">
-                      {changingPassword ? 'Updating...' : 'Update Password'}
-                    </button>
-                  </form>
-                )}
-              </div>
+                  Change Password
+                </span>
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
 
               {/* Name field */}
               <form onSubmit={handleSave} className="space-y-4">
@@ -387,5 +456,7 @@ export default function ProfileModal({ open, onClose }) {
         </div>
       </div>
     </div>
+    <ChangePasswordModal open={passwordOpen} onClose={closePassword} />
+    </>
   );
 }

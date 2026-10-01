@@ -477,6 +477,27 @@ function QuarterlyTooltip({ active, payload, label }) {
 }
 
 // Lists only the real series; the tube shadow/shine copies are left out.
+// Month keys come from the server as "2026-10".
+function monthDate(key) {
+  const [year, month] = String(key).split('-').map(Number);
+  return new Date(year, month - 1, 1);
+}
+const monthShort = key => monthDate(key).toLocaleString('en-US', { month: 'short' });
+const monthLong = key => (/^\d{4}-\d{2}$/.test(key) ? monthDate(key).toLocaleString('en-US', { month: 'long', year: 'numeric' }) : key);
+
+// The month under each point, with the full year under the first month and each
+// January, so "Oct 26" can't be read as the 26th.
+function MonthTick({ x, y, payload, index, color }) {
+  const key = payload.value;
+  const showYear = index === 0 || key.endsWith('-01');
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text dy={12} textAnchor="middle" fontSize={11} fill={color}>{monthShort(key)}</text>
+      {showYear && <text dy={25} textAnchor="middle" fontSize={10} fontWeight={700} fill={color}>{key.slice(0, 4)}</text>}
+    </g>
+  );
+}
+
 function MonthlyTooltip({ active, payload, label }) {
   const { pal } = useChartTheme();
   if (!active || !payload?.length) return null;
@@ -484,7 +505,7 @@ function MonthlyTooltip({ active, payload, label }) {
   const rows = [{ key: 'total', name: 'Total', color: pal.total }, ...TYPES.map(t => ({ ...t, color: pal[t.key] }))];
   return (
     <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl shadow-lg px-4 py-3 min-w-[160px]">
-      <p className="text-sm font-semibold text-gray-800 dark:text-slate-100 border-b border-gray-100 dark:border-slate-700 pb-2 mb-2">{label}</p>
+      <p className="text-sm font-semibold text-gray-800 dark:text-slate-100 border-b border-gray-100 dark:border-slate-700 pb-2 mb-2">{monthLong(label)}</p>
       <div className="space-y-1.5">
         {rows.map(r => (
           <div key={r.key} className="flex items-center justify-between gap-4 text-xs">
@@ -711,7 +732,8 @@ export default function Analytics() {
                   </filter>
                 </defs>
                 <CartesianGrid stroke={grid} vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: axisTick }} axisLine={{ stroke: grid }} tickLine={false} />
+                <XAxis dataKey="key" interval={0} height={36} tick={<MonthTick color={axisTick} />}
+                  axisLine={{ stroke: grid }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: axisTick }} axisLine={false} tickLine={false} allowDecimals={false} width={32} />
                 <Tooltip content={<MonthlyTooltip />} />
                 {/* Explicit entries: the tube shadow/shine copies must not show up here */}
