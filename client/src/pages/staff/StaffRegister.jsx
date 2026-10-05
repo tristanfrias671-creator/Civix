@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { BrandImg } from '../../context/BrandingContext';
@@ -10,6 +10,7 @@ const MIN_SPIN_MS = 800;
 const SUCCESS_MS = 700;
 const SHAKE_MS = 450;
 const NOTE_MAX = 1000;
+const CODE_LENGTH = 6;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -37,6 +38,15 @@ const regCss = `
 .rg-ring { stroke-dasharray: 1; stroke-dashoffset: 1; animation: rg-ring .6s .15s ease-out forwards; }
 .rg-tick { stroke-dasharray: 1; stroke-dashoffset: 1; animation: rg-ring .35s .6s ease-out forwards; }
 .rg-pulse { animation: rg-pulse 1.8s ease-in-out infinite; }
+.rg-code {
+  width: 2.5rem; height: 3rem; text-align: center; font-size: 1.375rem; font-weight: 700;
+  border-radius: .75rem; outline: none; border: 1px solid #d1d5db; background: #f9fafb; color: #111827;
+  transition: border-color .2s ease, background-color .2s ease, box-shadow .2s ease;
+}
+.rg-code:focus { background: #fff; border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+.rg-code.is-bad { border-color: #fca5a5; }
+.rg-code:disabled { opacity: .6; }
+@media (min-width: 420px) { .rg-code { width: 2.875rem; height: 3.25rem; } }
 @media (prefers-reduced-motion: reduce) {
   .rg-card, .rg-rise, .rg-pulse { animation: none; }
   .rg-ring, .rg-tick { animation: none; stroke-dashoffset: 0; }
@@ -139,7 +149,7 @@ function RegisterSkeleton() {
 
 function SentView({ email, onBack }) {
   const timeline = [
-    { label: 'Request sent', detail: 'Your account is created but locked for now.', state: 'done' },
+    { label: 'Email confirmed, request sent', detail: 'Your account is created but locked for now.', state: 'done' },
     { label: 'Administrator verifies you', detail: 'An administrator checks that you work for the municipality.', state: 'current' },
     { label: 'Sign in on Staff Login', detail: `Once approved, we'll email ${email}.`, state: 'next' },
   ];
@@ -180,8 +190,140 @@ function SentView({ email, onBack }) {
   );
 }
 
-// Public page for municipal employees to ask for a staff account. The account
-// can't sign in until an administrator approves it in Access Requests.
+// Asks for the 6-digit code emailed to the address on the request. `onVerify`
+// resolves null when the request went through, or { error, codeError };
+// `onResend` resolves { ok, resendAfter } or { ok: false, error, retryAfter }.
+function CodeModal({ email, resendAfter, onVerify, onResend, onClose }) {
+  const [digits, setDigits] = useState(() => Array(CODE_LENGTH).fill(''));
+  const [error, setError] = useState('');
+  const [needsNewCode, setNeedsNewCode] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [wait, setWait] = useState(resendAfter);
+  const boxes = useRef([]);
+
+  useEffect(() => { boxes.current[0]?.focus(); }, []);
+
+  // Countdown until a new code can be sent.
+  useEffect(() => {
+    if (wait <= 0) return undefined;
+    const timer = setTimeout(() => setWait(w => w - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
+
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape' && !checking) onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [checking, onClose]);
+
+  const clear = () => {
+    setDigits(Array(CODE_LENGTH).fill(''));
+    setTimeout(() => boxes.current[0]?.focus(), 0);
+  };
+
+  async function verify(code) {
+    if (checking || needsNewCode) return;
+    setChecking(true);
+    setError('');
+    const result = await onVerify(code);
+    if (!result) return; // sent: the page moves on
+    setChecking(false);
+    setError(result.error);
+    setNeedsNewCode(['expired', 'locked', 'missing'].includes(result.codeError));
+    clear();
+  }
+
+  // Typing or pasting several digits fills the next boxes too.
+  function fill(index, value) {
+    const typed = value.replace(/\D/g, '');
+    const next = [...digits];
+    if (!typed) {
+      next[index] = '';
+      setDigits(next);
+      return;
+    }
+    for (let i = 0; i < typed.length && index + i < CODE_LENGTH; i++) next[index + i] = typed[i];
+    setDigits(next);
+    boxes.current[Math.min(index + typed.length, CODE_LENGTH - 1)]?.focus();
+    if (next.every(Boolean)) verify(next.join(''));
+  }
+
+  function onKeyDown(index, e) {
+    if (e.key === 'Backspace' && !digits[index] && index > 0) boxes.current[index - 1]?.focus();
+    else if (e.key === 'ArrowLeft' && index > 0) boxes.current[index - 1]?.focus();
+    else if (e.key === 'ArrowRight' && index < CODE_LENGTH - 1) boxes.current[index + 1]?.focus();
+  }
+
+  async function resend() {
+    setResending(true);
+    setError('');
+    const result = await onResend();
+    setResending(false);
+    if (result.ok) {
+      setNeedsNewCode(false);
+      setWait(result.resendAfter);
+      clear();
+      toast.success('We sent you a new code');
+    } else {
+      setError(result.error);
+      if (result.retryAfter) setWait(result.retryAfter);
+    }
+  }
+
+  const code = digits.join('');
+  return (
+    <div className="fixed inset-0 z-50 flex justify-center p-4 overflow-y-auto"
+      style={{ background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)' }}>
+      <div className="rg-card w-full my-auto rounded-2xl bg-white p-6 sm:p-7 text-center"
+        style={{ maxWidth: 420, boxShadow: '0 24px 64px -12px rgba(15,23,42,0.45)' }}
+        role="dialog" aria-modal="true" aria-labelledby="code-title" aria-describedby="code-help">
+        <span className="mx-auto w-14 h-14 rounded-full flex items-center justify-center" style={{ background: '#eff6ff', color: '#2563eb' }}>
+          <MailIcon className="w-7 h-7" />
+        </span>
+        <h2 id="code-title" className="mt-4 text-lg font-extrabold" style={{ color: '#0b2f66' }}>Check your email</h2>
+        <p id="code-help" className="text-sm text-gray-500 mt-1.5">
+          We sent a 6-digit code to <strong className="text-gray-800 break-all">{email}</strong>. Enter it to send your request.
+        </p>
+
+        <div className="mt-5 flex justify-center gap-1.5 sm:gap-2">
+          {digits.map((digit, i) => (
+            <input key={i} ref={el => { boxes.current[i] = el; }} value={digit}
+              onChange={e => fill(i, e.target.value)} onKeyDown={e => onKeyDown(i, e)} onFocus={e => e.target.select()}
+              inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={CODE_LENGTH}
+              aria-label={`Digit ${i + 1} of ${CODE_LENGTH}`} disabled={checking || needsNewCode}
+              className={`rg-code ${error ? 'is-bad' : ''}`} />
+          ))}
+        </div>
+        <p className="min-h-[1.25rem] mt-2 text-xs font-semibold text-red-500" role="alert">{error}</p>
+
+        <button type="button" onClick={() => verify(code)} disabled={code.length < CODE_LENGTH || checking || needsNewCode}
+          className="si-btn w-full mt-2 py-3 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60">
+          {checking ? 'Checking the code...' : 'Verify and send request'}
+        </button>
+
+        <p className="mt-4 text-xs text-gray-500">
+          Didn't get it? Check your Spam folder, or{' '}
+          {wait > 0
+            ? <span className="font-semibold tabular-nums">send a new code in {wait}s</span>
+            : (
+              <button type="button" onClick={resend} disabled={resending} className="font-semibold underline" style={{ color: '#2563eb' }}>
+                {resending ? 'sending...' : 'send a new code'}
+              </button>
+            )}
+        </p>
+        <button type="button" onClick={onClose} disabled={checking}
+          className="mt-3 text-xs font-semibold text-gray-400 hover:text-gray-600 transition-colors">
+          Use a different email
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Public page for municipal employees to ask for a staff account. The address is
+// confirmed with an emailed code first, and the account can't sign in until an
+// administrator approves it in Access Requests.
 export default function StaffRegister() {
   const navigate = useNavigate();
   const gate = useSkeletonGate();
@@ -190,6 +332,8 @@ export default function StaffRegister() {
   const [showPw, setShowPw] = useState(false);
   const [status, setStatus] = useState('idle'); // idle | loading | success | error
   const [sent, setSent] = useState(false);
+  // While the code window is open: { email, resendAfter }.
+  const [codeFor, setCodeFor] = useState(null);
   const busy = status !== 'idle';
   const set = key => e => setForm(p => ({ ...p, [key]: e.target.value }));
 
@@ -222,13 +366,51 @@ export default function StaffRegister() {
     if (form.password !== form.confirm) return fail('Passwords do not match');
     setStatus('loading');
     try {
-      const { confirm, ...body } = form;
-      await Promise.all([api.post('/auth/staff-register', body), sleep(MIN_SPIN_MS)]);
-      setStatus('success');
-      await sleep(SUCCESS_MS);
-      setSent(true);
+      // First a code to the email; the request goes out once it's entered.
+      const [res] = await Promise.all([api.post('/auth/staff-register/code', requestBody()), sleep(MIN_SPIN_MS)]);
+      setStatus('idle');
+      setCodeFor({ email: form.email.trim(), resendAfter: res.data.resendAfterSeconds ?? 60 });
     } catch (err) {
-      fail(err.response?.data?.error || err.message || 'Failed to send the request');
+      // A code sent moments ago still works: open the window again.
+      const retryAfter = err.response?.status === 429 && err.response.data?.retryAfter;
+      if (retryAfter) {
+        setStatus('idle');
+        setCodeFor({ email: form.email.trim(), resendAfter: retryAfter });
+        return;
+      }
+      fail(err.response?.data?.error || err.message || 'Failed to send the code');
+    }
+  }
+
+  function requestBody() {
+    const { confirm, ...body } = form;
+    return body;
+  }
+
+  async function verifyCode(code) {
+    try {
+      await Promise.all([api.post('/auth/staff-register', { ...requestBody(), code }), sleep(MIN_SPIN_MS)]);
+    } catch (err) {
+      const data = err.response?.data || {};
+      if (data.codeError) return { error: data.error, codeError: data.codeError };
+      // Something other than the code (say the email was registered meanwhile).
+      setCodeFor(null);
+      fail(data.error || err.message || 'Failed to send the request');
+      return null;
+    }
+    setCodeFor(null);
+    setStatus('success');
+    await sleep(SUCCESS_MS);
+    setSent(true);
+    return null;
+  }
+
+  async function resendCode() {
+    try {
+      const res = await api.post('/auth/staff-register/code', requestBody());
+      return { ok: true, resendAfter: res.data.resendAfterSeconds ?? 60 };
+    } catch (err) {
+      return { ok: false, error: err.response?.data?.error || 'Could not send a new code', retryAfter: err.response?.data?.retryAfter };
     }
   }
 
@@ -283,7 +465,7 @@ export default function StaffRegister() {
                 </Field>
 
                 <Field label="Email Address *" htmlFor="rg-email" icon={MailIcon} delay={0.16}
-                  hint={<p className="text-[11px] text-gray-400 mt-1">You'll sign in with this email. The approval notice is also sent here.</p>}
+                  hint={<p className="text-[11px] text-gray-400 mt-1">We'll email a code to confirm it's yours. You'll sign in with this email, and the approval notice is sent here.</p>}
                   trailing={emailOk && <CheckIcon className="w-4 h-4 absolute right-3.5 top-3 text-green-500" strokeWidth="2.5" />}>
                   <input id="rg-email" type="email" className={`rg-input pr-10 ${emailOk ? 'is-good' : ''}`} value={form.email} onChange={set('email')} required autoComplete="email" placeholder="you@example.com" />
                 </Field>
@@ -374,6 +556,11 @@ export default function StaffRegister() {
           )}
         </div>
       </div>
+
+      {codeFor && (
+        <CodeModal email={codeFor.email} resendAfter={codeFor.resendAfter}
+          onVerify={verifyCode} onResend={resendCode} onClose={() => setCodeFor(null)} />
+      )}
     </div>
   );
 }

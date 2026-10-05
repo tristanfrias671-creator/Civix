@@ -4,10 +4,14 @@ const fs = require('fs');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../utils/cloudinary');
 
+// The saved file's extension comes from its checked type, never from the sender's
+// file name: a file named page.html must not be saved (and served) as a web page.
+const extensionFor = file => (file.mimetype === 'image/png' ? '.png' : '.jpg');
+
 const fileFilter = (req, file, cb) => {
   const allowed = ['image/jpeg', 'image/png', 'image/jpg'];
   if (allowed.includes(file.mimetype)) cb(null, true);
-  else cb(new Error('Only JPG and PNG images are allowed'), false);
+  else cb(Object.assign(new Error('Only JPG and PNG photos are allowed.'), { status: 400, code: 'BAD_PHOTO' }), false);
 };
 
 let storage, avatarStorage, brandingStorage;
@@ -33,7 +37,7 @@ if (cloudinary.configured) {
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
       const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${unique}${path.extname(file.originalname)}`);
+      cb(null, `${unique}${extensionFor(file)}`);
     },
   });
 
@@ -53,8 +57,14 @@ if (cloudinary.configured) {
   });
 }
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
-const avatarUpload = multer({ storage: avatarStorage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
-const brandingUpload = multer({ storage: brandingStorage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+// Report photos: up to 5 of 5 MB each, and a few small text fields (the longest is
+// the description, at most 2,000 characters). Anything bigger is refused before
+// it fills memory or disk.
+const PHOTO_LIMITS = { fileSize: 5 * 1024 * 1024, files: 5, fields: 30, fieldSize: 16 * 1024, parts: 40 };
+const ONE_IMAGE = { fileSize: 5 * 1024 * 1024, files: 1, fields: 10, fieldSize: 4 * 1024 };
+
+const upload = multer({ storage, fileFilter, limits: PHOTO_LIMITS });
+const avatarUpload = multer({ storage: avatarStorage, fileFilter, limits: ONE_IMAGE });
+const brandingUpload = multer({ storage: brandingStorage, fileFilter, limits: ONE_IMAGE });
 
 module.exports = { upload, avatarUpload, brandingUpload };

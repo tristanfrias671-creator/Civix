@@ -31,9 +31,9 @@ export function StatusBadge({ status }) {
 }
 
 const TYPE_LIGHT = {
-  COMPLAINT:  { label: 'Complaint',  bg: '#fef2f2', color: '#dc2626', icon: '!' },
-  SUGGESTION: { label: 'Suggestion', bg: '#eff6ff', color: '#2563eb', icon: '✦' },
-  FEEDBACK:   { label: 'Feedback',   bg: '#f0fdf4', color: '#16a34a', icon: '★' },
+  COMPLAINT:  { label: 'Complaint',  bg: '#fef2f2', color: '#b91c1c', icon: '!' },
+  SUGGESTION: { label: 'Suggestion', bg: '#eff6ff', color: '#1d4ed8', icon: '✦' },
+  FEEDBACK:   { label: 'Feedback',   bg: '#f0fdf4', color: '#15803d', icon: '★' },
 };
 const TYPE_DARK = {
   COMPLAINT:  { label: 'Complaint',  bg: 'rgba(220,38,38,0.15)',  color: '#f87171', icon: '!' },
@@ -58,9 +58,9 @@ export function TypeBadge({ type }) {
 }
 
 const PRIORITY_LIGHT = {
-  URGENT:   { label: 'Urgent',   bg: '#fef2f2', color: '#dc2626' },
-  STANDARD: { label: 'Standard', bg: '#eff6ff', color: '#2563eb' },
-  LOW:      { label: 'Low',      bg: '#f3f4f6', color: '#6b7280' },
+  URGENT:   { label: 'Urgent',   bg: '#fef2f2', color: '#b91c1c' },
+  STANDARD: { label: 'Standard', bg: '#eff6ff', color: '#1d4ed8' },
+  LOW:      { label: 'Low',      bg: '#f3f4f6', color: '#4b5563' },
 };
 const PRIORITY_DARK = {
   URGENT:   { label: 'Urgent',   bg: 'rgba(220,38,38,0.15)', color: '#f87171' },
@@ -73,7 +73,7 @@ export function PriorityBadge({ priority }) {
   const map = dark ? PRIORITY_DARK : PRIORITY_LIGHT;
   const cfg = map[priority] || (dark
     ? { label: priority, bg: 'rgba(148,163,184,0.12)', color: '#94a3b8' }
-    : { label: priority, bg: '#f3f4f6', color: '#6b7280' });
+    : { label: priority, bg: '#f3f4f6', color: '#4b5563' });
 
   return (
     <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
@@ -86,7 +86,7 @@ export function PriorityBadge({ priority }) {
 const SENTIMENT_LIGHT = {
   POSITIVE: { label: 'Positive', bg: '#f0fdf4', color: '#15803d' },
   NEUTRAL:  { label: 'Neutral',  bg: '#f3f4f6', color: '#374151' },
-  NEGATIVE: { label: 'Negative', bg: '#fef2f2', color: '#dc2626' },
+  NEGATIVE: { label: 'Negative', bg: '#fef2f2', color: '#b91c1c' },
 };
 const SENTIMENT_DARK = {
   POSITIVE: { label: 'Positive', bg: 'rgba(22,163,74,0.15)',  color: '#4ade80' },

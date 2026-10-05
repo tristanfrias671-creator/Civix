@@ -26,7 +26,7 @@ export default function FeedbackRatingDisplay({ rating, reaction, feedbackTags, 
   }
 
   return (
-    <div className="rounded-xl border border-green-100 bg-gradient-to-r from-green-50/80 to-white p-4">
+    <div className="rounded-xl border border-green-100 dark:border-green-900/60 bg-gradient-to-r from-green-50/80 to-white dark:from-green-950/50 dark:to-slate-800 p-4">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Citizen feedback rating</p>
       <div className="flex flex-wrap items-center gap-4">
         {meta && (

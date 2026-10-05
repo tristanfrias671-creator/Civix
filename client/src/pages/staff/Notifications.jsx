@@ -1,23 +1,85 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import { Skel, useSkeletonGate } from '../../components/common/Skeleton';
 import { AlertSections } from '../../components/common/alerts';
+import { getReactionMeta } from '../../components/citizen/FeedbackRatingPanel';
+import { formatDateTime, plural, timeAgo } from '../../utils/format';
 import api from '../../utils/api';
-import useMobileTable from '../../utils/useMobileTable';
 
-const STATUS_OPTIONS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
-const STATUS_LABELS  = { PENDING: 'Pending', REVIEWING: 'Reviewing', IN_PROGRESS: 'In Progress', RESOLVED: 'Resolved' };
+const STATUS_LABEL = { PENDING: 'Pending', REVIEWING: 'Reviewing', IN_PROGRESS: 'In Progress', RESOLVED: 'Resolved' };
+const STATUS_COLOR = { PENDING: '#6b7280', REVIEWING: '#1d4ed8', IN_PROGRESS: '#b45309', RESOLVED: '#15803d' };
+const TYPE_WORD = { COMPLAINT: 'complaint', SUGGESTION: 'suggestion', FEEDBACK: 'feedback' };
 
-function timeAgo(dateStr) {
-  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
-  if (diff < 60)     return 'Just now';
-  if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// Which feed items this person has already seen, kept in this browser:
+// everything up to `seen` (a time), plus single items opened since then.
+const seenKey = userId => `civix_activity_seen_${userId}`;
+const readKey = userId => `civix_activity_read_${userId}`;
+function loadSeen(userId) {
+  try {
+    const stored = Number(localStorage.getItem(seenKey(userId)));
+    if (stored) return stored;
+  } catch { /* storage unavailable */ }
+  return Date.now() - 24 * 60 * 60 * 1000; // first visit: only the last day counts as new
+}
+function loadRead(userId) {
+  try { return new Set(JSON.parse(localStorage.getItem(readKey(userId)) || '[]')); } catch { return new Set(); }
+}
+function saveSeen(userId, time) {
+  try {
+    localStorage.setItem(seenKey(userId), String(time));
+    localStorage.removeItem(readKey(userId));
+  } catch { /* storage unavailable */ }
+}
+function saveRead(userId, ids) {
+  try { localStorage.setItem(readKey(userId), JSON.stringify([...ids].slice(-300))); } catch { /* storage unavailable */ }
+}
+
+// "Today", "Yesterday" or the date, on the Philippine calendar.
+const phDay = date => new Date(date).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+function dayLabel(day) {
+  const today = phDay(Date.now());
+  const yesterday = phDay(Date.now() - 24 * 60 * 60 * 1000);
+  if (day === today) return 'Today';
+  if (day === yesterday) return 'Yesterday';
+  return new Date(`${day}T12:00:00+08:00`).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+const KIND_STYLE = {
+  new:      { color: '#2563eb', path: 'M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4' },
+  movedIn:  { color: '#7c3aed', path: 'M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1' },
+  movedOut: { color: '#64748b', path: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1' },
+  status:   { color: '#16a34a', path: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+  overdue:  { color: '#dc2626', path: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+};
+
+function describe(e) {
+  const who = e.byMe ? 'You' : e.by;
+  const id = <strong className="font-mono text-[13px]">{e.trackingId}</strong>;
+  switch (e.kind) {
+    case 'new': {
+      const reaction = e.type === 'FEEDBACK' ? getReactionMeta(e.reaction) : null;
+      return (
+        <>
+          New {TYPE_WORD[e.type] || 'report'} {id} {e.noOffice ? 'arrived with no office. Send it to the right office' : 'was sent to your office'}
+          {e.priority === 'URGENT' && <> · <strong className="text-red-700">urgent</strong></>}
+          {reaction && <> · rated <strong>{reaction.emoji} {reaction.label}</strong></>}
+        </>
+      );
+    }
+    case 'movedIn':
+      return <><strong>{who}</strong> moved {id} to your office from {e.fromDepartment === 'UNASSIGNED' ? 'the reports with no office' : <strong>{e.fromDepartment}</strong>}</>;
+    case 'movedOut':
+      return <><strong>{who}</strong> moved {id} to <strong>{e.toDepartment}</strong></>;
+    case 'status':
+      return <><strong>{who}</strong> set {id} to <strong style={{ color: STATUS_COLOR[e.status] }} className="dark:!text-inherit">{STATUS_LABEL[e.status]}</strong></>;
+    case 'overdue':
+      return <>{id} passed its deadline and is now <strong className="text-red-700">overdue</strong></>;
+    default:
+      return id;
+  }
 }
 
 // Reports in the staff member's office that are urgent, overdue, due soon or new
@@ -25,16 +87,16 @@ function timeAgo(dateStr) {
 function AttentionPanel({ alerts, dark, onOpen }) {
   const count = alerts?.total || 0;
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-5">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-5">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-base font-bold text-gray-800">Needs your attention</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h2 className="text-base font-bold text-gray-900">Needs your attention</h2>
+          <p className="text-sm text-gray-600 mt-0.5">
             Urgent, overdue, due soon and new reports{alerts?.department ? ` in ${alerts.department}` : ''}.
           </p>
         </div>
         {count > 0 && (
-          <span className="px-2.5 py-0.5 bg-red-100 text-red-600 text-xs font-bold rounded-full flex-shrink-0">{count}</span>
+          <span className="px-2.5 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full flex-shrink-0">{count}</span>
         )}
       </div>
       {!alerts ? (
@@ -48,8 +110,8 @@ function AttentionPanel({ alerts, dark, onOpen }) {
         </div>
       ) : count === 0 ? (
         <div className="px-5 py-6 text-center">
-          <p className="text-sm font-medium text-gray-700">You're all caught up</p>
-          <p className="text-xs text-gray-400 mt-0.5">No urgent, overdue or new reports in your office.</p>
+          <p className="text-sm font-semibold text-gray-800">You're all caught up</p>
+          <p className="text-sm text-gray-600 mt-0.5">No urgent, overdue or new reports in your office.</p>
         </div>
       ) : (
         <div className="max-h-[420px] overflow-y-auto pb-2">
@@ -62,217 +124,174 @@ function AttentionPanel({ alerts, dark, onOpen }) {
 
 export default function StaffNotifications() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { dark } = useTheme();
   const { alerts } = useOutletContext() || {};
-  const [submissions, setSubmissions] = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter,   setTypeFilter]   = useState('');
-  const [search, setSearch]             = useState('');
+  const [events, setEvents] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [seenAt, setSeenAt] = useState(() => loadSeen(user?.id));
+  const [readIds, setReadIds] = useState(() => loadRead(user?.id));
   const gate = useSkeletonGate();
-  const tableRef = useMobileTable();
 
   // This page lists the same items as the pop-up alert, which would cover them.
   useEffect(() => { toast.dismiss('civix-alert'); }, [alerts]);
 
-  useEffect(() => {
-    gate(api.get('/staff/portal/submissions?limit=30'))
-      .then(r => { setSubmissions(r.data.submissions || []); setLoading(false); })
-      .catch(() => setLoading(false));
+  const load = useCallback((quiet = false) => {
+    const request = api.get('/staff/portal/activity');
+    return (quiet ? request : gate(request))
+      .then(res => { setEvents(res.data.events || []); setFailed(false); })
+      .catch(() => { if (!quiet) setFailed(true); });
   }, [gate]);
 
-  const pending    = submissions.filter(s => s.status === 'PENDING').length;
-  const reviewing  = submissions.filter(s => s.status === 'REVIEWING').length;
-  const inProgress = submissions.filter(s => s.status === 'IN_PROGRESS').length;
-  const resolved   = submissions.filter(s => s.status === 'RESOLVED').length;
-  const unread     = pending + reviewing;
+  useEffect(() => {
+    load();
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') load(true); }, 60000);
+    return () => clearInterval(timer);
+  }, [load]);
 
-  const filtered = submissions.filter(s => {
-    if (statusFilter && s.status !== statusFilter) return false;
-    if (typeFilter   && s.type   !== typeFilter)   return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!s.trackingId.toLowerCase().includes(q) &&
-          !s.user?.fullName?.toLowerCase().includes(q) &&
-          !s.description?.toLowerCase().includes(q)) return false;
+  const isUnread = e => !e.byMe && new Date(e.at).getTime() > seenAt && !readIds.has(e.id);
+  const unreadCount = (events || []).filter(isUnread).length;
+  const shown = (events || []).filter(e => !showUnreadOnly || isUnread(e));
+
+  function markAllRead() {
+    const now = Date.now();
+    saveSeen(user?.id, now);
+    setSeenAt(now);
+    setReadIds(new Set());
+  }
+
+  function openEvent(e) {
+    if (isUnread(e)) {
+      const next = new Set(readIds).add(e.id);
+      setReadIds(next);
+      saveRead(user?.id, next);
     }
-    return true;
-  });
+    navigate('/staff/submissions', { state: { openId: e.submissionId } });
+  }
+
+  // Newest first, under a heading for each day.
+  const days = [];
+  for (const e of shown) {
+    const day = phDay(e.at);
+    if (!days.length || days[days.length - 1].day !== day) days.push({ day, items: [] });
+    days[days.length - 1].items.push(e);
+  }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
 
       {/* ── Page Header ── */}
       <div className="mb-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-800">Notifications</h1>
-          {unread > 0 && (
-            <span className="px-2.5 py-0.5 bg-red-100 text-red-600 text-xs font-bold rounded-full">
-              {unread} unread
-            </span>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
+          {unreadCount > 0 && (
+            <span className="px-2.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">{unreadCount} unread</span>
           )}
         </div>
-        <p className="text-gray-500 text-sm mt-0.5">
-          Stay updated on your assigned cases and citizen submissions.
+        <p className="text-gray-600 text-sm mt-1">
+          What needs action now, and what happened in {alerts?.department || 'your office'} in the last 30 days.
         </p>
       </div>
 
       <AttentionPanel alerts={alerts} dark={dark}
         onOpen={id => navigate('/staff/submissions', { state: { openId: id } })} />
 
-      {/* ── Summary row ── */}
-      {loading ? <SkeletonStatCards count={4} className="mb-5" /> : (
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
-        {(dark ? [
-          { label: 'Pending',     count: pending,    color: '#fbbf24', bg: 'rgba(217,119,6,0.15)',  border: 'rgba(217,119,6,0.3)' },
-          { label: 'Reviewing',   count: reviewing,  color: '#60a5fa', bg: 'rgba(37,99,235,0.15)',  border: 'rgba(37,99,235,0.3)' },
-          { label: 'In Progress', count: inProgress, color: '#a78bfa', bg: 'rgba(124,58,237,0.15)', border: 'rgba(124,58,237,0.3)' },
-          { label: 'Resolved',    count: resolved,   color: '#4ade80', bg: 'rgba(22,163,74,0.15)',  border: 'rgba(22,163,74,0.3)' },
-        ] : [
-          { label: 'Pending',     count: pending,    color: '#d97706', bg: '#fef3c7', border: '#fde68a' },
-          { label: 'Reviewing',   count: reviewing,  color: '#2563eb', bg: '#dbeafe', border: '#bfdbfe' },
-          { label: 'In Progress', count: inProgress, color: '#7c3aed', bg: '#ede9fe', border: '#c4b5fd' },
-          { label: 'Resolved',    count: resolved,   color: '#16a34a', bg: '#dcfce7', border: '#bbf7d0' },
-        ]).map(c => (
-          <div key={c.label}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-3 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => setStatusFilter(prev => prev === c.label.toUpperCase().replace(' ', '_') ? '' : c.label.toUpperCase().replace(' ', '_'))}>
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold flex-shrink-0"
-              style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
-              {c.count}
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-700">{c.label}</p>
-              <p className="text-xs text-gray-400">cases</p>
-            </div>
+      {/* ── Activity feed ── */}
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" aria-labelledby="activity-title">
+        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="activity-title" className="text-base font-bold text-gray-900">Activity</h2>
+            <p className="text-sm text-gray-600 mt-0.5">New reports, moves between offices, status updates and missed deadlines.</p>
           </div>
-        ))}
-      </div>
-      )}
-
-      {/* ── List card ── */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-
-        {/* Filters */}
-        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-52">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by ID, citizen name, or description..."
-              className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-xl border border-gray-200 overflow-hidden" role="group" aria-label="Show">
+              {[[false, 'All'], [true, `Unread${unreadCount ? ` (${unreadCount})` : ''}`]].map(([value, label]) => (
+                <button key={label} type="button" onClick={() => setShowUnreadOnly(value)} aria-pressed={showUnreadOnly === value}
+                  className={`px-3 py-1.5 text-sm font-semibold transition-colors ${showUnreadOnly === value ? 'bg-blue-700 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={markAllRead} disabled={!unreadCount}
+              className="px-3 py-1.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              Mark all as read
+            </button>
           </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary">
-            <option value="">All Statuses</option>
-            {STATUS_OPTIONS.filter(Boolean).map(s => (
-              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-            ))}
-          </select>
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary">
-            <option value="">All Types</option>
-            <option value="COMPLAINT">Complaint</option>
-            <option value="SUGGESTION">Suggestion</option>
-            <option value="FEEDBACK">Feedback</option>
-          </select>
-          <span className="ml-auto text-xs text-gray-400 self-center">{filtered.length} notifications</span>
         </div>
 
-        {/* List */}
-        {loading ? (
-          <div className="overflow-x-auto"><SkeletonTable cols={8} rows={10} /></div>
-        ) : filtered.length === 0 ? (
-          <div className="py-14 text-center">
-            <svg className="w-10 h-10 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
+        {events === null && !failed ? (
+          <div className="px-5 py-4 space-y-4">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-3">
+                <Skel className="w-9 h-9 rounded-full" />
+                <div className="flex-1"><Skel className="h-3.5 w-72 max-w-full mb-2" /><Skel className="h-3 w-24" /></div>
+              </div>
+            ))}
+          </div>
+        ) : failed ? (
+          <div className="px-5 py-10 text-center">
+            <p className="text-sm font-semibold text-gray-800">Could not load the activity</p>
+            <button type="button" onClick={() => load()} className="mt-3 px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50">Try again</button>
+          </div>
+        ) : shown.length === 0 ? (
+          <div className="px-5 py-12 text-center">
+            <svg className="w-10 h-10 mx-auto mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
             </svg>
-            <p className="text-gray-400 font-medium">No notifications found</p>
-            <p className="text-xs text-gray-300 mt-1">
-              {search || statusFilter || typeFilter ? 'Try adjusting your filters.' : "You're all caught up!"}
+            <p className="font-semibold text-gray-800">{showUnreadOnly ? 'No unread notifications' : 'Nothing has happened yet'}</p>
+            <p className="text-sm text-gray-600 mt-1">
+              {showUnreadOnly ? "You've read everything." : 'New reports and updates in your office will show up here.'}
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table ref={tableRef} className="mobile-cards w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                <tr>
-                  {['', 'Tracking ID', 'Citizen', 'Type', 'Description', 'Status', 'Received', 'Action'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((s, i) => {
-                  const needsAction = s.status === 'PENDING' || s.status === 'REVIEWING';
+          days.map(({ day, items }) => (
+            <div key={day}>
+              <h3 className="px-5 pt-4 pb-2 text-xs font-bold uppercase tracking-wide text-gray-600">{dayLabel(day)}</h3>
+              <ul>
+                {items.map(e => {
+                  const style = KIND_STYLE[e.kind] || KIND_STYLE.new;
+                  const color = e.kind === 'status' ? STATUS_COLOR[e.status] || style.color : style.color;
+                  const unread = isUnread(e);
+                  const extra = e.kind === 'status' ? e.note : (e.kind === 'movedIn' || e.kind === 'movedOut') ? e.reason : null;
+                  // A report moved to another office can only be opened by that office now.
+                  const canOpen = e.kind !== 'movedOut';
+                  const Row = canOpen ? 'button' : 'div';
                   return (
-                    <tr key={s.id}
-                      className={`hover:bg-gray-50 transition-colors ${i % 2 !== 0 ? 'bg-gray-50 bg-opacity-40' : ''}`}>
-
-                      {/* Unread dot */}
-                      <td className="px-3 py-3 w-6">
-                        {needsAction && (
-                          <span className="block w-2 h-2 rounded-full bg-red-500 mx-auto" />
-                        )}
-                      </td>
-
-                      {/* Tracking ID */}
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">
-                        {s.trackingId}
-                      </td>
-
-                      {/* Citizen */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${s.user?.fullName ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
-                            {s.user?.fullName?.charAt(0)?.toUpperCase() || '?'}
-                          </div>
-                          <div>
-                            <p className={`font-medium text-xs whitespace-nowrap ${s.user?.fullName ? 'text-gray-800' : 'text-gray-400 italic'}`}>{s.user?.fullName || 'Anonymous'}</p>
-                            <p className="text-gray-400 text-xs">{s.user?.email || s.contactNumber || 'No contact provided'}</p>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Type */}
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <TypeBadge type={s.type} />
-                      </td>
-
-                      {/* Description */}
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-xs">
-                        <p className="truncate" style={{ maxWidth: 200 }}>{s.description || '—'}</p>
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <StatusBadge status={s.status} />
-                      </td>
-
-                      {/* Time */}
-                      <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
-                        {timeAgo(s.createdAt)}
-                      </td>
-
-                      {/* Action */}
-                      <td className="px-4 py-3">
-                        <button onClick={() => navigate('/staff/monitor')}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary bg-opacity-10 text-primary text-xs font-semibold rounded-lg hover:bg-opacity-20 transition-colors whitespace-nowrap">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    <li key={e.id}>
+                      <Row {...(canOpen ? { type: 'button', onClick: () => openEvent(e) } : {})}
+                        className={`w-full text-left px-5 py-3 flex gap-3 transition-colors ${canOpen ? 'hover:bg-gray-50' : ''} ${unread ? 'bg-blue-50' : ''}`}>
+                        <span className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{ background: `${color}1f`, color: dark ? '#e2e8f0' : color }}>
+                          <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d={style.path} />
                           </svg>
-                          Handle
-                        </button>
-                      </td>
-                    </tr>
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm text-gray-800 leading-snug">{describe(e)}</span>
+                          {extra && (
+                            <span className="block text-sm text-gray-600 mt-1 line-clamp-2">
+                              {e.kind === 'status' ? `“${extra}”` : `Reason: ${extra}`}
+                            </span>
+                          )}
+                          {!canOpen && <span className="block text-xs text-gray-600 mt-1">Only {e.toDepartment} can open it now.</span>}
+                          <span className="block text-xs text-gray-600 mt-1" title={formatDateTime(e.at)}>{timeAgo(e.at)}</span>
+                        </span>
+                        {unread && <span className="w-2.5 h-2.5 rounded-full bg-blue-600 flex-shrink-0 mt-2" aria-label="Unread" />}
+                      </Row>
+                    </li>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </ul>
+            </div>
+          ))
         )}
-      </div>
+        {events && events.length > 0 && (
+          <p className="px-5 py-3 border-t border-gray-100 text-xs text-gray-600">
+            Showing {plural(events.length, 'item')} from the last 30 days.
+          </p>
+        )}
+      </section>
     </div>
   );
 }

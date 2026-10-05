@@ -104,7 +104,7 @@ export default function CitizenPortalLayout({ children }) {
   ];
 
   return (
-    <div className="min-h-screen" style={{ background: dark ? '#0f172a' : '#eef2f9' }}>
+    <div className="citizen-portal min-h-screen" style={{ background: dark ? '#0f172a' : '#eef2f9' }}>
       {/* Header banner */}
       <div className="relative overflow-hidden" style={{ height: 130 }}>
         <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
@@ -170,8 +170,8 @@ export default function CitizenPortalLayout({ children }) {
           </div>
         </aside>
 
-        {/* Page content */}
-        <main className="flex-1 px-4 sm:px-8 py-8">
+        {/* Page content (min-w-0: wide content can't stretch the page past the screen) */}
+        <main className="flex-1 min-w-0 px-4 sm:px-8 py-8">
           {children}
         </main>
       </div>

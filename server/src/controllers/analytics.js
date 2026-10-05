@@ -1,5 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
 
 // Year and month (1-12) on the Philippine calendar. The server clock may be UTC,
 // where a report filed early on the 1st (PH time) still falls in the month before.
@@ -16,7 +15,8 @@ async function getAlerts(req, res) {
   try {
     const now = new Date();
     const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-    const open = { status: { not: 'RESOLVED' } };
+    // Feedback has no workflow (no office acts on it), so it never needs attention here.
+    const open = { status: { not: 'RESOLVED' }, type: { not: 'FEEDBACK' } };
     const select = {
       id: true, trackingId: true, type: true, department: true, status: true,
       priority: true, dueAt: true, createdAt: true, updatedAt: true,
@@ -44,18 +44,23 @@ async function getAlerts(req, res) {
 
 async function getSummary(req, res) {
   try {
-    const [total, pending, reviewing, inProgress, resolved, overdue] = await Promise.all([
+    // Feedback rates the municipality's service as a whole and has no workflow, so
+    // the case figures (pending, resolved, overdue, response rate, resolution time)
+    // count complaints and suggestions only. The total counts every submission.
+    const cases = { type: { not: 'FEEDBACK' } };
+    const [total, caseTotal, pending, reviewing, inProgress, resolved, overdue] = await Promise.all([
       prisma.submission.count(),
-      prisma.submission.count({ where: { status: 'PENDING' } }),
-      prisma.submission.count({ where: { status: 'REVIEWING' } }),
-      prisma.submission.count({ where: { status: 'IN_PROGRESS' } }),
-      prisma.submission.count({ where: { status: 'RESOLVED' } }),
+      prisma.submission.count({ where: cases }),
+      prisma.submission.count({ where: { ...cases, status: 'PENDING' } }),
+      prisma.submission.count({ where: { ...cases, status: 'REVIEWING' } }),
+      prisma.submission.count({ where: { ...cases, status: 'IN_PROGRESS' } }),
+      prisma.submission.count({ where: { ...cases, status: 'RESOLVED' } }),
       // Past their resolve-by date and not yet resolved.
-      prisma.submission.count({ where: { status: { not: 'RESOLVED' }, dueAt: { lt: new Date() } } }),
+      prisma.submission.count({ where: { ...cases, status: { not: 'RESOLVED' }, dueAt: { lt: new Date() } } }),
     ]);
 
     const resolvedSubmissions = await prisma.submission.findMany({
-      where: { status: 'RESOLVED' },
+      where: { ...cases, status: 'RESOLVED' },
       select: { createdAt: true, updatedAt: true },
     });
 
@@ -67,7 +72,7 @@ async function getSummary(req, res) {
       avgResolutionTime = parseFloat((totalMs / resolvedSubmissions.length / (1000 * 60 * 60 * 24)).toFixed(1));
     }
 
-    const responseRate = total > 0 ? parseFloat(((total - pending) / total * 100).toFixed(1)) : 0;
+    const responseRate = caseTotal > 0 ? parseFloat(((caseTotal - pending) / caseTotal * 100).toFixed(1)) : 0;
 
     const citizens = await prisma.user.count({ where: { role: 'CITIZEN' } });
 

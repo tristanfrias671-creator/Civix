@@ -1,9 +1,8 @@
 const crypto = require('crypto');
-const { PrismaClient } = require('@prisma/client');
 const { configured: cloudinaryConfigured } = require('../utils/cloudinary');
 const { removeBrandingFile } = require('../utils/branding');
 
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
 
 // Upload kind in the URL -> SystemSettings column.
 const BRANDING_FIELDS = { seal: 'sealUrl', hero: 'heroImageUrl' };
@@ -60,6 +59,19 @@ async function getDepartmentList() {
   return parseJsonArray(settings.departmentsJson, DEFAULT_DEPARTMENTS);
 }
 
+// The office that receives reports with no office yet (the citizen didn't pick one
+// and the classifier couldn't tell) and forwards them to the right office. Chosen
+// in Settings; otherwise the Mayor's Office – CRMO, or the first office on the list.
+function receivingOfficeOf(row) {
+  const list = parseJsonArray(row.departmentsJson, DEFAULT_DEPARTMENTS);
+  if (row.unassignedOffice && list.includes(row.unassignedOffice)) return row.unassignedOffice;
+  return list.find(d => /CRMO/i.test(d)) || list[0] || null;
+}
+
+async function getReceivingOffice() {
+  return receivingOfficeOf(await ensureSettings());
+}
+
 // True only for the current private admin sign-in address.
 async function isAdminLoginPath(value) {
   if (typeof value !== 'string' || !value) return false;
@@ -86,12 +98,12 @@ function formatSecurity(row) {
   };
 }
 
-// Working days to resolve each report type.
+// Working days to resolve complaints and suggestions. Feedback has no deadline
+// (it rates the whole municipality's service; no office acts on it).
 function formatDeadlines(row) {
   return {
     COMPLAINT: row.deadlineComplaintDays,
     SUGGESTION: row.deadlineSuggestionDays,
-    FEEDBACK: row.deadlineFeedbackDays,
   };
 }
 
@@ -103,6 +115,7 @@ function formatSettings(row) {
     contactPhone: row.contactPhone,
     officeAddress: row.officeAddress,
     departments: parseJsonArray(row.departmentsJson, DEFAULT_DEPARTMENTS),
+    unassignedOffice: receivingOfficeOf(row),
     security: formatSecurity(row),
     deadlines: formatDeadlines(row),
     ...formatBranding(row),
@@ -166,13 +179,19 @@ async function updateSystemProfile(req, res) {
 
 async function updateLists(req, res) {
   try {
-    const { departments } = req.body;
+    const { departments, unassignedOffice } = req.body;
     const data = {};
     if (departments !== undefined) {
       if (!Array.isArray(departments)) return res.status(400).json({ error: 'departments must be an array' });
       data.departmentsJson = JSON.stringify(departments.map(d => String(d).trim()).filter(Boolean));
     }
     const settings = await ensureSettings();
+    if (unassignedOffice !== undefined) {
+      const office = String(unassignedOffice || '').trim();
+      const list = data.departmentsJson ? JSON.parse(data.departmentsJson) : parseJsonArray(settings.departmentsJson, DEFAULT_DEPARTMENTS);
+      if (office && !list.includes(office)) return res.status(400).json({ error: 'Please choose an office from the list' });
+      data.unassignedOffice = office || null;
+    }
     const updated = await prisma.systemSettings.update({ where: { id: settings.id }, data });
     res.json(formatSettings(updated));
   } catch (err) {
@@ -272,11 +291,11 @@ async function resetBranding(req, res) {
   }
 }
 
-// PATCH /api/settings/deadlines { COMPLAINT, SUGGESTION, FEEDBACK } — working days.
+// PATCH /api/settings/deadlines { COMPLAINT, SUGGESTION } — working days.
 // Applies to reports submitted from now on; existing deadlines stay as promised.
 async function updateDeadlines(req, res) {
   try {
-    const fields = { COMPLAINT: 'deadlineComplaintDays', SUGGESTION: 'deadlineSuggestionDays', FEEDBACK: 'deadlineFeedbackDays' };
+    const fields = { COMPLAINT: 'deadlineComplaintDays', SUGGESTION: 'deadlineSuggestionDays' };
     const data = {};
     for (const [type, column] of Object.entries(fields)) {
       if (req.body[type] === undefined) continue;
@@ -321,7 +340,7 @@ async function rotateAdminLink(req, res) {
 }
 
 module.exports = {
-  ensureSettings, getDepartmentList, isAdminLoginPath, BRANDING_FIELDS,
+  ensureSettings, getDepartmentList, getReceivingOffice, isAdminLoginPath, BRANDING_FIELDS,
   getAdminLink, rotateAdminLink, updateDeadlines,
   getPublicProfile, getSettings, updateSystemProfile, updateLists,
   updateSecurity, getLockedAccounts, unlockAccount, getSessionPolicy,

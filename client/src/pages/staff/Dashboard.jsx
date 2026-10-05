@@ -1,66 +1,128 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
-import { Skel, SkeletonStatCards, SkeletonQuickLinks, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import DeadlineBadge, { deadlineInfo } from '../../components/common/DeadlineBadge';
+import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
+import StatCard from '../../components/common/StatCard';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { BrandImg } from '../../context/BrandingContext';
+import { formatDate, plural, timeAgo } from '../../utils/format';
 import api from '../../utils/api';
-import useMobileTable from '../../utils/useMobileTable';
 
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+const LINK_LIGHT = '#2563eb';
+const LINK_DARK = '#60a5fa';
+
+// The To-do list: overdue first, then urgent, due soon and new reports.
+const TODO_GROUPS = [
+  { key: 'overdue',    tone: 'bad' },
+  { key: 'urgent',     tone: 'bad' },
+  { key: 'dueSoon',    tone: 'warn' },
+  { key: 'newReports', tone: 'new' },
+];
+const TODO_TONE_LIGHT = {
+  bad:  { chipBg: '#fef2f2', chip: '#b91c1c', dot: '#dc2626' },
+  warn: { chipBg: '#fffbeb', chip: '#b45309', dot: '#f59e0b' },
+  new:  { chipBg: '#eff6ff', chip: '#1d4ed8', dot: '#2563eb' },
+};
+const TODO_TONE_DARK = {
+  bad:  { chipBg: 'rgba(220,38,38,0.18)', chip: '#fca5a5', dot: '#f87171' },
+  warn: { chipBg: 'rgba(217,119,6,0.18)', chip: '#fcd34d', dot: '#fbbf24' },
+  new:  { chipBg: 'rgba(37,99,235,0.18)', chip: '#93c5fd', dot: '#60a5fa' },
+};
+const TODO_SHOWN = 6;
+
+function todoChip(item, key) {
+  if (key === 'urgent') {
+    const d = deadlineInfo(item);
+    return d && d.tone === 'bad' ? `Urgent · ${d.label}` : 'Urgent';
+  }
+  if (key === 'newReports') return `New · ${timeAgo(item.createdAt)}`;
+  return deadlineInfo(item)?.label || '';
 }
 
-const QUICK_LINKS = [
-  { to: '/staff/submissions', label: 'Assigned Complaints', desc: 'Cases in your department', icon: 'complaint', color: '#dc2626', bg: '#fef2f2', darkBg: 'rgba(220,38,38,0.12)' },
-  { to: '/staff/monitor',     label: 'Service Requests',    desc: 'Monitor all departments', icon: 'search',    color: '#2563eb', bg: '#eff6ff', darkBg: 'rgba(37,99,235,0.12)' },
-  { to: '/staff/notifications', label: 'Notifications',     desc: 'Recent activity',         icon: 'bell',      color: '#7c3aed', bg: '#f5f3ff', darkBg: 'rgba(124,58,237,0.12)' },
-];
+function TodoList({ alerts, onOpen, dark }) {
+  const tones = dark ? TODO_TONE_DARK : TODO_TONE_LIGHT;
+  const items = alerts
+    ? TODO_GROUPS.flatMap(g => (alerts[g.key] || []).map(item => ({ item, key: g.key, tone: tones[g.tone] })))
+    : null;
+  const muted = dark ? '#94a3b8' : '#4b5563';
+  const strong = dark ? '#f1f5f9' : '#111827';
+  const line = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6';
 
-const CARD_STYLES_LIGHT = [
-  { bg:'#f5f3ff', iconBg:'#ede9fe', iconColor:'#7c3aed' },
-  { bg:'#fff7ed', iconBg:'#ffedd5', iconColor:'#ea580c' },
-  { bg:'#eff6ff', iconBg:'#dbeafe', iconColor:'#2563eb' },
-  { bg:'#f0fdf4', iconBg:'#dcfce7', iconColor:'#16a34a' },
-  { bg:'#faf5ff', iconBg:'#f3e8ff', iconColor:'#9333ea' },
-  { bg:'#fefce8', iconBg:'#fef9c3', iconColor:'#ca8a04' },
-  { bg:'#f0f9ff', iconBg:'#e0f2fe', iconColor:'#0284c7' },
-  { bg:'#fef2f2', iconBg:'#fee2e2', iconColor:'#dc2626' },
-];
-const CARD_STYLES_DARK = [
-  { bg:'rgba(124,58,237,0.12)',  iconBg:'rgba(124,58,237,0.2)',  iconColor:'#a78bfa' },
-  { bg:'rgba(234,88,12,0.12)',   iconBg:'rgba(234,88,12,0.2)',   iconColor:'#fb923c' },
-  { bg:'rgba(37,99,235,0.12)',   iconBg:'rgba(37,99,235,0.2)',   iconColor:'#60a5fa' },
-  { bg:'rgba(22,163,74,0.12)',   iconBg:'rgba(22,163,74,0.2)',   iconColor:'#4ade80' },
-  { bg:'rgba(147,51,234,0.12)',  iconBg:'rgba(147,51,234,0.2)',  iconColor:'#c084fc' },
-  { bg:'rgba(202,138,4,0.12)',   iconBg:'rgba(202,138,4,0.2)',   iconColor:'#facc15' },
-  { bg:'rgba(2,132,199,0.12)',   iconBg:'rgba(2,132,199,0.2)',   iconColor:'#38bdf8' },
-  { bg:'rgba(220,38,38,0.12)',   iconBg:'rgba(220,38,38,0.2)',   iconColor:'#f87171' },
-];
-
-function KPICard({ label, value, sub, icon, styleIdx = 0 }) {
-  const { dark } = useTheme();
-  const styles = dark ? CARD_STYLES_DARK : CARD_STYLES_LIGHT;
-  const s = styles[styleIdx % styles.length];
   return (
-    <div className="rounded-2xl p-5 border hover:shadow-md transition-all hover:-translate-y-0.5"
-      style={{ background: s.bg, borderColor: dark ? 'rgba(255,255,255,0.06)' : 'transparent', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
-      <div className="flex justify-between items-start">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{label}</p>
-          <p className="text-3xl font-extrabold mt-1.5" style={{ color: dark ? '#f1f5f9' : '#111827' }}>{value}</p>
-          {sub && <p className="text-xs mt-0.5" style={{ color: dark ? '#64748b' : '#9ca3af' }}>{sub}</p>}
+    <section className="rounded-2xl border mb-6" aria-labelledby="todo-title"
+      style={{ background: dark ? '#1e293b' : 'white', borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+      <div className="flex items-start justify-between gap-3 px-5 sm:px-6 py-4 border-b" style={{ borderColor: line }}>
+        <div className="min-w-0">
+          <h2 id="todo-title" className="font-bold text-lg" style={{ color: strong }}>To do</h2>
+          <p className="text-sm mt-0.5" style={{ color: muted }}>Reports that need action now, most serious first.</p>
         </div>
-        <div className="p-2.5 rounded-xl" style={{ background: s.iconBg, color: s.iconColor }}>
-          <Icon name={icon} className="w-6 h-6" />
-        </div>
+        {items && items.length > TODO_SHOWN && (
+          <Link to="/staff/notifications" className="text-sm font-bold whitespace-nowrap flex items-center gap-1 mt-1" style={{ color: dark ? LINK_DARK : LINK_LIGHT }}>
+            See all {items.length}
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </Link>
+        )}
       </div>
-    </div>
+
+      {!items ? (
+        <div className="px-6 py-4 space-y-4">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="flex items-center gap-3">
+              <Skel className="w-2.5 h-2.5 rounded-full" />
+              <div className="flex-1"><Skel className="h-3.5 w-48 mb-2" /><Skel className="h-3 w-72 max-w-full" /></div>
+              <Skel className="h-8 w-16 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="px-6 py-8 flex flex-col items-center text-center">
+          <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: dark ? 'rgba(22,163,74,0.18)' : '#dcfce7', color: dark ? '#4ade80' : '#15803d' }}>
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <p className="font-semibold" style={{ color: strong }}>You're all caught up</p>
+          <p className="text-sm mt-0.5" style={{ color: muted }}>No overdue, urgent or new reports{alerts.department ? ` in ${alerts.department}` : ''}.</p>
+        </div>
+      ) : (
+        <ul>
+          {items.slice(0, TODO_SHOWN).map(({ item, key, tone }, i) => (
+            <li key={`${key}:${item.id}`} style={{ borderTop: i ? `1px solid ${line}` : 'none' }}>
+              <button type="button" onClick={() => onOpen(item.id)}
+                className="w-full text-left px-5 sm:px-6 py-3.5 flex items-center gap-3 transition-colors"
+                onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.03)' : '#f9fafb'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: tone.dot }} aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-[13px] font-semibold" style={{ color: strong }}>{item.trackingId}</span>
+                    <TypeBadge type={item.type} />
+                    {item.department === 'UNASSIGNED' && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: dark ? 'rgba(217,119,6,0.18)' : '#fffbeb', color: dark ? '#fcd34d' : '#92400e' }}>
+                        No office yet
+                      </span>
+                    )}
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: tone.chipBg, color: tone.chip }}>
+                      {todoChip(item, key)}
+                    </span>
+                  </span>
+                  {item.description && (
+                    <span className="block text-sm mt-1 truncate" style={{ color: muted }}>{item.description}</span>
+                  )}
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0"
+                  style={{ background: dark ? 'rgba(37,99,235,0.18)' : '#eff6ff', color: dark ? '#93c5fd' : '#1d4ed8' }}>
+                  Open
+                </span>
+                <svg className="sm:hidden w-4 h-4 flex-shrink-0" style={{ color: muted }} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -68,11 +130,11 @@ export default function StaffDashboard() {
   const { user } = useAuth();
   const { dark } = useTheme();
   const navigate = useNavigate();
+  const { alerts } = useOutletContext() || {};
   const [stats,   setStats]   = useState(null);
   const [recent,  setRecent]  = useState([]);
   const [loading, setLoading] = useState(true);
   const gate = useSkeletonGate();
-  const tableRef = useMobileTable();
 
   useEffect(() => {
     gate(Promise.all([
@@ -85,18 +147,16 @@ export default function StaffDashboard() {
     }).catch(() => setLoading(false));
   }, [gate]);
 
+  const openReport = id => navigate('/staff/submissions', { state: { openId: id } });
+  const muted = dark ? '#94a3b8' : '#4b5563';
+  const strong = dark ? '#f1f5f9' : '#111827';
+  const line = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6';
+
   if (loading) return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-7 flex items-center gap-3.5">
-        <Skel className="w-14 h-14 rounded-xl flex-shrink-0" />
-        <div>
-          <Skel className="h-3 w-40 mb-2" />
-          <Skel className="h-6 w-56" />
-        </div>
-      </div>
-      <SkeletonStatCards count={4} className="mb-4" />
-      <SkeletonStatCards count={4} className="mb-7" />
-      <SkeletonQuickLinks count={QUICK_LINKS.length} className="grid-cols-1 sm:grid-cols-3 mb-7" />
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+      <div className="mb-7"><Skel className="h-7 w-64 mb-2" /><Skel className="h-4 w-48" /></div>
+      <Skel className="h-56 w-full rounded-2xl mb-6" />
+      <SkeletonStatCards count={4} className="mb-6" />
       <div className="rounded-2xl border bg-white border-gray-100" style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
         <div className="px-6 py-4 border-b border-gray-100"><Skel className="h-4 w-48" /></div>
         <SkeletonTable cols={6} rows={8} />
@@ -104,164 +164,109 @@ export default function StaffDashboard() {
     </div>
   );
 
-  const total       = Number(stats?.total      ?? 0);
-  const pending     = Number(stats?.pending    ?? 0);
-  const reviewing   = Number(stats?.reviewing  ?? 0);
-  const inProgress  = Number(stats?.inProgress ?? 0);
-  const resolved    = Number(stats?.resolved   ?? 0);
-  const todayCount  = Number(stats?.todayCount ?? 0);
-  const overdue     = Number(stats?.overdue    ?? 0);
-  const resolveRate = total > 0 ? ((resolved / total) * 100).toFixed(1) : '0.0';
+  const today = Number(stats?.todayCount ?? 0);
+  const month = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'long' });
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
 
-      {/* Header */}
+      {/* Header, the same as the admin dashboard's */}
       <div className="mb-7 flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3.5">
-          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-14 h-14 object-contain flex-shrink-0" />
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: dark ? '#64748b' : '#9ca3af' }}>Municipality of Cantilan</p>
-            <h1 className="text-2xl font-extrabold leading-tight" style={{ color: dark ? '#f1f5f9' : '#111827' }}>
-              {greeting()}{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}
-            </h1>
-            <p className="text-sm mt-0.5 flex items-center gap-2" style={{ color: dark ? '#64748b' : '#9ca3af' }}>
-              {new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
-              {stats?.department && (
-                <span className="px-2 py-0.5 text-xs font-semibold rounded-full" style={{ background: dark ? 'rgba(37,99,235,0.18)' : '#eff6ff', color: dark ? '#93c5fd' : '#2563eb' }}>
-                  {stats.department}
-                </span>
-              )}
-            </p>
-          </div>
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight leading-tight" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
+            Welcome back{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}
+          </h1>
+          <p className="text-sm sm:text-[15px] mt-1 flex items-center gap-2 flex-wrap" style={{ color: muted }}>
+            {new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {stats?.department && (
+              <span className="px-2 py-0.5 text-xs font-semibold rounded-full" style={{ background: dark ? 'rgba(37,99,235,0.18)' : '#dbeafe', color: dark ? '#93c5fd' : '#1d4ed8' }}>
+                {stats.department}
+              </span>
+            )}
+          </p>
         </div>
         <Link to="/staff/submissions"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
-          style={{ background:'linear-gradient(135deg,#2563eb,#3b82f6)', boxShadow:'0 4px 14px rgba(37,99,235,0.3)' }}>
-          View All Cases
+          style={{ background: 'linear-gradient(135deg,#1d4ed8,#2563eb)', boxShadow: '0 4px 14px rgba(37,99,235,0.3)' }}>
+          View All Reports
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
           </svg>
         </Link>
       </div>
 
-      {/* KPI row 1 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <KPICard label="Assigned Complaints" value={total}      styleIdx={0} icon="submissions" sub={stats?.department} />
-        <KPICard label="Pending"             value={pending}    styleIdx={1} icon="clock"       sub="Needs attention" />
-        <KPICard label="In Progress"         value={inProgress} styleIdx={2} icon="activity" />
-        <KPICard label="Resolved"            value={resolved}   styleIdx={3} icon="check" />
-      </div>
+      <TodoList alerts={alerts} onOpen={openReport} dark={dark} />
 
-      {/* KPI row 2 */}
+      {/* The four numbers that matter day to day */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
-        <KPICard label="In Review"    value={reviewing}       styleIdx={4} icon="search" />
-        <KPICard label="Overdue"      value={overdue}         styleIdx={7} icon="complaint" sub="Past their deadline" />
-        <KPICard label="Resolve Rate" value={`${resolveRate}%`} styleIdx={5} icon="analytics" />
-        <KPICard label="New Today"    value={todayCount}      styleIdx={6} icon="clock" />
+        <StatCard stack label="Open" value={stats?.open ?? 0} tone="blue" icon="inbox" to="/staff/submissions"
+          sub={today ? `${today} new today` : 'None new today'} />
+        <StatCard stack label="Overdue" value={stats?.overdue ?? 0} tone="red" icon="complaint" to="/staff/submissions"
+          sub="Past their deadline" />
+        <StatCard stack label="Due in 7 Days" value={stats?.dueThisWeek ?? 0} tone="orange" icon="clock" to="/staff/submissions"
+          sub="Not overdue yet" />
+        <StatCard stack label="Resolved" value={stats?.resolvedThisMonth ?? 0} tone="green" icon="check" to="/staff/submissions"
+          sub={`This month (${month})`} />
       </div>
 
-      {/* Quick links */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-7">
-        {QUICK_LINKS.map(q => (
-          <Link key={q.to} to={q.to}
-            className="flex items-center gap-3 rounded-2xl p-4 border transition-all hover:-translate-y-0.5 hover:shadow-md"
-            style={{ background: dark ? q.darkBg : q.bg, borderColor: dark ? 'rgba(255,255,255,0.06)' : 'transparent' }}>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white" style={{ background: q.color }}>
-              <Icon name={q.icon} className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold truncate" style={{ color: dark ? '#f1f5f9' : '#111827' }}>{q.label}</p>
-              <p className="text-xs" style={{ color: dark ? '#64748b' : '#9ca3af' }}>{q.desc}</p>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* Recent submissions table */}
-      <div className="rounded-2xl border" style={{ background: dark ? '#1e293b' : 'white', borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
-        <div className="flex justify-between items-center px-6 py-4 border-b" style={{ borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6' }}>
-          <div>
-            <h2 className="font-bold" style={{ color: dark ? '#f1f5f9' : '#111827' }}>Complaint Management</h2>
-            <p className="text-xs mt-0.5" style={{ color: dark ? '#64748b' : '#9ca3af' }}>Recent cases assigned to your department</p>
+      {/* Newest reports */}
+      <div className="rounded-2xl border" style={{ background: dark ? '#1e293b' : 'white', borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+        <div className="flex justify-between items-center gap-3 px-5 sm:px-6 py-4 border-b" style={{ borderColor: line }}>
+          <div className="min-w-0">
+            <h2 className="font-bold text-lg" style={{ color: strong }}>Newest reports</h2>
+            <p className="text-sm mt-0.5" style={{ color: muted }}>The latest reports sent to your office.</p>
           </div>
-          <Link to="/staff/submissions" className="text-sm font-bold flex items-center gap-1 transition-colors" style={{ color: '#2563eb' }}>
-            View All
+          <Link to="/staff/submissions" className="text-sm font-bold flex items-center gap-1 whitespace-nowrap" style={{ color: dark ? LINK_DARK : LINK_LIGHT }}>
+            View all
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
             </svg>
           </Link>
         </div>
         {recent.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="flex flex-col items-center justify-center py-14 text-center px-6">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ background: dark ? 'rgba(255,255,255,0.05)' : '#f3f4f6' }}>
-              <Icon name="submissions" className="w-7 h-7" style={{ color: dark ? '#475569' : '#d1d5db' }} />
+              <span style={{ color: muted }}><Icon name="inbox" className="w-7 h-7" /></span>
             </div>
-            <p className="text-sm font-medium" style={{ color: dark ? '#64748b' : '#9ca3af' }}>No cases assigned yet.</p>
-            <p className="text-xs mt-1" style={{ color: dark ? '#475569' : '#d1d5db' }}>Cases routed to your department will appear here.</p>
+            <p className="font-semibold" style={{ color: strong }}>No reports yet</p>
+            <p className="text-sm mt-1" style={{ color: muted }}>Reports sent to your office will appear here.</p>
           </div>
         ) : (
-        <div className="overflow-x-auto">
-          <table ref={tableRef} className="mobile-cards w-full text-sm">
-            <thead>
-              <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}` }}>
-                {['Tracking ID','Citizen','Type','Status','Date','Actions'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide" style={{ color: dark ? '#64748b' : '#6b7280' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map((s, i) => {
-                const isAnon = !s.user?.fullName;
-                return (
-                <tr key={s.id}
-                  className="transition-colors"
-                  style={{ borderBottom: i < recent.length - 1 ? `1px solid ${dark ? 'rgba(255,255,255,0.04)' : '#f9fafb'}` : 'none' }}
-                  onMouseEnter={e => e.currentTarget.style.background = dark ? 'rgba(37,99,235,0.08)' : 'rgba(37,99,235,0.04)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <td className="px-4 py-3.5 font-mono text-xs" style={{ color: dark ? '#64748b' : '#9ca3af' }}>{s.trackingId}</td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                        style={isAnon
-                          ? { background: dark ? '#334155' : '#f3f4f6', color: dark ? '#64748b' : '#9ca3af' }
-                          : { background: dark ? 'rgba(37,99,235,0.2)' : '#dbeafe', color: dark ? '#60a5fa' : '#2563eb' }}>
-                        {isAnon ? <Icon name="citizens" className="w-3.5 h-3.5" /> : s.user.fullName.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-xs truncate" style={{ color: isAnon ? (dark ? '#64748b' : '#9ca3af') : (dark ? '#e2e8f0' : '#1f2937'), fontStyle: isAnon ? 'italic' : 'normal' }}>
-                          {isAnon ? 'Anonymous' : s.user.fullName}
-                        </p>
-                        <p className="text-xs truncate" style={{ color: dark ? '#64748b' : '#9ca3af' }}>
-                          {isAnon ? (s.contactNumber || 'No contact provided') : s.user.email}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
-                  <td className="px-4 py-3.5"><StatusBadge status={s.status} /></td>
-                  <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: dark ? '#64748b' : '#9ca3af' }}>
-                    {new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <button onClick={() => navigate('/staff/monitor')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap"
-                      style={{ background: dark ? 'rgba(37,99,235,0.15)' : 'rgba(37,99,235,0.08)', color: '#2563eb' }}>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                      </svg>
-                      View
-                    </button>
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+          <ul>
+            {recent.map((s, i) => {
+              const isAnon = !s.user?.fullName;
+              return (
+                <li key={s.id} style={{ borderTop: i ? `1px solid ${line}` : 'none' }}>
+                  <button type="button" onClick={() => openReport(s.id)}
+                    className="w-full text-left px-5 sm:px-6 py-3.5 grid gap-x-4 gap-y-1.5 items-center sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] transition-colors"
+                    onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(37,99,235,0.08)' : 'rgba(37,99,235,0.04)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-[13px] font-semibold" style={{ color: strong }}>{s.trackingId}</span>
+                        <TypeBadge type={s.type} />
+                      </span>
+                      <span className="block text-sm mt-1 truncate" style={{ color: muted }}>
+                        {isAnon ? 'Anonymous' : s.user.fullName} · {s.description}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2 flex-wrap sm:contents">
+                      <StatusBadge status={s.status} />
+                      <DeadlineBadge submission={s} />
+                      <span className="text-xs whitespace-nowrap" style={{ color: muted }}>{formatDate(s.createdAt)}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
+      {stats && (
+        <p className="text-xs mt-4 text-center" style={{ color: muted }}>
+          {plural(stats.total, 'report')} in {stats.department} so far · {plural(stats.resolved, 'resolved report')}
+        </p>
+      )}
     </div>
   );
 }

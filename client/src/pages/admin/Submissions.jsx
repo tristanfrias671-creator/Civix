@@ -9,6 +9,23 @@ import useMobileTable from '../../utils/useMobileTable';
 
 const STATUS_OPTS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 const STATUS_LABELS = { '':'All Statuses', PENDING:'Pending', REVIEWING:'Reviewing', IN_PROGRESS:'In Progress', RESOLVED:'Resolved' };
+const REACTION_LABELS = { EXCELLENT: 'Excellent', GOOD: 'Good', OKAY: 'Okay', POOR: 'Poor', TERRIBLE: 'Terrible' };
+
+// Feedback rates the municipality's service as a whole: it has no status steps,
+// deadline or office, so its list shows the rating instead.
+function RatingCell({ rating, reaction, dark }) {
+  const n = Math.max(0, Math.min(5, Number(rating) || 0));
+  return (
+    <span className="inline-flex flex-col">
+      <span className="whitespace-nowrap" aria-label={`${n} out of 5`}>
+        <span aria-hidden="true" style={{ color: '#f59e0b' }}>{'★'.repeat(n)}</span>
+        <span aria-hidden="true" style={{ color: dark ? '#475569' : '#cbd5e1' }}>{'★'.repeat(5 - n)}</span>
+        <span className="ml-1.5 text-xs font-semibold" style={{ color: dark ? '#e2e8f0' : '#374151' }}>{n}/5</span>
+      </span>
+      {reaction && <span className="text-xs" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{REACTION_LABELS[reaction] || reaction}</span>}
+    </span>
+  );
+}
 
 export default function AdminSubmissions({ type: typeFilter }) {
   const { dark } = useTheme();
@@ -47,9 +64,13 @@ export default function AdminSubmissions({ type: typeFilter }) {
   const title = typeFilter
     ? typeFilter.charAt(0) + typeFilter.slice(1).toLowerCase() + 's'
     : 'All Submissions';
+  const feedbackPage = typeFilter === 'FEEDBACK';
+  const headers = feedbackPage
+    ? ['Reference', 'Citizen', 'Rating', 'Date', '']
+    : ['Tracking ID', 'Citizen', 'Type', 'Status', 'Deadline', 'Department', 'Date', ''];
 
   const textPrimary = dark ? '#f1f5f9' : '#111827';
-  const textMuted = dark ? '#64748b' : '#9ca3af';
+  const textMuted = dark ? '#94a3b8' : '#6b7280'; // 4.5:1 or better on the table
   const border = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6';
 
   return (
@@ -83,8 +104,8 @@ export default function AdminSubmissions({ type: typeFilter }) {
               }} />
           </div>
 
-          {/* Status filter pills */}
-          <div className="flex gap-1.5 flex-wrap">
+          {/* Status filter pills (feedback has no status steps) */}
+          {!feedbackPage && <div className="flex gap-1.5 flex-wrap">
             {STATUS_OPTS.map(s => (
               <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
@@ -94,18 +115,18 @@ export default function AdminSubmissions({ type: typeFilter }) {
                 {STATUS_LABELS[s]}
               </button>
             ))}
-          </div>
+          </div>}
         </div>
 
         {loading ? (
-          <div className="overflow-x-auto"><SkeletonTable cols={8} rows={10} /></div>
+          <div className="overflow-x-auto"><SkeletonTable cols={headers.length} rows={10} /></div>
         ) : (
           <>
             <div className="overflow-x-auto">
               <table ref={tableRef} className="mobile-cards w-full text-sm">
                 <thead>
                   <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${border}` }}>
-                    {['Tracking ID','Citizen','Type','Status','Deadline','Department','Date',''].map(h => (
+                    {headers.map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: dark ? '#64748b' : '#6b7280' }}>{h}</th>
                     ))}
                   </tr>
@@ -113,7 +134,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-14 text-center">
+                      <td colSpan={headers.length} className="px-4 py-14 text-center">
                         <div className="flex flex-col items-center gap-2">
                           <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: dark ? 'rgba(255,255,255,0.05)' : '#f9fafb' }}>
                             <svg className="w-6 h-6" style={{ color: dark ? '#475569' : '#d1d5db' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
@@ -132,11 +153,21 @@ export default function AdminSubmissions({ type: typeFilter }) {
                       onMouseEnter={e => e.currentTarget.style.background = dark ? 'rgba(37,99,235,0.08)' : 'rgba(37,99,235,0.04)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                       <td className="px-4 py-3.5 font-mono text-xs whitespace-nowrap" style={{ color: textMuted }}>{s.trackingId}</td>
-                      <td className="px-4 py-3.5 font-semibold whitespace-nowrap" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: dark ? '#64748b' : '#9ca3af', fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
-                      <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
-                      <td className="px-4 py-3.5"><StatusBadge status={s.status} /></td>
-                      <td className="px-4 py-3.5"><DeadlineBadge submission={s} /></td>
-                      <td className="px-4 py-3.5 text-xs font-medium max-w-36 truncate" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{s.department}</td>
+                      <td className="px-4 py-3.5 font-semibold whitespace-nowrap" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: textMuted, fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
+                      {feedbackPage ? (
+                        <td className="px-4 py-3.5"><RatingCell rating={s.rating} reaction={s.reaction} dark={dark} /></td>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
+                          <td className="px-4 py-3.5">
+                            {s.type === 'FEEDBACK'
+                              ? <span className="text-xs" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>—</span>
+                              : <StatusBadge status={s.status} />}
+                          </td>
+                          <td className="px-4 py-3.5"><DeadlineBadge submission={s} /></td>
+                          <td className="px-4 py-3.5 text-xs font-medium max-w-36 truncate" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{s.department}</td>
+                        </>
+                      )}
                       <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: textMuted }}>{new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
                       <td className="px-4 py-3.5">
                         <Link to={`/admin/submissions/${s.id}`}

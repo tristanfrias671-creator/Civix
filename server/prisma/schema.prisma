@@ -189,6 +189,9 @@ model SystemSettings {
   heroImageUrl       String?
   // Private address (path segment) of the admin sign-in page
   adminLoginPath     String?
+  // Office that receives reports with no office yet and forwards them; null means
+  // the Mayor's Office – CRMO (or the first office on the list)
+  unassignedOffice   String?
   updatedAt        DateTime @updatedAt
 }
 
@@ -210,4 +213,18 @@ model AccessRequest {
   reviewedAt     DateTime?
   createdAt      DateTime            @default(now())
   user           User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// One-time code emailed to someone requesting a staff account, proving they own
+// the address. Only a hash of the code is kept; the row is removed once used.
+model EmailVerification {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  codeHash    String
+  attempts    Int      @default(0)
+  expiresAt   DateTime
+  sentAt      DateTime @default(now())
+  // Codes sent since windowStart, for the hourly limit
+  sendCount   Int      @default(1)
+  windowStart DateTime @default(now())
 }

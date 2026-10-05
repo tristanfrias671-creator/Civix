@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import { mediaUrl } from '../../utils/mediaUrl';
+import Avatar from './Avatar';
 
 // ── Canvas circular crop ──────────────────────────────────────────────────────
 function CropStep({ imgSrc, onDone, onBack }) {
@@ -244,7 +245,8 @@ function ChangePasswordModal({ open, onClose }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-export default function ProfileModal({ open, onClose }) {
+// `links`: extra rows under Change Password, each { label, description, icon, onClick }.
+export default function ProfileModal({ open, onClose, links = [] }) {
   const { user, updateUser } = useAuth();
 
   const [step,       setStep]       = useState('info');   // 'info' | 'crop'
@@ -366,14 +368,7 @@ export default function ProfileModal({ open, onClose }) {
               {/* Avatar */}
               <div className="flex flex-col items-center gap-3">
                 <div className="relative">
-                  {currentAvatar ? (
-                    <img src={currentAvatar} alt="avatar"
-                      className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg" />
-                  ) : (
-                    <div className="w-24 h-24 rounded-full bg-primary text-white flex items-center justify-center text-3xl font-bold border-4 border-white shadow-lg">
-                      {user?.fullName?.[0]?.toUpperCase()}
-                    </div>
-                  )}
+                  <Avatar user={user} src={currentAvatar} className="w-24 h-24 border-4 border-white shadow-lg" letterClassName="text-3xl font-bold" />
                   <button type="button" onClick={() => fileRef.current?.click()}
                     className="absolute -bottom-1 -right-1 w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center shadow-md hover:bg-blue-700 transition-colors border-2 border-white">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
@@ -430,6 +425,22 @@ export default function ProfileModal({ open, onClose }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
                 </svg>
               </button>
+
+              {links.map(link => (
+                <button key={link.label} type="button" onClick={link.onClick}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors text-left">
+                  <span className="flex items-center gap-2 min-w-0">
+                    {link.icon}
+                    <span className="min-w-0">
+                      <span className="block">{link.label}</span>
+                      {link.description && <span className="block text-xs font-normal text-gray-500 mt-0.5">{link.description}</span>}
+                    </span>
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
+                  </svg>
+                </button>
+              ))}
 
               {/* Name field */}
               <form onSubmit={handleSave} className="space-y-4">

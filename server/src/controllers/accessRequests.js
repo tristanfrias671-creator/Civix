@@ -1,10 +1,9 @@
-const { PrismaClient } = require('@prisma/client');
 const { ensureSettings } = require('./settings');
 const {
   sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail,
 } = require('../utils/mailer');
 
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 class ReviewConflict extends Error {}

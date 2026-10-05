@@ -9,6 +9,7 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const UPLOAD_ROOT = require('./src/utils/uploadRoot');
+const { limitRequests } = require('./src/utils/rateLimit');
 
 const authRoutes = require('./src/routes/auth');
 const submissionRoutes = require('./src/routes/submissions');
@@ -20,16 +21,39 @@ const staffRoutes    = require('./src/routes/staff');
 const classifyRoutes = require('./src/routes/classify');
 const accessRequestRoutes = require('./src/routes/accessRequests');
 
+// A failed background task (an email or a text that couldn't be sent, for example)
+// is logged instead of stopping the whole server; requests keep being served.
+process.on('unhandledRejection', err => console.error('[server] Unhandled promise rejection:', err));
+process.on('uncaughtException', err => console.error('[server] Uncaught exception:', err));
+
 const app = express();
+app.disable('x-powered-by');
 
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true,
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Every API request counts toward a per-network limit, far above normal use (staff
+// pages check for new reports about twice a minute), to blunt request floods.
+// It comes before the body is read, so refused requests cost almost nothing.
+app.use('/api', limitRequests({
+  windowMs: 60 * 1000,
+  max: Number(process.env.API_REQUESTS_PER_MINUTE) || 300,
+  message: wait => `Too many requests from this network. Please try again in ${wait}.`,
+}));
 
-app.use('/uploads', express.static(UPLOAD_ROOT));
+// Plain requests carry small amounts of data; photos go through the upload limits.
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+
+// Uploaded photos are only ever shown as pictures: the browser must not guess
+// another type, and anything that isn't a picture can't run scripts here.
+app.use('/uploads', express.static(UPLOAD_ROOT, {
+  setHeaders: res => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Security-Policy', 'sandbox');
+  },
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/submissions', submissionRoutes);
@@ -56,9 +80,27 @@ if (fs.existsSync(path.join(CLIENT_BUILD, 'index.html'))) {
   });
 }
 
+// Upload and request-size problems get a plain explanation; anything unexpected
+// is logged and answered without inner details.
+const UPLOAD_ERRORS = {
+  LIMIT_FILE_SIZE: [413, 'Each photo must be 5 MB or smaller.'],
+  LIMIT_FILE_COUNT: [400, 'You can attach up to 5 photos.'],
+  LIMIT_UNEXPECTED_FILE: [400, 'You can attach up to 5 photos.'],
+  LIMIT_FIELD_VALUE: [400, 'Some of the text is too long. Please shorten it and try again.'],
+  LIMIT_FIELD_COUNT: [400, 'The form could not be read. Please reload the page and try again.'],
+  LIMIT_FIELD_KEY: [400, 'The form could not be read. Please reload the page and try again.'],
+  LIMIT_PART_COUNT: [400, 'The form could not be read. Please reload the page and try again.'],
+};
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  req.releaseFormTicket?.();
+  if (res.headersSent) return next(err);
+  const upload = UPLOAD_ERRORS[err.code];
+  if (upload) return res.status(upload[0]).json({ error: upload[1], code: err.code });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'The request is too large.' });
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'The request could not be read.' });
+  const status = Number(err.status) >= 400 && Number(err.status) < 500 ? Number(err.status) : 500;
+  if (status === 500) console.error(err.stack || err);
+  res.status(status).json({ error: status < 500 ? err.message : 'Something went wrong. Please try again.', code: err.code });
 });
 
 const PORT = process.env.PORT || 5000;

@@ -80,12 +80,12 @@ const STEPS = [
 // Mirrors the Submit form, in the same order and with the same placeholders.
 const FORM_FIELDS = [
   { label: 'Type of Concern',      required: true,  sample: 'Complaint',                                 note: 'Complaint, Suggestion, or Feedback.' },
-  { label: 'Department Concerned', required: true,  sample: 'Select department / office…',               note: 'CIVIX suggests an office from your description. You can change it.' },
+  { label: 'Department Concerned', required: true,  sample: 'Select department / office…',               note: 'CIVIX suggests an office from your description. You can change it. Not asked for Feedback.' },
   { label: 'Location',             required: false, sample: 'Choose or type your barangay',              note: 'Pick your barangay from the list, then add a purok, street or landmark if you can.' },
   { label: 'Contact Number',       required: true,  sample: 'e.g. 09XX XXX XXXX',                        note: 'Your mobile number. We text you your tracking code and each status update.' },
   { label: 'Email Address',        required: true,  sample: 'e.g. juandelacruz@gmail.com',               note: 'We email you when your report is received and whenever its status changes.' },
   { label: 'Description',          required: true,  sample: 'There is a broken streetlight in front of…', note: 'At least 20 characters. Include what happened, where, when, and any other helpful details.' },
-  { label: 'File Attachment',      required: false, sample: 'Click to upload or drag and drop',          note: 'Up to 5 photos, JPG or PNG, each up to 5 MB.' },
+  { label: 'File Attachment',      required: false, sample: 'Click to upload or drag and drop',          note: 'Up to 5 photos, JPG or PNG, each up to 5 MB. Not asked for Feedback.' },
 ];
 
 const REPORT_TYPES = [
@@ -101,8 +101,8 @@ const REPORT_TYPES = [
   },
   {
     type: 'FEEDBACK', accent: '#16a34a',
-    when: 'You want to rate a service you received.',
-    examples: ['Rate it from 1 to 5 stars (required)', 'Pick how you felt about it (required)', 'Tag what went well or could improve (optional)'],
+    when: "You want to rate the municipality's service as a whole.",
+    examples: ['Rate it from 1 to 5 stars (required)', 'Pick how you felt about it (required)', 'No office to choose and no photos; we email you a thank-you note'],
   },
 ];
 
@@ -163,7 +163,7 @@ const FAQS = [
   { q: 'Do I need an account to submit a report?', a: 'No. You do not need to register. You only provide a contact number and email so the concerned office can reach you about your report.' },
   { q: 'How do I check the status of my report?', a: 'Open Track My Report and enter your tracking code. It looks like DEPT-YYYYMMDD-XXXX, for example ENG-20240527-0001.' },
   { q: 'What if I lose my tracking code?', a: 'Check your text messages or email. The tracking code is in the confirmation we send after you submit, and in every status update.' },
-  { q: 'Who can see my report?', a: 'The office your report is routed to and the CIVIX administrators. Your information is handled according to the Data Privacy Act.' },
+  { q: 'Who can see my report?', a: 'The office your report is routed to and the CIVIX administrators. Feedback goes to the administrators only. Your information is handled according to the Data Privacy Act.' },
   { q: 'Can I attach videos or documents?', a: 'Not at the moment. You can attach up to 5 photos in JPG or PNG format, each up to 5 MB.' },
 ];
 

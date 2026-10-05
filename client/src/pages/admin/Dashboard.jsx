@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { Skel, SkeletonStatCards, SkeletonQuickLinks, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
+import StatCard from '../../components/common/StatCard';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
@@ -14,49 +15,6 @@ const QUICK_LINKS = [
   { to: '/admin/feedback', label: 'Feedback', icon: 'feedback', color: '#16a34a', bg: '#f0fdf4', darkBg: 'rgba(22,163,74,0.12)' },
   { to: '/admin/analytics', label: 'Analytics', icon: 'analytics', color: '#7c3aed', bg: '#f5f3ff', darkBg: 'rgba(124,58,237,0.12)' },
 ];
-
-const CARD_STYLES_LIGHT = [
-  { bg:'#f5f3ff', iconBg:'#ede9fe', iconColor:'#7c3aed' },
-  { bg:'#fff7ed', iconBg:'#ffedd5', iconColor:'#ea580c' },
-  { bg:'#f0fdf4', iconBg:'#dcfce7', iconColor:'#16a34a' },
-  { bg:'#eff6ff', iconBg:'#dbeafe', iconColor:'#2563eb' },
-  { bg:'#faf5ff', iconBg:'#f3e8ff', iconColor:'#9333ea' },
-  { bg:'#fefce8', iconBg:'#fef9c3', iconColor:'#ca8a04' },
-  { bg:'#f0f9ff', iconBg:'#e0f2fe', iconColor:'#0284c7' },
-  { bg:'#fef2f2', iconBg:'#fee2e2', iconColor:'#dc2626' },
-];
-const CARD_STYLES_DARK = [
-  { bg:'rgba(124,58,237,0.12)',  iconBg:'rgba(124,58,237,0.2)',  iconColor:'#a78bfa' },
-  { bg:'rgba(234,88,12,0.12)',   iconBg:'rgba(234,88,12,0.2)',   iconColor:'#fb923c' },
-  { bg:'rgba(22,163,74,0.12)',   iconBg:'rgba(22,163,74,0.2)',   iconColor:'#4ade80' },
-  { bg:'rgba(37,99,235,0.12)',   iconBg:'rgba(37,99,235,0.2)',   iconColor:'#60a5fa' },
-  { bg:'rgba(147,51,234,0.12)',  iconBg:'rgba(147,51,234,0.2)',  iconColor:'#c084fc' },
-  { bg:'rgba(202,138,4,0.12)',   iconBg:'rgba(202,138,4,0.2)',   iconColor:'#facc15' },
-  { bg:'rgba(2,132,199,0.12)',   iconBg:'rgba(2,132,199,0.2)',   iconColor:'#38bdf8' },
-  { bg:'rgba(220,38,38,0.12)',   iconBg:'rgba(220,38,38,0.2)',   iconColor:'#f87171' },
-];
-
-// `stack` puts the icon above the text on phones, for cards that sit two per row.
-function KPICard({ label, value, sub, icon, styleIdx = 0, stack = false }) {
-  const { dark } = useTheme();
-  const styles = dark ? CARD_STYLES_DARK : CARD_STYLES_LIGHT;
-  const s = styles[styleIdx % styles.length];
-  return (
-    <div className="rounded-2xl p-4 sm:p-5 border hover:shadow-md transition-all hover:-translate-y-0.5"
-      style={{ background: s.bg, borderColor: dark ? 'rgba(255,255,255,0.06)' : 'transparent', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
-      <div className={`flex justify-between gap-3 ${stack ? 'flex-col-reverse items-start sm:flex-row' : 'items-start'}`}>
-        <div className="min-w-0">
-          <p className="text-[13px] sm:text-sm font-semibold leading-snug" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{label}</p>
-          <p className="text-[28px] sm:text-[38px] font-bold leading-none tracking-tight tabular-nums mt-2.5" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{value}</p>
-          {sub && <p className="text-[12.5px] sm:text-[13px] font-medium mt-2" style={{ color: dark ? '#64748b' : '#6b7280' }}>{sub}</p>}
-        </div>
-        <div className="p-2.5 rounded-xl flex-shrink-0" style={{ background: s.iconBg }}>
-          <Icon name={icon} className="w-6 h-6" style={{ color: s.iconColor }} />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -100,13 +58,13 @@ export default function AdminDashboard() {
           <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight leading-tight" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
             Welcome back{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}
           </h1>
-          <p className="text-sm sm:text-[15px] mt-1" style={{ color: dark ? '#64748b' : '#6b7280' }}>
+          <p className="text-sm sm:text-[15px] mt-1" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>
             {new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
           </p>
         </div>
         <Link to="/admin/submissions"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
-          style={{ background:'linear-gradient(135deg,#2563eb,#3b82f6)', boxShadow:'0 4px 14px rgba(37,99,235,0.3)' }}>
+          style={{ background:'linear-gradient(135deg,#1d4ed8,#2563eb)', boxShadow:'0 4px 14px rgba(37,99,235,0.3)' }}>
           View All Submissions
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
@@ -116,18 +74,18 @@ export default function AdminDashboard() {
 
       {/* KPI row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <KPICard stack label="Total Submissions" value={stats?.total ?? 0}                styleIdx={0} icon="submissions" />
-        <KPICard stack label="Pending"           value={stats?.pending ?? 0}              styleIdx={1} icon="clock"       sub="Needs attention" />
-        <KPICard stack label="Resolved"          value={stats?.resolved ?? 0}             styleIdx={2} icon="check" />
-        <KPICard stack label="Response Rate"     value={`${stats?.responseRate ?? 0}%`}   styleIdx={3} icon="analytics"   sub={`${stats?.avgResolutionTime} days avg`} />
+        <StatCard stack label="Total Submissions" value={stats?.total ?? 0}                tone="purple" icon="submissions" />
+        <StatCard stack label="Pending"           value={stats?.pending ?? 0}              tone="orange" icon="clock"       sub="Needs attention" />
+        <StatCard stack label="Resolved"          value={stats?.resolved ?? 0}             tone="green" icon="check" />
+        <StatCard stack label="Response Rate"     value={`${stats?.responseRate ?? 0}%`}   tone="blue" icon="analytics"   sub={`${stats?.avgResolutionTime} days avg`} />
       </div>
 
       {/* KPI row 2 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
-        <KPICard stack label="In Review"      value={stats?.reviewing  ?? 0} styleIdx={4} icon="search" />
-        <KPICard stack label="In Progress"    value={stats?.inProgress ?? 0} styleIdx={5} icon="activity" />
-        <KPICard stack label="Overdue"        value={stats?.overdue    ?? 0} styleIdx={7} icon="complaint" sub="Past their deadline" />
-        <KPICard stack label="Total Citizens" value={stats?.citizens   ?? 0} styleIdx={6} icon="citizens" />
+        <StatCard stack label="In Review"      value={stats?.reviewing  ?? 0} tone="violet" icon="search" />
+        <StatCard stack label="In Progress"    value={stats?.inProgress ?? 0} tone="yellow" icon="activity" />
+        <StatCard stack label="Overdue"        value={stats?.overdue    ?? 0} tone="red" icon="complaint" sub="Past their deadline" />
+        <StatCard stack label="Total Citizens" value={stats?.citizens   ?? 0} tone="sky" icon="citizens" />
       </div>
 
       {/* Quick links */}
@@ -141,7 +99,7 @@ export default function AdminDashboard() {
             </div>
             <div className="min-w-0">
               <p className="text-[15px] sm:text-base font-semibold leading-tight truncate" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{q.label}</p>
-              <p className="flex items-center gap-1 text-[13px] font-medium mt-1" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>
+              <p className="flex items-center gap-1 text-[13px] font-medium mt-1" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>
                 View all
                 <svg className="w-3 h-3 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
@@ -157,9 +115,9 @@ export default function AdminDashboard() {
         <div className="flex justify-between items-center px-6 py-4 border-b" style={{ borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6' }}>
           <div>
             <h2 className="text-[17px] font-bold tracking-tight" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>Recent Submissions</h2>
-            <p className="text-[13px] mt-0.5" style={{ color: dark ? '#64748b' : '#6b7280' }}>Latest activity across all departments</p>
+            <p className="text-[13px] mt-0.5" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>Latest activity across all departments</p>
           </div>
-          <Link to="/admin/submissions" className="text-sm font-bold flex items-center gap-1 transition-colors" style={{ color: '#2563eb' }}>
+          <Link to="/admin/submissions" className="text-sm font-bold flex items-center gap-1 transition-colors" style={{ color: dark ? '#60a5fa' : '#2563eb' }}>
             View All
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
@@ -169,9 +127,9 @@ export default function AdminDashboard() {
         {submissions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ background: dark ? 'rgba(255,255,255,0.05)' : '#f3f4f6' }}>
-              <Icon name="submissions" className="w-7 h-7" style={{ color: dark ? '#475569' : '#d1d5db' }} />
+              <span style={{ color: dark ? '#94a3b8' : '#6b7280' }}><Icon name="submissions" className="w-7 h-7" /></span>
             </div>
-            <p className="text-sm font-medium" style={{ color: dark ? '#64748b' : '#9ca3af' }}>No submissions yet.</p>
+            <p className="text-sm font-medium" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>No submissions yet.</p>
           </div>
         ) : (
         <div className="overflow-x-auto">
@@ -179,7 +137,7 @@ export default function AdminDashboard() {
             <thead>
               <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}` }}>
                 {['Tracking ID','Citizen','Type','Department','Status','Date'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide" style={{ color: dark ? '#64748b' : '#6b7280' }}>{h}</th>
+                  <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -190,12 +148,12 @@ export default function AdminDashboard() {
                   style={{ borderBottom: i < submissions.length - 1 ? `1px solid ${dark ? 'rgba(255,255,255,0.04)' : '#f9fafb'}` : 'none' }}
                   onMouseEnter={e => e.currentTarget.style.background = dark ? 'rgba(37,99,235,0.08)' : 'rgba(37,99,235,0.04)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <td className="px-4 py-3.5 font-mono text-xs" style={{ color: dark ? '#64748b' : '#9ca3af' }}>{s.trackingId}</td>
-                  <td className="px-4 py-3.5 font-semibold" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: dark ? '#64748b' : '#9ca3af', fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
+                  <td className="px-4 py-3.5 font-mono text-xs" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{s.trackingId}</td>
+                  <td className="px-4 py-3.5 font-semibold" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: dark ? '#94a3b8' : '#4b5563', fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
                   <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
-                  <td className="px-4 py-3.5 max-w-40 truncate" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>{s.department}</td>
+                  <td className="px-4 py-3.5 max-w-40 truncate" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{s.department}</td>
                   <td className="px-4 py-3.5"><StatusBadge status={s.status} /></td>
-                  <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: dark ? '#64748b' : '#9ca3af' }}>{new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
+                  <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
                 </tr>
               ))}
             </tbody>

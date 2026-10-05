@@ -338,22 +338,32 @@ function preprocessText(text) {
     .trim();
 }
 
+// Only the first MAX_CHARS characters are read: reports are limited to that length,
+// and longer text would only cost time (the fuzzy matching grows with the text).
+const MAX_CHARS = 2000;
+
+// Every keyword cleaned once, when the server starts, instead of on every call.
+const PREPARED = Object.entries(KEYWORD_DB).map(([dept, keywords]) => [
+  dept,
+  keywords.map(([term, weight]) => [term, weight, preprocessText(term)]),
+]);
+
 function classifyText(rawText) {
-  if (!rawText || rawText.trim().length < 3) {
+  if (!rawText || typeof rawText !== 'string' || rawText.trim().length < 3) {
     return { department: 'UNASSIGNED', confidence: 0, matchedKeywords: [], allScores: {} };
   }
 
-  const clean = preprocessText(rawText);
-  const tokens = clean.split(' ').filter(t => t.length >= 3);
+  const clean = preprocessText(rawText.slice(0, MAX_CHARS));
+  // Each distinct word once: a repeated word can't change whether a keyword matches.
+  const tokens = [...new Set(clean.split(' ').filter(t => t.length >= 3))];
   const scores = {};
   const matchedMap = {};
 
-  for (const [dept, keywords] of Object.entries(KEYWORD_DB)) {
+  for (const [dept, keywords] of PREPARED) {
     scores[dept] = 0;
     matchedMap[dept] = new Set();
 
-    for (const [term, weight] of keywords) {
-      const termClean = preprocessText(term);
+    for (const [term, weight, termClean] of keywords) {
 
       // Multi-word phrase: substring match in full preprocessed text
       if (termClean.includes(' ')) {
@@ -420,4 +430,7 @@ function classifyText(rawText) {
   };
 }
 
-module.exports = { classifyText };
+// The offices the classifier can suggest (the citizen form's list).
+const OFFICES = Object.keys(KEYWORD_DB);
+
+module.exports = { classifyText, OFFICES };

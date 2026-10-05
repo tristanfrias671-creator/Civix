@@ -80,6 +80,8 @@ export default function SubmissionDetail() {
   if (loading) return <div className="p-6 max-w-5xl mx-auto"><SkeletonDetail /></div>;
   if (!submission) return <div className="p-6 text-gray-500 dark:text-slate-400">Submission not found.</div>;
 
+  // Feedback rates the municipality's service as a whole: no office, status steps or deadline.
+  const isFeedback = submission.type === 'FEEDBACK';
   const ai = submission.aiClassification;
   const aiKeywords = ai?.matchedKeywords ? (() => { try { return JSON.parse(ai.matchedKeywords); } catch { return []; } })() : [];
   const aiMatchesFinal = ai && ai.predictedDepartment === submission.department;
@@ -101,11 +103,11 @@ export default function SubmissionDetail() {
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex flex-wrap gap-2 mb-4">
               <TypeBadge type={submission.type} />
-              <StatusBadge status={submission.status} />
-              <PriorityBadge priority={submission.priority} />
+              {!isFeedback && <StatusBadge status={submission.status} />}
+              {!isFeedback && <PriorityBadge priority={submission.priority} />}
               <SentimentBadge sentiment={submission.sentiment} />
             </div>
-            <h1 className="text-xl font-bold text-gray-800 dark:text-slate-100 mb-1">{submission.department}</h1>
+            <h1 className="text-xl font-bold text-gray-800 dark:text-slate-100 mb-1">{isFeedback ? 'Feedback on our services' : submission.department}</h1>
             <p className="font-mono text-xs text-gray-400 dark:text-slate-500 mb-4">{submission.trackingId}</p>
             {submission.type === 'FEEDBACK' && (submission.rating || submission.reaction) && (
               <div className="mb-4">
@@ -294,18 +296,18 @@ export default function SubmissionDetail() {
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-4">Case Status</h3>
             <dl className="space-y-3.5 text-sm">
-              <div className="flex items-center justify-between gap-3">
+              {!isFeedback && <div className="flex items-center justify-between gap-3">
                 <dt className="text-gray-500 dark:text-slate-400 text-xs">Status</dt>
                 <dd><StatusBadge status={submission.status} /></dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
+              </div>}
+              {!isFeedback && <div className="flex items-center justify-between gap-3">
                 <dt className="text-gray-500 dark:text-slate-400 text-xs">Priority</dt>
                 <dd><PriorityBadge priority={submission.priority} /></dd>
-              </div>
+              </div>}
               <div className="flex items-start justify-between gap-3">
                 <dt className="text-gray-500 dark:text-slate-400 text-xs pt-0.5">Assigned office</dt>
                 <dd className="font-medium text-right text-gray-800 dark:text-slate-100">
-                  {submission.department}
+                  {submission.department === 'General' ? 'None (general feedback)' : submission.department}
                   {ai && ai.predictedDepartment !== submission.department && (
                     <span className="block text-[11px] font-normal text-blue-600 dark:text-blue-400 mt-0.5">AI suggested: {ai.predictedDepartment}</span>
                   )}
@@ -325,7 +327,9 @@ export default function SubmissionDetail() {
             </dl>
             <p className="mt-5 flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-900/40 text-gray-500 dark:text-slate-400">
               <Icon name="citizens" className="w-4 h-4 mt-px flex-shrink-0" />
-              View only. The assigned office's staff update this report's status, priority and department.
+              {isFeedback
+                ? "View only. Feedback rates the municipality's service as a whole, so no office acts on it."
+                : "View only. The assigned office's staff update this report's status, priority and department."}
             </p>
           </div>
         </div>

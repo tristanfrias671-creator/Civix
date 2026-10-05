@@ -1,10 +1,14 @@
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const crypto = require('crypto');
-const { PrismaClient } = require('@prisma/client');
 const { ensureSettings } = require('./settings');
 const { loadSealImage } = require('../utils/branding');
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
+
+// Status figures (pending, resolved, response rate, resolution time) count cases
+// only: feedback rates the municipality's service as a whole and has no workflow.
+// Same rule as the admin dashboard (controllers/analytics.js).
+const CASES = { type: { not: 'FEEDBACK' } };
 
 // ── Color constants (PDFKit accepts hex strings only — NO rgba()) ─────────────
 const BRAND      = '#1D4ED8';
@@ -284,10 +288,10 @@ async function generatePDF(req, res) {
       complaints, suggestions, feedbacks,
     ] = await Promise.all([
       prisma.submission.count(),
-      prisma.submission.count({ where: { status: 'PENDING' } }),
-      prisma.submission.count({ where: { status: 'REVIEWING' } }),
-      prisma.submission.count({ where: { status: 'IN_PROGRESS' } }),
-      prisma.submission.count({ where: { status: 'RESOLVED' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'PENDING' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'REVIEWING' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'IN_PROGRESS' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'RESOLVED' } }),
       prisma.submission.count({ where: { sentiment: 'POSITIVE' } }),
       prisma.submission.count({ where: { sentiment: 'NEUTRAL' } }),
       prisma.submission.count({ where: { sentiment: 'NEGATIVE' } }),
@@ -297,7 +301,7 @@ async function generatePDF(req, res) {
     ]);
 
     const resolvedSubs = await prisma.submission.findMany({
-      where: { status: 'RESOLVED' },
+      where: { ...CASES, status: 'RESOLVED' },
       select: { createdAt: true, updatedAt: true },
     });
     let avgDays = '0.0';
@@ -305,7 +309,8 @@ async function generatePDF(req, res) {
       const ms = resolvedSubs.reduce((s, r) => s + (r.updatedAt - r.createdAt), 0);
       avgDays = (ms / resolvedSubs.length / 86400000).toFixed(1);
     }
-    const responseRate = total > 0 ? ((total - pending) / total * 100).toFixed(1) : '0.0';
+    const caseTotal = complaints + suggestions;
+    const responseRate = caseTotal > 0 ? ((caseTotal - pending) / caseTotal * 100).toFixed(1) : '0.0';
 
     const allTypeSubs = await prisma.submission.findMany({
       select: { department: true, type: true, createdAt: true },
@@ -415,8 +420,9 @@ async function generatePDF(req, res) {
         `This report presents a comprehensive statistical analysis of citizen engagement submissions ` +
         `recorded through the CIVIX platform for the Municipality of Cantilan, Surigao del Sur. ` +
         `A total of ${total.toLocaleString()} submission(s) have been recorded, comprising complaints, ` +
-        `suggestions, and service feedback from registered citizens. The current response rate stands at ` +
-        `${responseRate}%, with an average resolution time of ${avgDays} day(s). This document is intended ` +
+        `suggestions, and service feedback from registered citizens. The current response rate for complaints ` +
+        `and suggestions stands at ${responseRate}%, with an average resolution time of ${avgDays} day(s). ` +
+        `Feedback rates the municipality's service as a whole and is not routed to an office. This document is intended ` +
         `for review by municipal officials and designated department heads.`,
         50, 422, { width: W - 100, lineGap: 4, align: 'justify' }
       );
@@ -820,10 +826,10 @@ async function generateExcel(req, res) {
       citizens,
     ] = await Promise.all([
       prisma.submission.count(),
-      prisma.submission.count({ where: { status: 'PENDING' } }),
-      prisma.submission.count({ where: { status: 'REVIEWING' } }),
-      prisma.submission.count({ where: { status: 'IN_PROGRESS' } }),
-      prisma.submission.count({ where: { status: 'RESOLVED' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'PENDING' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'REVIEWING' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'IN_PROGRESS' } }),
+      prisma.submission.count({ where: { ...CASES, status: 'RESOLVED' } }),
       prisma.submission.count({ where: { sentiment: 'POSITIVE' } }),
       prisma.submission.count({ where: { sentiment: 'NEUTRAL' } }),
       prisma.submission.count({ where: { sentiment: 'NEGATIVE' } }),
@@ -834,7 +840,7 @@ async function generateExcel(req, res) {
     ]);
 
     const resolvedSubs = await prisma.submission.findMany({
-      where: { status: 'RESOLVED' },
+      where: { ...CASES, status: 'RESOLVED' },
       select: { createdAt: true, updatedAt: true },
     });
     let avgDays = 0;
@@ -842,7 +848,8 @@ async function generateExcel(req, res) {
       const ms = resolvedSubs.reduce((s, r) => s + (r.updatedAt - r.createdAt), 0);
       avgDays = parseFloat((ms / resolvedSubs.length / 86400000).toFixed(1));
     }
-    const responseRate = total > 0 ? parseFloat(((total - pending) / total * 100).toFixed(1)) : 0;
+    const caseTotal = complaints + suggestions;
+    const responseRate = caseTotal > 0 ? parseFloat(((caseTotal - pending) / caseTotal * 100).toFixed(1)) : 0;
 
     const allSubs = await prisma.submission.findMany({
       select: { createdAt: true, type: true, department: true, citizenDepartment: true },

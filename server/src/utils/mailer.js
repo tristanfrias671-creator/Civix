@@ -20,9 +20,16 @@ if (useResend) {
 } else if (useSmtp) {
   const auth = { user: EMAIL_USER, pass: EMAIL_APP_PASSWORD };
   const port = Number(EMAIL_PORT) || 465;
+  // A small pool of reused connections, so a burst of emails doesn't open dozens
+  // of connections to the mail server at once (mailboxes limit that).
+  // Time limits, so a slow mail server can't leave emails waiting for minutes.
+  const pool = {
+    pool: true, maxConnections: 2, maxMessages: 100,
+    connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
+  };
   transporter = nodemailer.createTransport(EMAIL_HOST
-    ? { host: EMAIL_HOST, port, secure: port === 465, auth }
-    : { service: 'gmail', auth });
+    ? { host: EMAIL_HOST, port, secure: port === 465, auth, ...pool }
+    : { service: 'gmail', auth, ...pool });
 } else {
   console.warn('[mailer] No email provider configured (RESEND_API_KEY or EMAIL_USER/EMAIL_APP_PASSWORD) — status update emails will be skipped.');
 }
@@ -228,8 +235,10 @@ function toPlainText(html) {
     .trim();
 }
 
+// Resolves true once the email is handed to the mail service, false if it could
+// not be sent (or no service is set up). Never throws.
 async function sendMail({ to, subject, html }) {
-  if (!configured || !to) return;
+  if (!configured || !to) return false;
   const text = toPlainText(html);
   try {
     if (useResend) {
@@ -240,8 +249,10 @@ async function sendMail({ to, subject, html }) {
     } else {
       await transporter.sendMail({ from: `"CIVIX - Cantilan" <${EMAIL_USER}>`, to, subject, html, text });
     }
+    return true;
   } catch (err) {
     console.error('[mailer] Failed to send email:', err.message);
+    return false;
   }
 }
 
@@ -258,10 +269,10 @@ async function deliver(build) {
 
 const TYPE_LABELS = { COMPLAINT: 'Complaint', SUGGESTION: 'Suggestion', FEEDBACK: 'Feedback' };
 
+// Feedback has its own thank-you email (buildFeedbackThanksEmail).
 const RECEIVED_COPY = {
   COMPLAINT:  { title: 'We received your complaint', intro: 'Thank you for reporting this to the Municipality of Cantilan.' },
   SUGGESTION: { title: 'Thank you for your suggestion', intro: 'We appreciate your idea for improving our community.' },
-  FEEDBACK:   { title: 'Thank you for your feedback', intro: 'Your feedback helps us serve you better.' },
 };
 
 const STATUS_META = {
@@ -296,8 +307,15 @@ function trackUrl(trackingId) {
   return `${SITE_URL}/track?id=${encodeURIComponent(trackingId)}`;
 }
 
+// The start of the report's text, quoted in the email. Anyone can type any text and
+// any email address, so web links and site names are taken out: CIVIX's mailbox
+// must not carry someone's scam link to another person.
 function excerpt(text, max = 220) {
-  const clean = String(text || '').trim().replace(/\s+/g, ' ');
+  const clean = String(text || '')
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, '[link removed]')
+    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|info|xyz|top|site|online|ph|io|ly|me|co|app|link|click|shop)\b\S*/gi, '[link removed]')
+    .trim()
+    .replace(/\s+/g, ' ');
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
 
@@ -306,9 +324,53 @@ function stars(rating) {
   return `<span style="color:#f59e0b; letter-spacing:1px;">${'&#9733;'.repeat(n)}</span><span style="color:#cbd5e1; letter-spacing:1px;">${'&#9733;'.repeat(5 - n)}</span> ${n}/5`;
 }
 
+const REACTION_LABELS = { EXCELLENT: 'Excellent', GOOD: 'Good', OKAY: 'Okay', POOR: 'Poor', TERRIBLE: 'Terrible' };
+
+// What the thank-you note says back, depending on the rating.
+function feedbackReply(rating) {
+  if (rating >= 4) return "We're glad you had a good experience, and we'll share your kind words with the municipal offices.";
+  if (rating === 3) return 'Thank you for your honest rating. We will keep working to serve you better.';
+  return "We're sorry your experience was not what you expected. Your comments show us what to improve, and we take them seriously.";
+}
+
+function feedbackTagList(raw) {
+  try {
+    const tags = JSON.parse(raw || '[]');
+    return Array.isArray(tags) ? tags.filter(Boolean).map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Feedback rates the municipality's service as a whole, so its email is a
+// thank-you note: no tracking ID to keep and no status updates to wait for.
+async function buildFeedbackThanksEmail(submission) {
+  const rating = Number(submission.rating) || 0;
+  const tags = feedbackTagList(submission.feedbackTags);
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: `Thank you for rating our services${rating ? ` ${rating} out of 5` : ''}.`,
+    icon: '&#9733;', tone: 'green', title: 'Thank you for your feedback!',
+    intro: 'Thank you for taking the time to rate the services of the Municipality of Cantilan.',
+    body: `
+      ${detailRows([
+        rating && ['Your rating', stars(rating)],
+        submission.reaction && ['How you felt', escapeHtml(REACTION_LABELS[submission.reaction] || submission.reaction)],
+        tags.length && ['You mentioned', escapeHtml(tags.join(', '))],
+        ['Sent', formatPhDateTime(submission.createdAt || new Date())],
+      ])}
+      ${submission.description ? quote('Your feedback', escapeHtml(excerpt(submission.description))) : ''}
+      ${paragraph(`${escapeHtml(feedbackReply(rating))} Your feedback goes to the municipal administrators, who use it to improve services for everyone in Cantilan.`)}
+      ${small(`You don't need to do anything else. If you have a problem that needs action, you can <a href="${SITE_URL}/submit" style="color:${BRAND}; font-weight:600;">send a complaint or suggestion</a> anytime.`)}
+      ${small(`Reference no. <span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`)}
+    `,
+  });
+  return { to: submission.email, subject: 'CIVIX — Thank you for your feedback', html };
+}
+
 async function buildSubmissionReceivedEmail(submission) {
+  if (submission.type === 'FEEDBACK') return buildFeedbackThanksEmail(submission);
   const copy = RECEIVED_COPY[submission.type] || RECEIVED_COPY.COMPLAINT;
-  const isFeedback = submission.type === 'FEEDBACK';
   const office = officeOf(submission);
   const html = layout({
     seal: await sealImageUrl(),
@@ -320,11 +382,10 @@ async function buildSubmissionReceivedEmail(submission) {
         ['Type', escapeHtml(TYPE_LABELS[submission.type] || submission.type)],
         office && ['Office', escapeHtml(office)],
         ['Submitted', formatPhDateTime(submission.createdAt || new Date())],
-        submission.dueAt && [isFeedback ? 'Target response' : 'Target resolution', formatPhDate(submission.dueAt)],
-        submission.rating && ['Your rating', stars(submission.rating)],
+        submission.dueAt && ['Target resolution', formatPhDate(submission.dueAt)],
       ])}
-      ${submission.description ? quote(isFeedback ? 'Your feedback' : 'Your report', escapeHtml(excerpt(submission.description))) : ''}
-      ${paragraph(`${strong('What happens next?')}<br>${escapeHtml(office || 'The concerned office')} will review it${submission.dueAt ? ` and aim to ${isFeedback ? 'respond' : 'act on it'} by ${strong(formatPhDate(submission.dueAt))}` : ''}. We'll email you every time its status changes.`)}
+      ${submission.description ? quote('Your report', escapeHtml(excerpt(submission.description))) : ''}
+      ${paragraph(`${strong('What happens next?')}<br>${escapeHtml(office || 'The concerned office')} will review it${submission.dueAt ? ` and aim to act on it by ${strong(formatPhDate(submission.dueAt))}` : ''}. We'll email you every time its status changes.`)}
       ${button(trackUrl(submission.trackingId), 'Track my report')}
     `,
   });
@@ -437,16 +498,48 @@ async function buildStaffAccountDecisionEmail({ email, fullName }, approved, not
   return { to: email, subject: approved ? 'CIVIX — Staff account approved' : 'CIVIX — Staff account request', html };
 }
 
+// The one-time code for a staff account request (see controllers/auth.js).
+async function buildVerificationCodeEmail({ email, fullName }, code, minutes) {
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: `Your CIVIX verification code is ${code}. It expires in ${minutes} minutes.`,
+    icon: '&#9993;', tone: 'blue', title: 'Confirm your email',
+    intro: `Hi ${escapeHtml(fullName || 'there')}, enter this code to send your CIVIX staff account request.`,
+    body: `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
+        <td align="center" bgcolor="#eff6ff" style="background:#eff6ff; border:1px dashed #93c5fd; border-radius:12px; padding:18px 16px;">
+          <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:#1d4ed8;">Verification code</div>
+          <div style="margin-top:6px; font-family:${MONO}; font-size:32px; font-weight:700; letter-spacing:8px; color:${INK};">${code}</div>
+          <div style="margin-top:6px; font-size:12px; color:#475569;">Expires in ${minutes} minutes</div>
+        </td></tr></table>
+      ${paragraph(`Type this code in the window that opened on the CIVIX page. Don't share it with anyone.`)}
+      ${small(`If you didn't ask for a CIVIX staff account, you can ignore this email. No account is created without this code.`)}
+    `,
+  });
+  return { to: email, subject: `CIVIX — Your verification code is ${code}`, html };
+}
+
 const sendSubmissionReceivedEmail = submission => deliver(buildSubmissionReceivedEmail(submission));
 const sendStatusUpdateEmail = (submission, newStatus, note) => deliver(buildStatusUpdateEmail(submission, newStatus, note));
 const sendAccessRequestAlertEmail = (to, request) => deliver(buildAccessRequestAlertEmail(to, request));
 const sendAdminAccessDecisionEmail = (user, approved, note, adminUrl) => deliver(buildAdminAccessDecisionEmail(user, approved, note, adminUrl));
 const sendStaffAccountDecisionEmail = (user, approved, note) => deliver(buildStaffAccountDecisionEmail(user, approved, note));
 
+// Waited for: the caller needs to know whether the code went out. Resolves to
+// true or false.
+async function sendVerificationCodeEmail(person, code, minutes) {
+  try {
+    return await sendMail(await buildVerificationCodeEmail(person, code, minutes));
+  } catch (err) {
+    console.error('[mailer] Failed to build email:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
-  sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail,
+  sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail, sendVerificationCodeEmail,
   sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail,
   // For previews and tests.
-  buildSubmissionReceivedEmail, buildStatusUpdateEmail, buildAccessRequestAlertEmail,
-  buildAdminAccessDecisionEmail, buildStaffAccountDecisionEmail, toPlainText,
+  buildSubmissionReceivedEmail, buildFeedbackThanksEmail, buildStatusUpdateEmail, buildAccessRequestAlertEmail,
+  buildAdminAccessDecisionEmail, buildStaffAccountDecisionEmail, buildVerificationCodeEmail, toPlainText,
 };

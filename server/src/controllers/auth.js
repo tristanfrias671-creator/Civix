@@ -1,15 +1,18 @@
 const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
+const crypto = require('crypto');
 const fs     = require('fs');
 const path   = require('path');
-const { PrismaClient } = require('@prisma/client');
 const { OAuth2Client } = require('google-auth-library');
 const { configured: cloudinaryConfigured } = require('../utils/cloudinary');
 const UPLOAD_ROOT = require('../utils/uploadRoot');
 const { ensureSettings, getDepartmentList, isAdminLoginPath } = require('./settings');
 const { notifyAdmins } = require('./accessRequests');
+const { sendVerificationCodeEmail } = require('../utils/mailer');
+const { networkKey } = require('../utils/clientIp');
+const { createLimiter } = require('../utils/rateLimit');
 
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Each login page names its portal; an account can only sign in on its own
@@ -145,30 +148,131 @@ async function checkPortalPath(req, res) {
 
 // Public staff sign-up: the account stays PENDING, and a request goes to the
 // administrators, until one of them approves it.
+// ── Email codes for staff account requests ──
+// A request is only accepted with the 6-digit code emailed to its address, so
+// nobody can file requests for addresses they don't own.
+const CODE_MINUTES = 10;          // how long a code works
+const RESEND_SECONDS = 60;        // wait before another code to the same email
+const MAX_CODE_TRIES = 5;         // wrong guesses before the code is cancelled
+const MAX_CODES_PER_HOUR = 5;     // codes per email per hour
+const MAX_CODES_PER_IP_HOUR = 20; // codes per device or network per hour
+
+// Only this hash is stored, never the code itself.
+const hashCode = (email, code) => crypto.createHmac('sha256', process.env.JWT_SECRET).update(`${email}:${code}`).digest('hex');
+
+// Code requests per IP address in the last hour (kept in memory).
+// Codes from everyone together are capped too (STAFF_CODES_PER_HOUR), so the form
+// can't be used to flood mailboxes or use up the mailbox's sending limit.
+const codesPerIp = createLimiter({ windowMs: 3600 * 1000, max: MAX_CODES_PER_IP_HOUR });
+const codesSiteWide = createLimiter({ windowMs: 3600 * 1000, max: Number(process.env.STAFF_CODES_PER_HOUR) || 30 });
+// Returns why no code may be sent now, or null.
+function codeRequestRefusal(req) {
+  const network = networkKey(req); // null when unknown: then only the site-wide cap
+  if (network != null && !codesPerIp.take(network).ok) return 'Too many codes were requested from this device. Please try again later.';
+  if (codesSiteWide.take('all').ok) return null;
+  if (network != null) codesPerIp.give(network);
+  return 'Many codes were requested in the last hour. Please try again later.';
+}
+
+// The staff request form, checked the same way when the code is sent and when
+// the request is made.
+async function readStaffRequest(body) {
+  const data = {
+    fullName: String(body.fullName || '').trim(),
+    email: String(body.email || '').trim().toLowerCase(),
+    department: String(body.department || '').trim(),
+    reason: String(body.reason || '').trim(),
+    password: String(body.password || ''),
+  };
+  if (!data.fullName || !data.email || !data.department || !data.password) {
+    return { error: 'Full name, email, department and password are required' };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return { error: 'Please enter a valid email address' };
+  if (data.password.length < 8) return { error: 'Password must be at least 8 characters' };
+  if (data.reason.length > 1000) return { error: 'Please keep the note under 1000 characters' };
+  if (!(await getDepartmentList()).includes(data.department)) return { error: 'Please choose your department from the list' };
+  return { data };
+}
+
+// POST /api/auth/staff-register/code — checks the request form, then emails a
+// code to its address.
+async function sendStaffCode(req, res) {
+  try {
+    const { error, data } = await readStaffRequest(req.body);
+    if (error) return res.status(400).json({ error });
+    const { email, fullName } = data;
+    if (await prisma.user.findUnique({ where: { email } })) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+
+    const now = new Date();
+    const previous = await prisma.emailVerification.findUnique({ where: { email } });
+    if (previous) {
+      const waitSeconds = Math.ceil((previous.sentAt.getTime() + RESEND_SECONDS * 1000 - now.getTime()) / 1000);
+      if (waitSeconds > 0) {
+        return res.status(429).json({ error: `Please wait ${waitSeconds} seconds before asking for a new code.`, retryAfter: waitSeconds });
+      }
+    }
+    const sameHour = previous && now.getTime() - previous.windowStart.getTime() < 3600 * 1000;
+    if (sameHour && previous.sendCount >= MAX_CODES_PER_HOUR) {
+      return res.status(429).json({ error: 'Too many codes were sent to this email. Please try again in an hour.' });
+    }
+    const refusal = codeRequestRefusal(req);
+    if (refusal) return res.status(429).json({ error: refusal });
+
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const fields = {
+      codeHash: hashCode(email, code),
+      attempts: 0,
+      sentAt: now,
+      expiresAt: new Date(now.getTime() + CODE_MINUTES * 60 * 1000),
+      sendCount: sameHour ? previous.sendCount + 1 : 1,
+      windowStart: sameHour ? previous.windowStart : now,
+    };
+    await prisma.emailVerification.upsert({ where: { email }, create: { email, ...fields }, update: fields });
+
+    if (!(await sendVerificationCodeEmail({ email, fullName }, code, CODE_MINUTES))) {
+      // Don't make them wait out the resend timer for a code that never went out.
+      await prisma.emailVerification.update({ where: { email }, data: { sentAt: new Date(0) } }).catch(() => {});
+      return res.status(503).json({ error: "We couldn't send the code right now. Please check the email address and try again." });
+    }
+    res.json({ message: 'Code sent', expiresInMinutes: CODE_MINUTES, resendAfterSeconds: RESEND_SECONDS });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send the code' });
+  }
+}
+
 async function registerStaff(req, res) {
   try {
-    const fullName = String(req.body.fullName || '').trim();
-    const email = String(req.body.email || '').trim().toLowerCase();
-    const department = String(req.body.department || '').trim();
-    const reason = String(req.body.reason || '').trim();
-    const password = String(req.body.password || '');
-    if (!fullName || !email || !department || !password) {
-      return res.status(400).json({ error: 'Full name, email, department and password are required' });
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'Please enter a valid email address' });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
-    if (reason.length > 1000) {
-      return res.status(400).json({ error: 'Please keep the note under 1000 characters' });
-    }
-    if (!(await getDepartmentList()).includes(department)) {
-      return res.status(400).json({ error: 'Please choose your department from the list' });
-    }
+    const { error, data } = await readStaffRequest(req.body);
+    if (error) return res.status(400).json({ error });
+    const { fullName, email, department, reason, password } = data;
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return res.status(409).json({ error: 'An account with this email already exists' });
+
+    // The emailed code proves the address belongs to them.
+    const code = String(req.body.code || '').replace(/\D/g, '');
+    const check = await prisma.emailVerification.findUnique({ where: { email } });
+    if (!check) {
+      return res.status(400).json({ error: 'Please ask for a verification code first.', codeError: 'missing' });
+    }
+    if (check.expiresAt < new Date()) {
+      return res.status(400).json({ error: 'This code has expired. Please send a new code.', codeError: 'expired' });
+    }
+    if (check.attempts >= MAX_CODE_TRIES) {
+      return res.status(429).json({ error: 'Too many wrong tries. Please send a new code.', codeError: 'locked' });
+    }
+    const matches = code.length === 6
+      && crypto.timingSafeEqual(Buffer.from(check.codeHash, 'hex'), Buffer.from(hashCode(email, code), 'hex'));
+    if (!matches) {
+      const { attempts } = await prisma.emailVerification.update({ where: { email }, data: { attempts: { increment: 1 } } });
+      const left = MAX_CODE_TRIES - attempts;
+      return res.status(left > 0 ? 400 : 429).json({
+        error: left > 0 ? `That code isn't right. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong tries. Please send a new code.',
+        codeError: left > 0 ? 'wrong' : 'locked',
+      });
+    }
 
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const randPart = Math.random().toString(36).substring(2, 7).toUpperCase();
@@ -181,6 +285,7 @@ async function registerStaff(req, res) {
           role: 'STAFF', accountStatus: 'PENDING',
         },
       });
+      await tx.emailVerification.delete({ where: { email } });
       return tx.accessRequest.create({
         data: { type: 'STAFF_ACCOUNT', userId: user.id, fullName, email, department, reason: reason || null },
       });
@@ -355,4 +460,4 @@ async function uploadAvatar(req, res) {
   }
 }
 
-module.exports = { register, registerStaff, checkPortalPath, login, googleLogin, getMe, updateProfile, changePassword, uploadAvatar };
+module.exports = { register, registerStaff, sendStaffCode, checkPortalPath, login, googleLogin, getMe, updateProfile, changePassword, uploadAvatar };

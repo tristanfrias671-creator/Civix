@@ -1,6 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('./prisma');
 
 // Resolution deadlines count working days (Monday–Friday) on the Philippine calendar,
 // like the Anti-Red Tape Act processing times. Holidays are not excluded.
@@ -20,19 +18,34 @@ function addWorkingDays(from, days) {
   return new Date(day.getTime() + DAY_MS - 1 - PH_OFFSET_MS);
 }
 
+// Midnight on the Philippine calendar at the start of `date`'s day / month.
+function phDayStart(date = new Date()) {
+  const p = new Date(date.getTime() + PH_OFFSET_MS);
+  return new Date(Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), p.getUTCDate()) - PH_OFFSET_MS);
+}
+function phMonthStart(date = new Date()) {
+  const p = new Date(date.getTime() + PH_OFFSET_MS);
+  return new Date(Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), 1) - PH_OFFSET_MS);
+}
+
+// Feedback rates the municipality's service as a whole: no office acts on it, so
+// it has no deadline (null).
 function deadlineDays(settings, type) {
+  if (type === 'FEEDBACK') return null;
   return {
     COMPLAINT: settings.deadlineComplaintDays,
     SUGGESTION: settings.deadlineSuggestionDays,
-    FEEDBACK: settings.deadlineFeedbackDays,
   }[type] || settings.deadlineComplaintDays;
 }
 
-// Reports filed before deadlines existed get one from their submission date.
+// Reports filed before deadlines existed get one from their submission date, and
+// feedback filed while it still had deadlines loses its (so it is never overdue).
 async function backfillDeadlines() {
   const { ensureSettings } = require('../controllers/settings');
+  const cleared = await prisma.submission.updateMany({ where: { type: 'FEEDBACK', dueAt: { not: null } }, data: { dueAt: null } });
+  if (cleared.count) console.log(`[deadlines] Removed deadlines from ${cleared.count} feedback report(s).`);
   const missing = await prisma.submission.findMany({
-    where: { dueAt: null },
+    where: { dueAt: null, type: { not: 'FEEDBACK' } },
     select: { id: true, type: true, createdAt: true },
   });
   if (!missing.length) return 0;
@@ -46,4 +59,4 @@ async function backfillDeadlines() {
   return missing.length;
 }
 
-module.exports = { addWorkingDays, deadlineDays, backfillDeadlines };
+module.exports = { addWorkingDays, deadlineDays, backfillDeadlines, phDayStart, phMonthStart };

@@ -105,6 +105,13 @@ const STATUS_TONE = {
   },
 };
 
+// Feedback rates the municipality's service as a whole: no office, no status steps.
+const FEEDBACK_TONE = {
+  color: '#15803d', textDark: '#4ade80', bg: '#f0fdf4', border: '#bbf7d0', darkBg: 'rgba(22,163,74,0.10)', darkBorder: 'rgba(22,163,74,0.35)',
+  icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', title: 'Feedback received',
+  message: 'Thank you! Your rating helps the Municipality of Cantilan improve its services.',
+};
+
 const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const fmtDateTime = d => new Date(d).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -325,17 +332,19 @@ export default function Track() {
         {/* Search box */}
         <form onSubmit={handleSubmit} className="track-fade-1 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6 transition-shadow hover:shadow-md">
           <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Code</label>
-          <div className="flex gap-3">
+          {/* Phones: the box and button stack, so the whole code fits and the page
+              never gets wider than the screen. */}
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               value={code}
               onChange={e => setCode(e.target.value.toUpperCase())}
               placeholder="e.g. ENG-20240527-0001"
-              className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono tracking-wider outline-none transition-all focus:ring-2 focus:bg-white hover:border-primary"
+              className="flex-1 min-w-0 w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono tracking-wider outline-none transition-all focus:ring-2 focus:bg-white hover:border-primary"
               style={{ '--tw-ring-color': '#2563eb' }}
               spellCheck={false}
             />
             <button type="submit" disabled={loading || !code.trim()} aria-busy={loading}
-              className={`tk-btn px-6 py-2.5 rounded-xl font-semibold text-sm text-white transition-colors bg-primary flex items-center justify-center ${loading ? 'is-loading' : 'hover:bg-blue-700'} ${!loading && !code.trim() ? 'opacity-50' : ''}`}>
+              className={`tk-btn w-full sm:w-auto whitespace-nowrap px-6 py-2.5 rounded-xl font-semibold text-sm text-white transition-colors bg-primary flex items-center justify-center ${loading ? 'is-loading' : 'hover:bg-blue-700'} ${!loading && !code.trim() ? 'opacity-50' : ''}`}>
               <span className="tk-labels">
                 <span className="tk-label tk-label-idle" aria-hidden={loading}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -389,7 +398,8 @@ export default function Track() {
 
         {/* Result */}
         {result && (() => {
-          const tone = STATUS_TONE[result.status] || STATUS_TONE.PENDING;
+          const isFeedback = result.type === 'FEEDBACK';
+          const tone = isFeedback ? FEEDBACK_TONE : (STATUS_TONE[result.status] || STATUS_TONE.PENDING);
           const latestNote = result.statusLogs?.find(l => l.status === result.status && l.note)?.note;
           // statusLogs are newest-first; the submission itself is the oldest event.
           const history = [
@@ -419,18 +429,18 @@ export default function Track() {
                       </button>
                     </div>
                   </div>
-                  <StatusBadge status={result.status} />
+                  {!isFeedback && <StatusBadge status={result.status} />}
                 </div>
-                <h3 className="font-bold text-gray-900 text-lg mt-3">{office}</h3>
+                <h3 className="font-bold text-gray-900 text-lg mt-3">{isFeedback ? 'Feedback on our services' : office}</h3>
                 <div className="flex items-center gap-2 flex-wrap mt-2">
                   <TypeBadge type={result.type} />
-                  <PriorityBadge priority={result.priority} />
+                  {!isFeedback && <PriorityBadge priority={result.priority} />}
                 </div>
               </div>
 
               <div className="px-5 sm:px-6 py-5 space-y-6">
                 {/* Progress */}
-                <ProgressTimeline result={result} />
+                {!isFeedback && <ProgressTimeline result={result} />}
 
                 {/* Status banner, with the office's latest note */}
                 <div className="flex items-start gap-3 rounded-xl px-4 py-3.5 border"
@@ -439,7 +449,7 @@ export default function Track() {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={tone.icon} /></svg>
                   </span>
                   <div className="min-w-0">
-                    <p className="font-bold text-sm" style={{ color: tone.color }}>{tone.title}</p>
+                    <p className="font-bold text-sm" style={{ color: dark && tone.textDark ? tone.textDark : tone.color }}>{tone.title}</p>
                     <p className="text-sm text-gray-700 mt-0.5">{tone.message}</p>
                     {latestNote && (
                       <div className="mt-2.5 rounded-lg bg-white/80 border border-white dark:bg-slate-900/50 dark:border-slate-700 px-3 py-2">
@@ -455,8 +465,8 @@ export default function Track() {
                   {[
                     { label: 'Location', value: result.address || 'Not specified', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' },
                     { label: 'Filed', value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
-                    { label: 'Last updated', value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-                    ...(result.dueAt ? [{
+                    ...(isFeedback ? [] : [{ label: 'Last updated', value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' }]),
+                    ...(result.dueAt && !isFeedback ? [{
                       label: 'Resolve by',
                       value: (
                         <span className="flex flex-wrap items-center gap-2">
@@ -479,7 +489,7 @@ export default function Track() {
 
                 {/* Description */}
                 <div>
-                  <h4 className={sectionTitle}>Description</h4>
+                  <h4 className={sectionTitle}>{isFeedback ? 'Your feedback' : 'Description'}</h4>
                   <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line break-words rounded-xl border-l-4 border-gray-200 bg-gray-50/70 dark:bg-slate-900/40 px-4 py-3">
                     {result.description}
                   </p>
@@ -504,8 +514,8 @@ export default function Track() {
                   </div>
                 )}
 
-                {/* Activity history */}
-                <div>
+                {/* Activity history (feedback has no status steps) */}
+                {!isFeedback && <div>
                   <h4 className={sectionTitle}>Activity history</h4>
                   <ol className="relative">
                     {history.map((h, i) => {
@@ -527,7 +537,7 @@ export default function Track() {
                       );
                     })}
                   </ol>
-                </div>
+                </div>}
               </div>
             </div>
           );

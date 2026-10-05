@@ -1,22 +1,29 @@
 const router = require('express').Router();
-const { PrismaClient } = require('@prisma/client');
-const { authenticate, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 const { classifyText } = require('../utils/classifier');
+const { createLimiter, limitRequests } = require('../utils/rateLimit');
 
-const prisma = new PrismaClient();
+const prisma = require('../utils/prisma');
+
+// Suggestions for everyone together. Past this the server answers "no suggestion"
+// at once (the form then just shows none), so a flood can't tie up the server.
+const allSuggestions = createLimiter({ windowMs: 60 * 1000, max: Number(process.env.SUGGESTIONS_PER_MINUTE) || 1200 });
+const NO_SUGGESTION = { department: 'UNASSIGNED', confidence: 0, matchedKeywords: [], allScores: {} };
 
 // POST /api/classify  — public: real-time classification while citizen types
-router.post('/', (req, res) => {
+// (the form asks after each pause in typing; the limit is far above that).
+router.post('/', limitRequests({ windowMs: 60 * 1000, max: 120 }), (req, res) => {
   const { text } = req.body;
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ error: 'text is required' });
   }
+  if (!allSuggestions.take('all').ok) return res.json(NO_SUGGESTION);
   const result = classifyText(text.slice(0, 2000)); // cap input length
   res.json(result);
 });
 
 // GET /api/classify/submission/:id  — returns saved AI classification for a submission
-router.get('/submission/:id', authenticate, requireStaffOrAdmin, async (req, res) => {
+router.get('/submission/:id', authenticate, requireAdmin, async (req, res) => {
   try {
     const rec = await prisma.aIClassification.findUnique({
       where: { submissionId: req.params.id },
@@ -29,7 +36,7 @@ router.get('/submission/:id', authenticate, requireStaffOrAdmin, async (req, res
 });
 
 // GET /api/classify/audit-log  — department change history
-router.get('/audit-log', authenticate, requireStaffOrAdmin, async (req, res) => {
+router.get('/audit-log', authenticate, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);

@@ -22,12 +22,123 @@ body {
   border: none !important;
 }
 
+/* ── Report pins on the admin Map View ──
+   A 3D map pin (public/map-pins, colored by report type) with a status dot, a
+   drop-in bounce when shown, a shadow on the ground, and a pulsing ring while the
+   report is open (faster and red when urgent). The pin's point is at (90px, 74px).
+   Only the label and pin take clicks. */
+.leaflet-marker-icon.cvx-pin-icon { pointer-events: none !important; }
+.cvx-pin { position: relative; width: 180px; height: 80px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.cvx-pin-drop { position: absolute; inset: 0; animation: cvx-drop .75s cubic-bezier(.3, 1.2, .5, 1) both; animation-delay: var(--delay, 0ms); }
+.cvx-pin-lift { position: absolute; inset: 0; transition: transform .2s ease; }
+.cvx-pin-lift:hover { transform: translateY(-5px); }
+.cvx-pin-label {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 2px 9px 2px 7px; border-radius: 999px; background: #fff; border: 1px solid #e2e8f0;
+  font-size: 11px; font-weight: 600; line-height: 1.5; color: #1e293b;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .18); pointer-events: auto; cursor: pointer;
+}
+.cvx-pin-label i { width: 7px; height: 7px; border-radius: 50%; background: var(--pin); }
+.cvx-pin-img {
+  position: absolute; left: 63px; top: 24px; width: 54px; height: 54px;
+  pointer-events: auto; cursor: pointer; user-select: none; -webkit-user-drag: none;
+}
+.cvx-pin-status {
+  position: absolute; left: 99px; top: 25px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--status); border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3); pointer-events: none;
+}
+/* On the ground: the ball's shadow falling to the right of the point, and a
+   small dark spot where the needle goes in. */
+.cvx-pin-shadow, .cvx-pin-contact {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  animation: cvx-shadow .75s cubic-bezier(.3, 1.2, .5, 1) both; animation-delay: var(--delay, 0ms);
+  transition: transform .2s ease, opacity .2s ease;
+}
+.cvx-pin-shadow { left: 92px; top: 69px; width: 24px; height: 7px; background: rgba(0, 0, 0, .28); filter: blur(2px); transform-origin: 0 50%; }
+.cvx-pin-contact { left: 87px; top: 72.5px; width: 6px; height: 3px; background: rgba(0, 0, 0, .5); filter: blur(.8px); }
+.cvx-pin:hover .cvx-pin-shadow { transform: scale(.7); opacity: .6; }
+/* Two rings, the second half a beat behind */
+.cvx-pin-pulse {
+  position: absolute; left: 90px; top: 74px; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  border-radius: 50%; border: 2.5px solid var(--pin); background: var(--pin-soft);
+  animation: cvx-pulse 2.2s ease-out infinite; animation-delay: calc(var(--delay, 0ms) + .7s);
+  opacity: 0; pointer-events: none;
+}
+.cvx-pin-pulse.is-late { animation-delay: calc(var(--delay, 0ms) + 1.8s); }
+.cvx-pin.is-urgent .cvx-pin-pulse { border-color: #dc2626; background: rgba(220, 38, 38, .18); animation-duration: 1.2s; }
+.cvx-pin.is-urgent .cvx-pin-pulse.is-late { animation-delay: calc(var(--delay, 0ms) + 1.3s); }
+@keyframes cvx-drop {
+  0% { transform: translateY(-48px); opacity: 0; }
+  55% { transform: translateY(0); opacity: 1; }
+  72% { transform: translateY(-9px); }
+  86% { transform: translateY(0); }
+  94% { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+@keyframes cvx-shadow {
+  0% { transform: scale(.3); opacity: 0; }
+  55% { transform: scale(1); opacity: 1; }
+  72% { transform: scale(.75); }
+  100% { transform: scale(1); }
+}
+@keyframes cvx-pulse {
+  0% { transform: scale(.2, .08); opacity: .95; }
+  100% { transform: scale(1.5, .6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cvx-pin-drop, .cvx-pin-shadow, .cvx-pin-contact { animation: none; }
+  .cvx-pin-pulse { display: none; }
+  .cvx-pin-lift, .cvx-pin-shadow, .cvx-pin-contact { transition: none; }
+}
+
+/* "You are here" dot on the citizen pin map (live location) */
+.civix-you-are-here {
+  position: relative;
+  width: 18px;
+  height: 18px;
+}
+.civix-you-are-here span {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+.civix-you-are-here::before {
+  content: '';
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.35);
+  animation: civix-you-pulse 2s ease-out infinite;
+}
+@keyframes civix-you-pulse {
+  0% { transform: scale(0.4); opacity: 0.9; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .civix-you-are-here::before { animation: none; opacity: 0.4; }
+}
+
 .scrollbar-none {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .scrollbar-none::-webkit-scrollbar {
   display: none;
+}
+
+/* Phones: text boxes on the citizen pages use 16px text. With smaller text,
+   iPhones zoom the whole page in when a box is tapped, and it stays zoomed. */
+@media (max-width: 639px) {
+  .citizen-portal input,
+  .citizen-portal textarea,
+  .citizen-portal select {
+    font-size: 16px;
+  }
 }
 
 /* ═══════════════════════════════════════════════
@@ -227,13 +338,13 @@ body {
     letter-spacing: 0.03em;
     text-transform: uppercase;
     text-align: left;
-    color: #94a3b8;
+    color: #64748b;
   }
   table.mobile-cards td:not([data-label])::before,
   table.mobile-cards td[data-label=""]::before { display: none; }
   table.mobile-cards td > * { min-width: 0; }
   .dark table.mobile-cards tr { border-bottom-color: rgba(255,255,255,0.06); }
-  .dark table.mobile-cards td::before { color: #64748b; }
+  .dark table.mobile-cards td::before { color: #94a3b8; }
 }
 
 /* ── Scrollbar ── */

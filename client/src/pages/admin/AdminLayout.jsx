@@ -1,14 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import Icon from '../../components/common/Icons';
+import Avatar from '../../components/common/Avatar';
+import SignOutDialog from '../../components/common/SignOutDialog';
 import ProfileModal from '../../components/common/ProfileModal';
 import IdleSessionGuard from '../../components/common/IdleSessionGuard';
 import AdminNotificationBell, { openAlerts } from '../../components/common/AdminNotificationBell';
 import { announceNewAlerts } from '../../components/common/alerts';
 import { BrandImg } from '../../context/BrandingContext';
-import { mediaUrl } from '../../utils/mediaUrl';
 import api from '../../utils/api';
 
 const NAV_SECTIONS = [
@@ -66,6 +67,8 @@ export default function AdminLayout() {
   const location = useLocation();
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const closeSignOut = useCallback(() => setConfirmSignOut(false), []);
   const [topSearch, setTopSearch] = useState('');
   const [alerts, setAlerts] = useState(null);
   const pendingRequests = alerts?.accessRequests?.length || 0;
@@ -98,6 +101,7 @@ export default function AdminLayout() {
     : location.pathname.startsWith(i.to));
 
   function handleLogout() {
+    setConfirmSignOut(false);
     logout();
     navigate('/');
   }
@@ -120,20 +124,20 @@ export default function AdminLayout() {
           <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-10 h-10 object-contain flex-shrink-0" />
           <div className="min-w-0">
             <p className="text-white font-extrabold text-sm leading-tight truncate">CIVIX</p>
-            <p className="text-white/50 text-[11px] font-medium leading-tight truncate">Administrator Portal</p>
+            <p className="text-white/70 text-[11px] font-medium leading-tight truncate">Administrator Portal</p>
           </div>
         </div>
 
         <nav className="flex-1 px-3 py-4 overflow-y-auto scrollbar-none">
           {NAV_SECTIONS.map(section => (
             <div key={section.label} className="mb-4">
-              <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-white/30">{section.label}</p>
+              <p className="px-3 mb-1.5 text-[11px] font-bold uppercase tracking-widest text-white/60">{section.label}</p>
               {section.items.map(item => (
                 <NavLink key={item.to} to={item.to} end={item.to === '/admin/dashboard'}
                   onClick={() => setSidebarOpen(false)}
                   className={({ isActive }) =>
                     `relative flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm font-medium transition-colors ${
-                      isActive ? 'text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'
+                      isActive ? 'text-white' : 'text-white/75 hover:bg-white/5 hover:text-white'
                     }`
                   }
                   style={({ isActive }) => isActive ? { background: 'rgba(37,99,235,0.9)' } : undefined}>
@@ -143,7 +147,7 @@ export default function AdminLayout() {
                       <Icon name={item.icon} className="w-5 h-5 flex-shrink-0" />
                       {item.label}
                       {item.to === '/admin/access-requests' && pendingRequests > 0 && (
-                        <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center text-[11px] font-bold text-white bg-red-500"
+                        <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center text-[11px] font-bold text-white bg-red-600"
                           aria-label={`${pendingRequests} pending`}>
                           {pendingRequests > 9 ? '9+' : pendingRequests}
                         </span>
@@ -159,17 +163,14 @@ export default function AdminLayout() {
         <div className="px-4 py-4" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <button onClick={() => setProfileOpen(true)}
             className="flex items-center gap-3 mb-1 w-full text-left hover:bg-white/5 rounded-lg p-1.5 -ml-1.5 transition-colors group">
-            {user?.avatar
-              ? <img src={mediaUrl(user.avatar)} alt="avatar" className="w-9 h-9 rounded-full object-cover flex-shrink-0 ring-2 ring-white/20 group-hover:ring-blue-400 transition-all" />
-              : <div className="w-9 h-9 rounded-full text-white flex items-center justify-center font-semibold text-sm flex-shrink-0" style={{ background: '#2563eb' }}>{user?.fullName?.[0]}</div>
-            }
+            <Avatar user={user} className="w-9 h-9" imgClassName="ring-2 ring-white/20 group-hover:ring-blue-400 transition-all" />
             <div className="min-w-0">
               <p className="text-sm font-medium text-white leading-tight truncate">{user?.fullName}</p>
-              <p className="text-xs text-white/45 group-hover:text-white/70">Administrator · Edit Profile</p>
+              <p className="text-xs text-white/70 group-hover:text-white/90">Administrator · Edit Profile</p>
             </div>
           </button>
-          <button onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/50 hover:text-red-300 hover:bg-white/5 rounded-lg transition-colors">
+          <button onClick={() => setConfirmSignOut(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/75 hover:text-red-200 hover:bg-white/5 rounded-lg transition-colors">
             <Icon name="logout" className="w-5 h-5" /> Sign Out
           </button>
         </div>
@@ -179,7 +180,7 @@ export default function AdminLayout() {
         {/* Mobile header */}
         <header className="bg-white border-b border-gray-200 flex items-center px-4 py-3 md:hidden"
           style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-          <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-500 hover:text-gray-800 rounded-lg transition-colors">
+          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" className="p-2 text-gray-600 hover:text-gray-800 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
@@ -187,9 +188,22 @@ export default function AdminLayout() {
           <div className="flex items-center gap-2 ml-3">
             <BrandImg kind="seal" className="w-6 h-6 object-contain" />
             <span className="font-extrabold text-gray-900 text-sm">CIVIX</span>
-            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">Admin</span>
+            <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">Admin</span>
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-0.5">
+            <button onClick={toggleDark} aria-label={dark ? 'Light mode' : 'Dark mode'}
+              className="p-2 rounded-lg transition-colors" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>
+              {dark ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <circle cx="12" cy="12" r="5"/>
+                  <path strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+                </svg>
+              )}
+            </button>
             <AdminNotificationBell alerts={alerts} dark={dark} />
           </div>
         </header>
@@ -198,19 +212,19 @@ export default function AdminLayout() {
         <header className="hidden md:flex items-center gap-4 px-6 h-16 flex-shrink-0"
           style={{ background: dark ? '#1e293b' : 'white', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#e5e7eb'}` }}>
           <div className="min-w-0">
-            <p className="text-xs font-medium" style={{ color: dark ? '#64748b' : '#9ca3af' }}>Admin</p>
+            <p className="text-xs font-medium" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>Admin</p>
             <h2 className="text-sm font-bold truncate" style={{ color: dark ? '#f1f5f9' : '#111827' }}>{activeItem?.label || 'Dashboard'}</h2>
           </div>
 
           <form onSubmit={handleTopSearch} className="hidden lg:block flex-1 max-w-sm ml-4">
             <div className="relative">
-              <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: dark ? '#64748b' : '#9ca3af' }}
+              <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: dark ? '#94a3b8' : '#4b5563' }}
                 fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                 <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
               </svg>
               <input value={topSearch} onChange={e => setTopSearch(e.target.value)}
                 placeholder="Search submissions, tracking code..."
-                className="w-full pl-10 pr-3 py-2 rounded-lg text-sm outline-none transition-all"
+                className="w-full pl-10 pr-3 py-2 rounded-lg text-sm outline-none transition-all placeholder:text-gray-500 dark:placeholder:!text-slate-400 focus:ring-2 focus:ring-blue-500"
                 style={{
                   background: dark ? '#0f172a' : '#f3f4f6',
                   color: dark ? '#e2e8f0' : '#111827',
@@ -223,7 +237,7 @@ export default function AdminLayout() {
             <AdminNotificationBell alerts={alerts} dark={dark} />
             <button onClick={toggleDark}
               className="p-2 rounded-lg transition-colors"
-              style={{ color: dark ? '#94a3b8' : '#6b7280' }}
+              style={{ color: dark ? '#94a3b8' : '#4b5563' }}
               onMouseEnter={e => e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               title={dark ? 'Light Mode' : 'Dark Mode'}>
@@ -239,20 +253,21 @@ export default function AdminLayout() {
               )}
             </button>
             <button onClick={() => setProfileOpen(true)} className="flex items-center gap-2 pl-2 ml-1" style={{ borderLeft: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'}` }}>
-              {user?.avatar
-                ? <img src={mediaUrl(user.avatar)} alt="avatar" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-                : <div className="w-8 h-8 rounded-full text-white flex items-center justify-center font-semibold text-xs flex-shrink-0" style={{ background: '#2563eb' }}>{user?.fullName?.[0]}</div>
-              }
+              <Avatar user={user} className="w-8 h-8" letterClassName="text-xs" />
             </button>
           </div>
         </header>
 
-        <main className={`flex-1 min-h-0 ${isMapPage ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
+        {/* The map page fills the height; it still scrolls if the screen is too short. */}
+        <main className={`flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
           <Outlet key={location.key} />
         </main>
       </div>
 
       <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <SignOutDialog open={confirmSignOut} user={user} roleLabel="Administrator"
+        message="You'll need your private admin link to sign in again."
+        onCancel={closeSignOut} onConfirm={handleLogout} />
       <IdleSessionGuard loginPath="/" />
     </div>
   );

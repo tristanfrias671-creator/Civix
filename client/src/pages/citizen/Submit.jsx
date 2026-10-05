@@ -5,9 +5,12 @@ import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
 import Icon from '../../components/common/Icons';
 import { formatDueDate } from '../../components/common/DeadlineBadge';
 import FeedbackRatingPanel from '../../components/citizen/FeedbackRatingPanel';
+import LocationPicker from '../../components/citizen/LocationPicker';
+import TurnstileBox from '../../components/citizen/TurnstileBox';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
-import { suggestLocations, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
+import { fetchFormTicket } from '../../utils/reportGuard';
+import { suggestLocations, withBarangay, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
 
 const fadeCss = `
 @keyframes submitFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
@@ -39,6 +42,11 @@ function ConfidenceBadge({ confidence }) {
   );
 }
 
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// A form ticket only works a few seconds after it was issued (see utils/reportGuard).
+const TICKET_READY_MS = 3200;
+
 export default function Submit() {
   const { dark } = useTheme();
   const navigate = useNavigate();
@@ -47,11 +55,52 @@ export default function Submit() {
   const debounceRef = useRef(null);
 
   const [form, setForm] = useState({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
+  // Feedback rates the municipality's service as a whole: no office, no photos,
+  // no deadline (see server controllers/submissions.js).
+  const isFeedback = form.type === 'FEEDBACK';
   const [trackInput, setTrackInput] = useState('');
   const [photos, setPhotos] = useState([]);
+  const [pin, setPin] = useState(null); // { lat, lng, barangay } from the map, optional
+
+  // A new pin also puts its barangay in the Location field (keeping what was typed).
+  function handlePin(next) {
+    setPin(next);
+    if (next?.barangay) setForm(f => ({ ...f, address: withBarangay(f.address, next.barangay) }));
+  }
+  const pinAgrees = !pin?.barangay
+    || withBarangay(form.address, pin.barangay).toLowerCase() === form.address.trim().toLowerCase();
   const [loading, setLoading] = useState(false);
   const [trackingId, setTrackingId] = useState(null);
   const [dueAt, setDueAt] = useState(null);
+  // Why the last send didn't go through, shown above Submit: { text, trackingId? }
+  // (trackingId when the same report was already sent).
+  const [notice, setNotice] = useState(null);
+
+  // Spam protection: the form's one-time ticket { ticket, at, siteKey }, the
+  // "I'm not a robot" check (only when the site has it set up), and a hidden field
+  // only bots fill in.
+  const ticketRef = useRef(null);
+  const [siteKey, setSiteKey] = useState(null);
+  const botTokenRef = useRef(null);
+  const [botCheckRound, setBotCheckRound] = useState(0);
+  const honeypotRef = useRef(null);
+  const handleBotToken = useCallback(token => { botTokenRef.current = token; }, []);
+
+  const loadTicket = useCallback(async () => {
+    const { ticket, siteKey: key } = await fetchFormTicket();
+    ticketRef.current = { ticket, at: Date.now(), siteKey: key };
+    setSiteKey(key);
+    return ticketRef.current;
+  }, []);
+
+  useEffect(() => { loadTicket().catch(() => {}); }, [loadTicket]);
+
+  // Waits up to 12 seconds for the "I'm not a robot" check to finish (if its script
+  // can't load in 8, it reports 'unavailable' and the report goes ahead).
+  async function botCheckToken() {
+    for (let waited = 0; !botTokenRef.current && waited < 12000; waited += 250) await pause(250);
+    return botTokenRef.current;
+  }
   const [feedbackRating, setFeedbackRating]     = useState(0);
   const [feedbackReaction, setFeedbackReaction] = useState('');
   const [feedbackTags, setFeedbackTags]         = useState([]);
@@ -163,7 +212,7 @@ export default function Submit() {
   function handleDescriptionChange(e) {
     const text = e.target.value;
     setForm(p => ({ ...p, description: text }));
-    if (!form.department) runAI(text);
+    if (!form.department && !isFeedback) runAI(text);
     else { setAiResult(null); setAiLoading(false); }
   }
 
@@ -176,8 +225,9 @@ export default function Submit() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.department) return toast.error('Please select a department / office');
-    if (form.description.length < 20) return toast.error('Description must be at least 20 characters');
+    if (loading) return;
+    if (!isFeedback && !form.department) return toast.error('Please select a department / office');
+    if (form.description.trim().length < 20) return toast.error('Description must be at least 20 characters');
     if (!form.contactNumber.trim()) return toast.error('Contact number is required');
     // Same rule as the server: a PH mobile number (09…, +639… or 639…), since updates are texted.
     if (!/^(09\d{9}|639\d{9}|9\d{9})$/.test(form.contactNumber.replace(/\D/g, ''))) {
@@ -189,42 +239,135 @@ export default function Submit() {
       if (!feedbackReaction) return toast.error('Please select how you felt about the service');
     }
     setLoading(true);
+    setNotice(null);
+    let sent = false;
     try {
       const fd = new FormData();
       fd.append('type', form.type);
-      fd.append('citizenDepartment', form.department);
+      if (!isFeedback) fd.append('citizenDepartment', form.department);
       fd.append('description', form.description);
       if (form.contactNumber) fd.append('contactNumber', form.contactNumber);
       if (form.email) fd.append('email', form.email);
       if (form.address) fd.append('address', form.address);
+      if (pin) {
+        fd.append('latitude', String(pin.lat));
+        fd.append('longitude', String(pin.lng));
+      }
       if (form.type === 'FEEDBACK') {
         fd.append('rating', String(feedbackRating));
         fd.append('reaction', feedbackReaction);
         if (feedbackTags.length) fd.append('feedbackTags', JSON.stringify(feedbackTags));
       }
-      photos.forEach(p => fd.append('photos', p));
+      const bait = honeypotRef.current?.value;
+      if (bait) fd.append('leave_empty', bait);
+      if (!isFeedback) photos.forEach(p => fd.append('photos', p));
 
-      const res = await api.post('/submissions', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      let res;
+      let botToken = null;
+      for (let attempt = 1; ; attempt += 1) {
+        const ticket = ticketRef.current || await loadTicket();
+        if (ticket.siteKey && !botToken) {
+          botToken = await botCheckToken();
+          if (!botToken) {
+            setNotice({ text: 'Please complete the "I\'m not a robot" check just above the Submit button, then press Submit again.' });
+            return;
+          }
+        }
+        const age = Date.now() - ticket.at;
+        if (age < TICKET_READY_MS) await pause(TICKET_READY_MS - age);
+
+        const headers = { 'Content-Type': 'multipart/form-data', 'X-Form-Ticket': ticket.ticket };
+        if (botToken) headers['X-Turnstile-Token'] = botToken;
+        sent = true;
+        try {
+          res = await api.post('/submissions', fd, { headers });
+          break;
+        } catch (err) {
+          // The ticket was too old or already used (e.g. the page was open overnight):
+          // send once more with a new one.
+          if (attempt === 1 && err.response?.data?.code === 'FORM_TICKET') {
+            ticketRef.current = null;
+            continue;
+          }
+          throw err;
+        }
+      }
       setTrackingId(res.data.trackingId);
       setDueAt(res.data.submission?.dueAt || null);
       toast.success('Submission received!');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Submission failed');
+      const data = err.response?.data;
+      setNotice({
+        text: data?.error || (err.response
+          ? 'Your report could not be sent. Please try again.'
+          : 'Your report could not be sent. Please check your internet connection, then press Submit again.'),
+        // Already sent: a friendly note (plus a Track link, except for feedback).
+        info: data?.code === 'DUPLICATE',
+        trackingId: data?.code === 'DUPLICATE' && !isFeedback ? data.trackingId : null,
+      });
     } finally {
       setLoading(false);
+      if (sent) {
+        // Each ticket and each "I'm not a robot" pass is good for one report.
+        ticketRef.current = null;
+        loadTicket().catch(() => {});
+        setBotCheckRound(n => n + 1);
+      }
     }
   }
 
   function resetForm() {
     setTrackingId(null);
     setDueAt(null);
+    setNotice(null);
     setForm({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
     setPhotos([]);
+    setPin(null);
     setFeedbackRating(0);
     setFeedbackReaction('');
     setFeedbackTags([]);
     setAiResult(null);
     setAiDismissed(false);
+  }
+
+  // Feedback: a thank-you, with no code to keep (nothing to track or wait for).
+  if (trackingId && isFeedback) {
+    return (
+      <CitizenPortalLayout>
+        <div className="max-w-lg mx-auto py-8 text-center">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
+            <div className="mb-4 flex justify-center">
+              <div className="p-4 rounded-full bg-green-50 text-green-700">
+                <Icon name="feedback" className="w-14 h-14" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Thank you for your feedback!</h2>
+            {feedbackRating > 0 && (
+              <p className="mb-3">
+                <span className="text-2xl tracking-wider" aria-hidden="true">
+                  <span style={{ color: '#f59e0b' }}>{'★'.repeat(feedbackRating)}</span>
+                  <span style={{ color: '#cbd5e1' }}>{'★'.repeat(5 - feedbackRating)}</span>
+                </span>
+                <span className="block text-sm font-semibold text-gray-700 mt-1">You rated us {feedbackRating} out of 5</span>
+              </p>
+            )}
+            <p className="text-gray-600 mb-2">Your rating helps the Municipality of Cantilan improve its services for everyone.</p>
+            <p className="text-sm text-gray-500 mb-1">We've sent a thank-you note to your email.</p>
+            <p className="text-xs text-gray-500 mb-8">Reference no. <span className="font-mono">{trackingId}</span></p>
+            <div className="flex flex-wrap gap-3 justify-center">
+              <button onClick={resetForm}
+                className="px-5 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+                Send Another
+              </button>
+              <button onClick={() => navigate('/')}
+                className="px-5 py-2.5 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
+                Back to Home
+              </button>
+            </div>
+          </div>
+        </div>
+      </CitizenPortalLayout>
+    );
   }
 
   if (trackingId) {
@@ -252,7 +395,7 @@ export default function Submit() {
             <p className="text-sm text-gray-500 mb-1 font-medium">
               Save this code to track the status of your submission.
             </p>
-            <p className="text-xs text-gray-400 mb-8">
+            <p className="text-xs text-gray-500 mb-8">
               No account is required. Enter this code on the Track Complaint page at any time.
             </p>
             <div className="flex gap-3 justify-center">
@@ -285,7 +428,7 @@ export default function Submit() {
           <div className="flex-1">
             <h1 className="text-xl font-bold text-gray-800">Report a Concern</h1>
             <p className="text-gray-500 text-sm mt-0.5">Help us keep Cantilan clean, safe and organized.</p>
-            <p className="text-gray-400 text-xs mt-0.5">No registration. Just fill out the form and submit your report.</p>
+            <p className="text-gray-500 text-xs mt-0.5">No registration. Just fill out the form and submit your report.</p>
           </div>
         </div>
 
@@ -311,13 +454,27 @@ export default function Submit() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Type of Concern *</label>
-              <select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
+              <select value={form.type}
+                onChange={e => {
+                  const type = e.target.value;
+                  setForm(p => ({ ...p, type }));
+                  if (type === 'FEEDBACK') { setAiResult(null); setAiLoading(false); setDeptOpen(false); }
+                }}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm">
                 <option value="COMPLAINT">Complaint</option>
                 <option value="SUGGESTION">Suggestion</option>
                 <option value="FEEDBACK">Feedback</option>
               </select>
             </div>
+            {/* Feedback rates the municipality's service as a whole: no office to choose. */}
+            {isFeedback ? (
+              <div className="flex items-start gap-2.5 sm:self-end rounded-lg border border-green-200 bg-green-50 px-3.5 py-2.5">
+                <Icon name="feedback" className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-700" />
+                <p className="text-sm text-gray-700 leading-snug">
+                  Feedback is about the municipality's service as a whole, so there's no office to choose.
+                </p>
+              </div>
+            ) : (
             <div ref={deptFieldRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Department Concerned *
@@ -355,6 +512,7 @@ export default function Submit() {
                 </div>
               )}
             </div>
+            )}
           </div>
 
           {/* LOCATION */}
@@ -370,7 +528,7 @@ export default function Submit() {
                 onFocus={() => showLocationSuggestionsFor(form.address)}
                 onKeyDown={e => { if (e.key === 'Escape') setShowLocationSuggestions(false); }}
                 placeholder="Choose or type your barangay"
-                autoComplete="off"
+                autoComplete="off" maxLength={191}
                 role="combobox" aria-expanded={showLocationSuggestions} aria-controls="location-suggestions" aria-autocomplete="list"
                 className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
               <button type="button" onClick={toggleBarangayList} tabIndex={-1}
@@ -387,7 +545,7 @@ export default function Submit() {
                   className="absolute z-20 left-0 right-0 mt-1.5 bg-white rounded-lg border border-gray-200 shadow-lg overflow-y-auto"
                   style={{ maxHeight: '16rem' }}>
                   {listingBarangays && (
-                    <p className="px-4 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Barangays of Cantilan</p>
+                    <p className="px-4 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Barangays of Cantilan</p>
                   )}
                   {locationSuggestions.map(loc => (
                     <button key={loc} type="button" role="option" aria-selected={false}
@@ -403,27 +561,51 @@ export default function Submit() {
                 </div>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-1">Choose your barangay from the list. You can then add a purok, street or landmark after it.</p>
+            <p className="text-xs text-gray-500 mt-1">Choose your barangay from the list. You can then add a purok, street or landmark after it.</p>
+            {pin?.barangay && (pinAgrees ? (
+              <p className="text-xs font-medium text-green-700 mt-1">
+                ✓ Barangay {pin.barangay} was filled in from your map pin. You can still edit it.
+              </p>
+            ) : (
+              <p className="text-xs font-medium text-amber-700 mt-1">
+                Your map pin is in Barangay {pin.barangay}.{' '}
+                <button type="button" onClick={() => setForm(f => ({ ...f, address: withBarangay(f.address, pin.barangay) }))}
+                  className="font-semibold underline">
+                  Use Barangay {pin.barangay}
+                </button>
+              </p>
+            ))}
           </div>
+
+          {/* MAP PIN (optional) */}
+          <LocationPicker value={pin} onChange={handlePin} />
 
           {/* CONTACT NUMBER (REQUIRED) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Contact Number *</label>
-            <input type="tel" value={form.contactNumber} required
+            <input type="tel" value={form.contactNumber} required maxLength={20}
               onChange={e => setForm(p => ({ ...p, contactNumber: e.target.value }))}
               placeholder="e.g. 09XX XXX XXXX"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-            <p className="text-xs text-gray-400 mt-1">Mobile number. We'll text you your tracking code and each status update.</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {isFeedback
+                ? 'Mobile number, in case the municipality needs to reach you about your feedback.'
+                : "Mobile number. We'll text you your tracking code and each status update."}
+            </p>
           </div>
 
           {/* EMAIL (REQUIRED) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email Address *</label>
-            <input type="email" value={form.email} required
+            <input type="email" value={form.email} required maxLength={191}
               onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
               placeholder="e.g. juandelacruz@gmail.com"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-            <p className="text-xs text-gray-400 mt-1">We'll email you automatically whenever your report's status changes — no need to keep checking Track My Report.</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {isFeedback
+                ? "We'll email you a thank-you note for your feedback."
+                : "We'll email you automatically whenever your report's status changes — no need to keep checking Track My Report."}
+            </p>
           </div>
 
           {form.type === 'FEEDBACK' && (
@@ -442,13 +624,13 @@ export default function Submit() {
               </div>
             )}
             <div className="relative">
-              <textarea value={form.description} onChange={handleDescriptionChange} rows={5}
+              <textarea value={form.description} onChange={handleDescriptionChange} rows={5} maxLength={2000}
                 placeholder={form.type === 'FEEDBACK'
                   ? 'Share what went well or what could be improved...'
                   : 'Example: There is a broken streetlight in front of Brgy. Hall, Parang, Cantilan. It has been broken for 2 weeks and is dangerous at night...'}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
               {aiLoading && (
-                <div className="absolute bottom-3 right-3 flex items-center gap-1.5 text-xs text-gray-400">
+                <div className="absolute bottom-3 right-3 flex items-center gap-1.5 text-xs text-gray-500">
                   <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
@@ -465,7 +647,11 @@ export default function Submit() {
                     background: form.description.length >= 20 ? '#16a34a' : form.description.length >= 10 ? '#d97706' : '#dc2626',
                   }} />
               </div>
-              <p className="text-xs text-gray-400 flex-shrink-0">{form.description.length} / 20 min</p>
+              <p className="text-xs text-gray-500 flex-shrink-0">
+                {form.description.length < 20
+                  ? `${form.description.length} / 20 min`
+                  : `${form.description.length.toLocaleString('en-US')} / 2,000`}
+              </p>
             </div>
 
             {/* AI Suggestion Panel */}
@@ -516,8 +702,8 @@ export default function Submit() {
             )}
           </div>
 
-          {/* FILE ATTACHMENT */}
-          <div>
+          {/* FILE ATTACHMENT (not for feedback) */}
+          {!isFeedback && <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">File Attachment (Optional)</label>
             <div
               onDragOver={e => { e.preventDefault(); setDragActive(true); }}
@@ -536,7 +722,7 @@ export default function Submit() {
                 <p className="text-sm text-gray-500">
                   <span className="text-primary font-semibold">Click to upload</span> or drag and drop
                 </p>
-                <p className="text-xs text-gray-400 mt-1">JPG or PNG files only, up to 5 photos</p>
+                <p className="text-xs text-gray-500 mt-1">JPG or PNG files only, up to 5 photos</p>
               </label>
               {photos.length > 0 && (
                 <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 gap-2">
@@ -555,16 +741,46 @@ export default function Submit() {
                 </div>
               )}
             </div>
+          </div>}
+
+          {/* Hidden from people (off-screen, skipped by Tab and screen readers). Only
+              bots fill it in, and the server then refuses the report. */}
+          <div aria-hidden="true" style={{ position: 'absolute', left: '-10000px', width: 1, height: 1, overflow: 'hidden' }}>
+            <label htmlFor="leave_empty">Leave this field empty</label>
+            <input ref={honeypotRef} id="leave_empty" name="leave_empty" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
           </div>
 
           {/* SUBMIT BUTTON */}
-          <button type="submit" disabled={loading}
-            className="w-full bg-primary text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-            </svg>
-            {loading ? 'Submitting...' : 'Submit Report'}
-          </button>
+          <div className="space-y-3">
+            {notice && (
+              <div role="alert"
+                className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm leading-relaxed ${
+                  notice.info ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'
+                }`}>
+                <Icon name={notice.info ? 'check' : 'complaint'}
+                  className={`w-5 h-5 flex-shrink-0 mt-0.5 ${notice.info ? 'text-blue-700' : 'text-red-700'}`} />
+                <div className="min-w-0">
+                  <p className={notice.info ? 'text-gray-800' : 'text-red-700'}>{notice.text}</p>
+                  {notice.trackingId && (
+                    <button type="button" onClick={() => navigate('/track', { state: { prefill: notice.trackingId } })}
+                      className="mt-1 font-semibold text-blue-700 underline underline-offset-2">
+                      Track report {notice.trackingId}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            {siteKey && (
+              <TurnstileBox siteKey={siteKey} theme={dark ? 'dark' : 'light'} onToken={handleBotToken} resetSignal={botCheckRound} />
+            )}
+            <button type="submit" disabled={loading}
+              className="w-full bg-primary text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+              </svg>
+              {loading ? 'Submitting...' : 'Submit Report'}
+            </button>
+          </div>
         </form>
         </div>
 

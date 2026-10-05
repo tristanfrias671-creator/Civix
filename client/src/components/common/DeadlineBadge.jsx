@@ -43,7 +43,7 @@ const TONE = {
 
 export default function DeadlineBadge({ submission, showDate = false }) {
   const info = deadlineInfo(submission);
-  if (!info) return <span className="text-xs text-gray-400">—</span>;
+  if (!info) return <span className="text-xs text-gray-500">—</span>;
   return (
     <span className="inline-flex flex-col items-start">
       <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md whitespace-nowrap ${TONE[info.tone]}`}>
@@ -52,7 +52,7 @@ export default function DeadlineBadge({ submission, showDate = false }) {
         </svg>
         {info.label}
       </span>
-      {showDate && <span className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">Due {info.dateText}</span>}
+      {showDate && <span className="text-[11px] text-gray-500 mt-0.5 whitespace-nowrap">Due {info.dateText}</span>}
     </span>
   );
 }

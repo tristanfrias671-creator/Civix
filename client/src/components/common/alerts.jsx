@@ -1,7 +1,7 @@
 import React from 'react';
 import toast from 'react-hot-toast';
 import { deadlineInfo } from './DeadlineBadge';
-import { timeAgo } from './AccessRequestBadges';
+import { timeAgo } from '../../utils/format';
 
 // Shared by the admin bell and the staff Notifications page. Alert data comes from
 // GET /api/analytics/alerts (admin) or /api/staff/portal/alerts (staff's own office).
@@ -13,12 +13,13 @@ const REQUEST_ACTION = {
 };
 
 // Groups, most serious first; each report appears in only one of them.
+// `text` / `textDark` are darker or lighter than the dot so the words stay readable.
 const SECTIONS = [
-  { key: 'urgent',         title: 'Urgent',          dot: '#dc2626' },
-  { key: 'overdue',        title: 'Overdue',         dot: '#ef4444' },
-  { key: 'dueSoon',        title: 'Due soon',        dot: '#f59e0b' },
-  { key: 'newReports',     title: 'New reports',     dot: '#2563eb' },
-  { key: 'accessRequests', title: 'Access requests', dot: '#7c3aed' },
+  { key: 'urgent',         title: 'Urgent',          dot: '#dc2626', text: '#b91c1c', textDark: '#fca5a5' },
+  { key: 'overdue',        title: 'Overdue',         dot: '#ef4444', text: '#b91c1c', textDark: '#fca5a5' },
+  { key: 'dueSoon',        title: 'Due soon',        dot: '#f59e0b', text: '#b45309', textDark: '#fcd34d' },
+  { key: 'newReports',     title: 'New reports',     dot: '#2563eb', text: '#1d4ed8', textDark: '#93c5fd' },
+  { key: 'accessRequests', title: 'Access requests', dot: '#7c3aed', text: '#6d28d9', textDark: '#c4b5fd' },
 ];
 
 function reportDetail(item, key) {
@@ -83,7 +84,7 @@ export function AlertSections({ alerts, onSelect, dark, showDepartment = true })
                       <span style={{ color: muted }}> · {TYPE_LABEL[item.type] || item.type}</span>
                     </span>
                   )}
-                  <span className="block text-xs mt-0.5 truncate" style={{ color: isRequest ? muted : section.dot }}>
+                  <span className="block text-xs mt-0.5 truncate" style={{ color: isRequest ? muted : (dark ? section.textDark : section.text) }}>
                     {isRequest ? `${item.department ? `${item.department} · ` : ''}${timeAgo(item.createdAt)}` : reportDetail(item, section.key)}
                   </span>
                   {!isRequest && showDepartment && <span className="block text-xs truncate" style={{ color: muted }}>{item.department}</span>}

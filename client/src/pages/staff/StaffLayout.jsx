@@ -1,55 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { BrandImg } from '../../context/BrandingContext';
+import Icon from '../../components/common/Icons';
+import Avatar from '../../components/common/Avatar';
+import SignOutDialog from '../../components/common/SignOutDialog';
 import ProfileModal from '../../components/common/ProfileModal';
 import IdleSessionGuard from '../../components/common/IdleSessionGuard';
+import NotificationBell, { openAlerts } from '../../components/common/NotificationBell';
 import { announceNewAlerts } from '../../components/common/alerts';
-import { mediaUrl } from '../../utils/mediaUrl';
 import api from '../../utils/api';
 
-const NAV = [
-  { to: '/staff/dashboard',   label: 'Dashboard',           icon: <DashboardIcon />   },
-  { to: '/staff/submissions', label: 'Assigned Complaints',  icon: <ComplaintIcon />   },
-  { to: '/staff/monitor',     label: 'Service Requests',     icon: <ServiceIcon />     },
+// Same layout as the admin portal (navy sidebar with the town seal, white top
+// bar), with the staff member's office and its report counts.
+const NAV_SECTIONS = [
+  { label: 'Overview', items: [{ to: '/staff/dashboard', label: 'Dashboard', icon: 'dashboard' }] },
+  {
+    label: 'Reports',
+    items: [
+      { to: '/staff/submissions', label: 'Our Reports', icon: 'inbox', badge: 'open' },
+      { to: '/staff/map',         label: 'Office Map',  icon: 'map' },
+    ],
+  },
+  { label: 'Updates', items: [{ to: '/staff/notifications', label: 'Notifications', icon: 'bell', badge: 'alerts' }] },
 ];
-
-function DashboardIcon() {
-  return (
-    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm10-3a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1v-7z"/>
-    </svg>
-  );
-}
-function ComplaintIcon() {
-  return (
-    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-    </svg>
-  );
-}
-function ServiceIcon() {
-  return (
-    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-    </svg>
-  );
-}
-function BellIcon() {
-  return (
-    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-    </svg>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-    </svg>
-  );
-}
+const PAGE_TITLES = [
+  ['/staff/dashboard', 'Dashboard'],
+  ['/staff/submissions', 'Our Reports'],
+  ['/staff/map', 'Office Map'],
+  ['/staff/notifications', 'Notifications'],
+  ['/staff/admin-access', 'Administrator Access'],
+];
 
 // Staff pop-ups: reports in their own office that are urgent, overdue or newly received.
 const STAFF_ALERT_KINDS = {
@@ -67,42 +49,18 @@ const STAFF_ALERT_KINDS = {
   },
 };
 
-const sidebarCss = `
-@keyframes sbFadeIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
-.sb-item { position: relative; animation: sbFadeIn .35s cubic-bezier(.22,1,.36,1) both; }
-.sb-item::before {
-  content: ''; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 0; border-radius: 3px; background: #60a5fa;
-  transition: height .25s cubic-bezier(.22,1,.36,1);
+function ThemeIcon({ dark }) {
+  return dark ? (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+      <circle cx="12" cy="12" r="5"/>
+      <path strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+    </svg>
+  ) : (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+    </svg>
+  );
 }
-.sb-item.active::before { height: 60%; }
-.sb-item:hover svg { transform: scale(1.12); }
-.sb-item svg { transition: transform .2s ease; }
-/* GPU-composited ping ring (transform+opacity only — no box-shadow repaint cost) */
-@keyframes sbPingRing { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(2.2); opacity: 0; } }
-.sb-bell-badge { position: relative; }
-.sb-bell-badge::after {
-  content: ''; position: absolute; inset: 0; border-radius: 9999px; z-index: -1;
-  background: rgba(239,68,68,0.6);
-  animation: sbPingRing 2s ease-out infinite;
-  will-change: transform, opacity;
-}
-.sb-brand { animation: sbFadeIn .4s ease both; }
-.sb-dept { animation: sbFadeIn .4s .05s cubic-bezier(.22,1,.36,1) both; }
-.sb-avatar-wrap:hover .sb-avatar-ring { box-shadow: 0 0 0 3px rgba(37,99,235,0.35); }
-.sb-avatar-ring { transition: box-shadow .25s ease; }
-
-/* GPU-composited glow pulse (opacity only, on a static-sized pseudo-layer — no box-shadow repaint) */
-@keyframes sbMarkGlow { 0%,100% { opacity: 0.35; } 50% { opacity: 0.85; } }
-.sb-mark { position: relative; transition: transform .3s cubic-bezier(.22,1,.36,1); }
-.sb-mark::before {
-  content: ''; position: absolute; inset: -6px; border-radius: 14px; z-index: -1;
-  background: radial-gradient(circle, rgba(37,99,235,0.5), rgba(13,148,136,0.35) 70%, transparent 100%);
-  animation: sbMarkGlow 3s ease-in-out infinite;
-  will-change: opacity;
-}
-.sb-brand:hover .sb-mark { transform: rotate(-8deg) scale(1.08); }
-`;
 
 export default function StaffLayout() {
   const { user, logout } = useAuth();
@@ -111,8 +69,12 @@ export default function StaffLayout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [alerts, setAlerts] = useState(null);
-  const alertCount = alerts?.total || 0;
   const [profileOpen, setProfileOpen] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [topSearch, setTopSearch] = useState('');
+  const alertCount = alerts?.total || 0;
+  const openCount = alerts?.counts?.open ?? null;
+  const overdueCount = alerts?.counts?.overdue || 0;
 
   // Reports in this staff member's office that need attention, refreshed every
   // 30 seconds, on each page change and after they update a report. Items that
@@ -123,7 +85,7 @@ export default function StaffLayout() {
       .then(res => {
         if (!active) return;
         setAlerts(res.data);
-        announceNewAlerts(res.data, STAFF_ALERT_KINDS, () => navigate('/staff/notifications'));
+        announceNewAlerts(res.data, STAFF_ALERT_KINDS, openAlerts);
       })
       .catch(() => {});
     load();
@@ -134,224 +96,223 @@ export default function StaffLayout() {
       clearInterval(timer);
       window.removeEventListener('civix:alerts-changed', load);
     };
-  }, [location.pathname, navigate]);
+  }, [location.pathname]);
 
-  function handleLogout() { logout(); navigate('/staff-login'); }
+  const isMapPage = location.pathname.startsWith('/staff/map');
+  const pageTitle = (PAGE_TITLES.find(([path]) => location.pathname.startsWith(path)) || [null, 'Dashboard'])[1];
+
+  function handleLogout() { setConfirmSignOut(false); logout(); navigate('/staff-login'); }
+  const closeSignOut = useCallback(() => setConfirmSignOut(false), []);
+
+  function handleTopSearch(e) {
+    e.preventDefault();
+    if (!topSearch.trim()) return;
+    navigate('/staff/submissions', { state: { search: topSearch.trim() } });
+    setTopSearch('');
+  }
+
+  // Count badges. On the highlighted (blue) item they turn solid white to stay readable.
+  function navBadge(kind, isActive) {
+    let label = null;
+    let style = null;
+    let title = '';
+    if (kind === 'open' && openCount > 0) {
+      label = openCount > 99 ? '99+' : openCount;
+      title = `${openCount} open${overdueCount ? `, ${overdueCount} overdue` : ''}`;
+      style = overdueCount > 0
+        ? (isActive ? { background: '#ffffff', color: '#b91c1c' } : { background: '#dc2626', color: '#ffffff' })
+        : (isActive ? { background: '#ffffff', color: '#1d4ed8' } : { background: 'rgba(255,255,255,0.16)', color: '#ffffff' });
+    } else if (kind === 'alerts' && alertCount > 0) {
+      label = alertCount > 9 ? '9+' : alertCount;
+      title = `${alertCount} need attention`;
+      style = isActive ? { background: '#ffffff', color: '#b91c1c' } : { background: '#dc2626', color: '#ffffff' };
+    }
+    if (label === null) return null;
+    return (
+      <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+        style={style} title={title}>
+        {label}
+      </span>
+    );
+  }
+
+  const bell = (
+    <NotificationBell alerts={alerts} dark={dark} showDepartment={false}
+      emptyText="No urgent, overdue or new reports in your office."
+      onSelect={item => navigate('/staff/submissions', { state: { openId: item.id } })}
+      links={[
+        { label: 'All notifications', onClick: () => navigate('/staff/notifications') },
+        { label: 'Our reports', onClick: () => navigate('/staff/submissions') },
+      ]} />
+  );
+
+  const adminAccessLink = {
+    label: 'Request administrator access',
+    description: 'Only if your work needs it. An administrator will review it.',
+    icon: <Icon name="shield" className="w-4 h-4 text-gray-500 flex-shrink-0" />,
+    onClick: () => { setProfileOpen(false); navigate('/staff/admin-access'); },
+  };
+
+  const topBarMuted = dark ? '#94a3b8' : '#4b5563';
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-screen overflow-hidden" style={{ background: dark ? '#0f172a' : '#f1f5f9' }}>
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden"
-          onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* ── Sidebar ── */}
       <aside className={`fixed inset-y-0 left-0 z-30 w-64 flex flex-col transform transition-transform duration-200 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        style={{ background: 'linear-gradient(180deg, #0f172a 0%, #090e1a 100%)' }}>
-        <style>{sidebarCss}</style>
-
-        {/* Brand */}
-        <div className="sb-brand flex items-center gap-3 px-6 py-5 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-          <div className="sb-mark w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #2563eb, #0d9488)' }}>
-            <svg viewBox="0 0 24 24" className="w-5 h-5">
-              <line x1="5" y1="5" x2="19" y2="19" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
-              <line x1="19" y1="5" x2="5" y2="19" stroke="white" strokeWidth="2.2" strokeLinecap="round" opacity="0.55" />
-              <circle cx="5" cy="5" r="2.1" fill="white" />
-              <circle cx="19" cy="5" r="2.1" fill="#5eead4" />
-              <circle cx="5" cy="19" r="2.1" fill="#5eead4" />
-              <circle cx="19" cy="19" r="2.1" fill="white" />
-            </svg>
-          </div>
+        style={{ background: 'linear-gradient(180deg, #0b2f66 0%, #081d40 100%)' }}>
+        <div className="flex items-center gap-3 px-5 py-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-10 h-10 object-contain flex-shrink-0" />
           <div className="min-w-0">
-            <p className="font-extrabold text-white text-base leading-none tracking-tight">CIVIX</p>
-            <p className="text-[10px] font-medium mt-1 leading-none" style={{ color: '#5eead4' }}>Real-Time Civic Engagement</p>
+            <p className="text-white font-extrabold text-sm leading-tight truncate">CIVIX</p>
+            <p className="text-white/70 text-[11px] font-medium leading-tight truncate">Staff Portal</p>
           </div>
-          <span className="ml-auto text-xs font-bold text-blue-200 px-2 py-0.5 rounded-md flex-shrink-0"
-            style={{ background: 'rgba(37,99,235,0.25)', border: '1px solid rgba(37,99,235,0.4)' }}>STAFF</span>
         </div>
 
-        {/* Department chip */}
+        {/* The staff member's office, with how many reports are open */}
         {user?.department && (
-          <div className="sb-dept mx-3 mt-3 px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition-all hover:shadow-[0_0_0_1px_rgba(37,99,235,0.4)]"
-            style={{ background: 'rgba(37,99,235,0.12)', border: '1px solid rgba(37,99,235,0.2)' }}>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(37,99,235,0.25)' }}>
-              <svg className="w-4 h-4" fill="none" stroke="#93c5fd" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2M5 21H3m4-14h.01M11 7h.01M7 11h.01M11 11h.01M7 15h.01M11 15h.01M9 21v-4h2v4"/>
-              </svg>
+          <NavLink to="/staff/submissions" onClick={() => setSidebarOpen(false)}
+            className="mx-3 mt-4 px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition-colors hover:bg-white/10"
+            style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)', color: '#bfdbfe' }}>
+              <Icon name="offices" className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-wider mb-0.5" style={{ color: 'rgba(147,197,253,0.6)' }}>Department</p>
-              <p className="text-xs font-bold leading-snug truncate" style={{ color: '#93c5fd' }}>{user.department}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#bfdbfe' }}>Your office</p>
+              <p className="text-sm font-bold leading-snug truncate text-white">{user.department}</p>
+              {openCount !== null && (
+                <p className="text-xs mt-0.5" style={{ color: '#dbeafe' }}>
+                  {openCount === 0 ? 'No open reports' : `${openCount} open`}
+                  {overdueCount > 0 && <span style={{ color: '#fecaca' }}> · {overdueCount} overdue</span>}
+                </p>
+              )}
             </div>
-          </div>
+          </NavLink>
         )}
 
-        {/* Main nav */}
-        <nav className="flex-1 px-3 py-2 overflow-y-auto space-y-0.5">
-          <p className="text-xs font-bold uppercase tracking-widest px-3 pb-1 pt-2" style={{ color: 'rgba(255,255,255,0.25)' }}>Navigation</p>
-          {NAV.map((item, i) => (
-            <NavLink key={item.to} to={item.to} end={item.to === '/staff/dashboard'}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `sb-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${isActive ? 'active' : ''} ${
-                  isActive
-                    ? 'text-white'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5 hover:translate-x-0.5'
-                }`
-              }
-              style={({ isActive }) => ({
-                animationDelay: `${i * 0.05}s`,
-                ...(isActive ? {
-                  background: 'linear-gradient(135deg, rgba(37,99,235,0.85), rgba(29,78,216,0.85))',
-                  boxShadow: '0 4px 14px rgba(37,99,235,0.35)',
-                } : {}),
-              })}>
-              {item.icon}
-              {item.label}
-            </NavLink>
+        <nav className="flex-1 px-3 py-4 overflow-y-auto scrollbar-none" aria-label="Staff menu">
+          {NAV_SECTIONS.map(section => (
+            <div key={section.label} className="mb-4">
+              <p className="px-3 mb-1.5 text-[11px] font-bold uppercase tracking-widest text-white/60">{section.label}</p>
+              {section.items.map(item => (
+                <NavLink key={item.to} to={item.to} end={item.to === '/staff/dashboard'}
+                  onClick={() => setSidebarOpen(false)}
+                  className={({ isActive }) =>
+                    `relative flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm font-medium transition-colors ${
+                      isActive ? 'text-white' : 'text-white/75 hover:bg-white/5 hover:text-white'
+                    }`
+                  }
+                  style={({ isActive }) => isActive ? { background: 'rgba(37,99,235,0.9)' } : undefined}>
+                  {({ isActive }) => (
+                    <>
+                      {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full bg-white/80" />}
+                      <Icon name={item.icon} className="w-5 h-5 flex-shrink-0" />
+                      <span className="min-w-0 truncate">{item.label}</span>
+                      {navBadge(item.badge, isActive)}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           ))}
-
-          {/* Divider */}
-          <div className="mx-1 my-3" style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
-
-          {/* Notifications */}
-          <p className="text-xs font-bold uppercase tracking-widest px-3 pb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>More</p>
-          <NavLink to="/staff/notifications"
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `sb-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${isActive ? 'active' : ''} ${
-                isActive ? 'text-white' : 'text-slate-400 hover:text-white hover:bg-white/5 hover:translate-x-0.5'
-              }`
-            }
-            style={({ isActive }) => ({
-              animationDelay: '.15s',
-              ...(isActive ? {
-                background: 'linear-gradient(135deg, rgba(37,99,235,0.85), rgba(29,78,216,0.85))',
-                boxShadow: '0 4px 14px rgba(37,99,235,0.35)',
-              } : {}),
-            })}>
-            <BellIcon />
-            Notifications
-            {alertCount > 0 && (
-              <span className="sb-bell-badge ml-auto min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
-                title={`${alertCount} need attention`}>
-                {alertCount > 9 ? '9+' : alertCount}
-              </span>
-            )}
-          </NavLink>
-          <NavLink to="/staff/admin-access"
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `sb-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${isActive ? 'active' : ''} ${
-                isActive ? 'text-white' : 'text-slate-400 hover:text-white hover:bg-white/5 hover:translate-x-0.5'
-              }`
-            }
-            style={({ isActive }) => ({
-              animationDelay: '.2s',
-              ...(isActive ? {
-                background: 'linear-gradient(135deg, rgba(37,99,235,0.85), rgba(29,78,216,0.85))',
-                boxShadow: '0 4px 14px rgba(37,99,235,0.35)',
-              } : {}),
-            })}>
-            <ShieldIcon />
-            Admin Access
-          </NavLink>
         </nav>
 
-        {/* Bottom: user + logout */}
-        <div className="px-3 py-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        <div className="px-4 py-4" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <button onClick={() => setProfileOpen(true)}
-            className="sb-avatar-wrap flex items-center gap-3 w-full px-3 py-2.5 rounded-xl transition-all hover:bg-white/5 group mb-1">
-            <div className="relative flex-shrink-0">
-              {user?.avatar
-                ? <img src={mediaUrl(user.avatar)} alt="avatar"
-                    className="sb-avatar-ring w-9 h-9 rounded-full object-cover"
-                    style={{ border: '2px solid rgba(37,99,235,0.5)' }} />
-                : <div className="sb-avatar-ring w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                    style={{ background: 'linear-gradient(135deg,#2563eb,#4f46e5)' }}>
-                    {user?.fullName?.[0]?.toUpperCase()}
-                  </div>
-              }
-              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2" style={{ background: '#22c55e', borderColor: '#0f172a' }} />
+            className="flex items-center gap-3 mb-1 w-full text-left hover:bg-white/5 rounded-lg p-1.5 -ml-1.5 transition-colors group">
+            <Avatar user={user} className="w-9 h-9" imgClassName="ring-2 ring-white/20 group-hover:ring-blue-400 transition-all" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white leading-tight truncate">{user?.fullName}</p>
+              <p className="text-xs text-white/70 group-hover:text-white/90">Staff · Edit Profile</p>
             </div>
-            <div className="min-w-0 flex-1 text-left">
-              <p className="text-sm font-semibold text-white truncate leading-tight">{user?.fullName}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>Staff · Edit Profile</p>
-            </div>
-            <svg className="w-4 h-4 flex-shrink-0 opacity-40 group-hover:opacity-70 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
-            </svg>
           </button>
-
-          <button onClick={toggleDark}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition-all mb-1"
-            style={{ color: 'rgba(255,255,255,0.45)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.45)'; e.currentTarget.style.background = 'transparent'; }}>
-            {dark ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <circle cx="12" cy="12" r="5"/>
-                <path strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
-              </svg>
-            )}
-            {dark ? 'Light Mode' : 'Dark Mode'}
-          </button>
-          <button onClick={handleLogout}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={{ color: 'rgba(255,255,255,0.35)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#f87171'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.35)'; e.currentTarget.style.background = 'transparent'; }}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-            </svg>
-            Sign Out
+          <button onClick={() => setConfirmSignOut(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/75 hover:text-red-200 hover:bg-white/5 rounded-lg transition-colors">
+            <Icon name="logout" className="w-5 h-5" /> Sign Out
           </button>
         </div>
       </aside>
 
-      {/* ── Main area ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-
-        {/* Mobile top bar */}
+        {/* Mobile header */}
         <header className="bg-white border-b border-gray-200 flex items-center px-4 py-3 md:hidden"
           style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-          <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-500 hover:text-gray-800 rounded-lg transition-colors">
+          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu"
+            className="p-2 text-gray-600 hover:text-gray-800 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
           <div className="flex items-center gap-2 ml-3">
-            <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#2563eb,#1d4ed8)' }}>
-              <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-              </svg>
-            </div>
+            <BrandImg kind="seal" className="w-6 h-6 object-contain" />
             <span className="font-extrabold text-gray-900 text-sm">CIVIX</span>
-            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">Staff</span>
+            <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">Staff</span>
           </div>
-          <NavLink to="/staff/notifications" className="relative ml-auto p-2 text-gray-500 hover:text-gray-800 rounded-lg transition-colors"
-            aria-label={alertCount > 0 ? `Notifications, ${alertCount} need attention` : 'Notifications'}>
-            <BellIcon />
-            {alertCount > 0 && (
-              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center">
-                {alertCount > 9 ? '9+' : alertCount}
-              </span>
-            )}
-          </NavLink>
+          <div className="ml-auto flex items-center gap-0.5">
+            <button onClick={toggleDark} aria-label={dark ? 'Light mode' : 'Dark mode'}
+              className="p-2 rounded-lg transition-colors" style={{ color: topBarMuted }}>
+              <ThemeIcon dark={dark} />
+            </button>
+            {bell}
+          </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        {/* Desktop top bar */}
+        <header className="hidden md:flex items-center gap-4 px-6 h-16 flex-shrink-0"
+          style={{ background: dark ? '#1e293b' : 'white', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#e5e7eb'}` }}>
+          <div className="min-w-0">
+            <p className="text-xs font-medium truncate" style={{ color: topBarMuted }}>Staff{user?.department ? ` · ${user.department}` : ''}</p>
+            <h2 className="text-sm font-bold truncate" style={{ color: dark ? '#f1f5f9' : '#111827' }}>{pageTitle}</h2>
+          </div>
+
+          <form onSubmit={handleTopSearch} className="hidden lg:block flex-1 max-w-sm ml-4" role="search">
+            <div className="relative">
+              <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: topBarMuted }}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
+              </svg>
+              <input value={topSearch} onChange={e => setTopSearch(e.target.value)} aria-label="Search your office's reports"
+                placeholder="Search reports, tracking ID..."
+                className="w-full pl-10 pr-3 py-2 rounded-lg text-sm outline-none transition-all placeholder:text-gray-500 dark:placeholder:!text-slate-400 focus:ring-2 focus:ring-blue-500"
+                style={{
+                  background: dark ? '#0f172a' : '#f3f4f6',
+                  color: dark ? '#e2e8f0' : '#111827',
+                  border: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'transparent'}`,
+                }} />
+            </div>
+          </form>
+
+          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+            {bell}
+            <button onClick={toggleDark}
+              className="p-2 rounded-lg transition-colors"
+              style={{ color: topBarMuted }}
+              onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              title={dark ? 'Light Mode' : 'Dark Mode'} aria-label={dark ? 'Light mode' : 'Dark mode'}>
+              <ThemeIcon dark={dark} />
+            </button>
+            <button onClick={() => setProfileOpen(true)} aria-label="Edit profile"
+              className="flex items-center gap-2 pl-2 ml-1" style={{ borderLeft: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb'}` }}>
+              <Avatar user={user} className="w-8 h-8" letterClassName="text-xs" />
+            </button>
+          </div>
+        </header>
+
+        {/* The map page fills the height; it still scrolls if the screen is too short. */}
+        <main className={`flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
           <Outlet key={location.key} context={{ alerts }} />
         </main>
       </div>
 
-      <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
+      <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} links={[adminAccessLink]} />
+      <SignOutDialog open={confirmSignOut} user={user}
+        roleLabel={`Staff${user?.department ? ` · ${user.department}` : ''}`}
+        message="You'll need to sign in again to see your office's reports."
+        onCancel={closeSignOut} onConfirm={handleLogout} />
       <IdleSessionGuard loginPath="/staff-login" />
     </div>
   );

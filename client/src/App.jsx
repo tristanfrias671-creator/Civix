@@ -17,7 +17,7 @@ import AdminLayout    from './pages/admin/AdminLayout';
 import StaffLayout    from './pages/staff/StaffLayout';
 import StaffDashboard       from './pages/staff/Dashboard';
 import StaffSubmissions     from './pages/staff/Submissions';
-import StaffMonitor         from './pages/staff/Monitor';
+import StaffOfficeMap       from './pages/staff/OfficeMap';
 import StaffNotifications   from './pages/staff/Notifications';
 import StaffAdminAccess     from './pages/staff/AdminAccess';
 import StaffRegister        from './pages/staff/StaffRegister';
@@ -108,7 +108,9 @@ function AppRoutes() {
       <Route path="/staff" element={<PrivateRoute role="STAFF"><StaffLayout /></PrivateRoute>}>
         <Route path="dashboard"     element={<StaffDashboard />} />
         <Route path="submissions"   element={<StaffSubmissions />} />
-        <Route path="monitor"       element={<StaffMonitor />} />
+        <Route path="map"           element={<StaffOfficeMap />} />
+        {/* The old All Offices page: staff now see only their own office's reports. */}
+        <Route path="monitor"       element={<Navigate to="/staff/map" replace />} />
         <Route path="notifications" element={<StaffNotifications />} />
         <Route path="admin-access"  element={<StaffAdminAccess />} />
         <Route index element={<Navigate to="dashboard" replace />} />

@@ -341,7 +341,9 @@ export default function Settings() {
     officeAddress: '',
   });
   const [departments, setDepartments] = useState([]);
-  const [deadlines, setDeadlines] = useState({ COMPLAINT: 7, SUGGESTION: 15, FEEDBACK: 3 });
+  const [unassignedOffice, setUnassignedOffice] = useState('');
+  // Working days for complaints and suggestions (feedback has no deadline).
+  const [deadlines, setDeadlines] = useState({ COMPLAINT: 7, SUGGESTION: 15 });
   const [newDept, setNewDept] = useState('');
 
   const [profile, setProfile] = useState({ fullName: '', email: '', citizenId: '' });
@@ -369,6 +371,7 @@ export default function Settings() {
           officeAddress: s.data.officeAddress,
         });
         setDepartments(s.data.departments);
+        setUnassignedOffice(s.data.unassignedOffice || '');
         if (s.data.deadlines) setDeadlines(s.data.deadlines);
         if (s.data.security) setSecurity(s.data.security);
         setBrandingUrls({ sealUrl: s.data.sealUrl, heroImageUrl: s.data.heroImageUrl });
@@ -529,9 +532,10 @@ export default function Settings() {
   async function saveLists(type) {
     setSaving(type);
     try {
-      const payload = { departments };
+      const payload = { departments, unassignedOffice: departments.includes(unassignedOffice) ? unassignedOffice : '' };
       const res = await api.patch('/settings/lists', payload);
       setDepartments(res.data.departments);
+      setUnassignedOffice(res.data.unassignedOffice || '');
       toast.success('Departments saved');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to save');
@@ -640,7 +644,7 @@ export default function Settings() {
           <form onSubmit={saveDeadlines}>
             <SectionCard
               title="Resolution Deadlines"
-              description="How many working days (Monday–Friday) the assigned office has to resolve each type of report"
+              description="How many working days (Monday–Friday) the assigned office has to resolve complaints and suggestions"
               footer={
                 <button type="submit" disabled={saving === 'deadlines'}
                   className="px-6 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
@@ -649,7 +653,7 @@ export default function Settings() {
               }
             >
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                {[['COMPLAINT', 'Complaints'], ['SUGGESTION', 'Suggestions'], ['FEEDBACK', 'Feedback']].map(([key, label]) => (
+                {[['COMPLAINT', 'Complaints'], ['SUGGESTION', 'Suggestions']].map(([key, label]) => (
                   <Field key={key} label={label} hint="Working days, 1–60">
                     <div className="relative">
                       <input type="number" min={1} max={60} step={1} required className={`${inputClass} pr-24`}
@@ -892,6 +896,19 @@ export default function Settings() {
           }
         >
           <ListEditor items={departments} setItems={setDepartments} newVal={newDept} setNew={setNewDept} onAdd={addDept} placeholder="New department name..." />
+
+          {/* Staff see only their own office's reports; this office also gets the ones with no office. */}
+          <div className="mt-6 pt-5 border-t border-gray-100 dark:border-slate-700">
+            <label htmlFor="unassigned-office" className="block text-sm font-semibold text-gray-800 dark:text-slate-100">Office that receives reports with no office</label>
+            <p className="text-sm text-gray-600 dark:text-slate-300 mt-0.5 mb-2">
+              When a citizen doesn't choose an office and the system can't tell which one a report is for, this office gets it and sends it to the right office. Each office's staff see only their own reports.
+            </p>
+            <select id="unassigned-office" value={departments.includes(unassignedOffice) ? unassignedOffice : ''} onChange={e => setUnassignedOffice(e.target.value)}
+              className="w-full sm:max-w-md px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
+              <option value="">Default (Mayor's Office – CRMO, or the first office)</option>
+              {departments.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
         </SectionCard>
       )}
 
@@ -907,6 +924,7 @@ export default function Settings() {
               ['Maps', 'Leaflet + OpenStreetMap'],
               ['Charts', 'Recharts'],
               ['Animated emoji', 'Google Noto Emoji (CC BY 4.0)'],
+              ['Map pins', 'Microsoft Fluent Emoji (MIT)'],
               ['Signed in as', profile.email],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between items-center px-4 py-3 bg-gray-50 dark:bg-slate-900/40 rounded-lg text-sm">

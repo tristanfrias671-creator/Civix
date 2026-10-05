@@ -36,7 +36,7 @@ function Stepper({ status }) {
           <span className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${dot[s.state]}`}>
             {s.state === 'done' ? '✓' : s.state === 'failed' ? '✕' : i + 1}
           </span>
-          <span className={`mt-2 text-xs font-semibold px-1 ${s.state === 'upcoming' ? 'text-gray-400' : 'text-gray-700 dark:text-slate-200'}`}>{s.label}</span>
+          <span className={`mt-2 text-xs font-semibold px-1 ${s.state === 'upcoming' ? 'text-gray-500' : 'text-gray-700 dark:text-slate-200'}`}>{s.label}</span>
         </li>
       ))}
     </ol>
@@ -137,7 +137,7 @@ export default function StaffAdminAccess() {
             {latest.reviewNote && (
               <p className="rounded-xl bg-gray-50 px-4 py-3"><span className="font-semibold text-gray-700">Note from the administrator: </span>{latest.reviewNote}</p>
             )}
-            <p className="text-xs text-gray-400">Your reason: “{latest.reason}”</p>
+            <p className="text-xs text-gray-600">Your reason: “{latest.reason}”</p>
           </div>
 
           {latest.status === 'APPROVED' && adminLoginPath && (
@@ -160,7 +160,7 @@ export default function StaffAdminAccess() {
           <textarea id="admin-reason" rows={4} maxLength={MAX_REASON} value={reason} onChange={e => setReason(e.target.value)}
             placeholder="e.g., I was assigned by the Mayor's Office to manage staff accounts and review reports for all offices."
             className="w-full px-4 py-2.5 border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary" />
-          <div className="flex items-center justify-between mt-1 text-xs text-gray-400">
+          <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
             <span>{trimmed.length < MIN_REASON ? `At least ${MIN_REASON} characters` : 'Looks good'}</span>
             <span>{reason.length} / {MAX_REASON}</span>
           </div>

@@ -102,7 +102,7 @@ const STAT_CARDS = [
   { key: 'total',          label: 'Total Submissions', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', light: { color:'#6366f1', bg:'#eef2ff', iconBg:'rgba(99,102,241,0.15)' }, dark: { color:'#a5b4fc', bg:'rgba(99,102,241,0.1)', iconBg:'rgba(99,102,241,0.2)' } },
   { key: 'classified',     label: 'AI Classified',     icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', light: { color:'#2563eb', bg:'#dbeafe', iconBg:'rgba(37,99,235,0.15)' }, dark: { color:'#60a5fa', bg:'rgba(37,99,235,0.1)', iconBg:'rgba(37,99,235,0.2)' } },
   { key: 'correct',        label: 'Correct Predictions', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', light: { color:'#16a34a', bg:'#dcfce7', iconBg:'rgba(22,163,74,0.15)' }, dark: { color:'#4ade80', bg:'rgba(22,163,74,0.1)', iconBg:'rgba(22,163,74,0.2)' } },
-  { key: 'manualOverrides', label: 'Manual Overrides', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z', light: { color:'#dc2626', bg:'#fee2e2', iconBg:'rgba(220,38,38,0.15)' }, dark: { color:'#f87171', bg:'rgba(220,38,38,0.1)', iconBg:'rgba(220,38,38,0.2)' } },
+  { key: 'manualOverrides', label: 'Corrected by Staff', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z', light: { color:'#dc2626', bg:'#fee2e2', iconBg:'rgba(220,38,38,0.15)' }, dark: { color:'#f87171', bg:'rgba(220,38,38,0.1)', iconBg:'rgba(220,38,38,0.2)' } },
 ];
 
 const FILTERS = [
@@ -235,7 +235,7 @@ export default function AIClassification() {
               <div className="space-y-3.5">
                 {[
                   { label: 'Correct Predictions', value: stats.correct,        total: stats.classified, color: '#22c55e' },
-                  { label: 'Admin Corrected',      value: stats.manualOverrides, total: stats.classified, color: '#f87171' },
+                  { label: 'Corrected by Staff',   value: stats.manualOverrides, total: stats.classified, color: '#f87171' },
                   { label: 'Avg Confidence',       value: stats.avgConfidence,   total: 100,              color: '#60a5fa', suffix: '%' },
                 ].map(row => {
                   const pct = row.total > 0 ? Math.round((row.value / row.total) * 100) : 0;

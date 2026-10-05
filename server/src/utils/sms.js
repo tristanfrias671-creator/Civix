@@ -11,6 +11,8 @@ const provider = TEXTBEE_API_KEY && TEXTBEE_DEVICE_ID ? 'textbee'
   : SEMAPHORE_API_KEY ? 'semaphore'
   : null;
 const configured = Boolean(provider);
+// A text that the provider hasn't accepted within this time is given up (and logged).
+const SEND_TIMEOUT_MS = 15000;
 
 console.log(provider
   ? `[sms] Sending SMS updates through ${provider === 'textbee' ? 'TextBee (Android phone)' : 'Semaphore'}.`
@@ -37,13 +39,14 @@ function sendViaTextBee(to, message) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': TEXTBEE_API_KEY },
     body: JSON.stringify({ recipients: [`+63${to.slice(1)}`], message }),
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
   });
 }
 
 function sendViaSemaphore(to, message) {
   const body = new URLSearchParams({ apikey: SEMAPHORE_API_KEY, number: to, message });
   if (SMS_SENDER_NAME) body.set('sendername', SMS_SENDER_NAME);
-  return fetch('https://api.semaphore.co/api/v4/messages', { method: 'POST', body });
+  return fetch('https://api.semaphore.co/api/v4/messages', { method: 'POST', body, signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
 }
 
 async function sendSms(number, message) {

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { brandingUpload } = require('../middleware/upload');
+const { requireRealPhotos } = require('../utils/uploadSafety');
 const {
   BRANDING_FIELDS,
   getPublicProfile,
@@ -44,7 +45,7 @@ router.patch('/security', updateSecurity);
 router.patch('/deadlines', updateDeadlines);
 router.get('/security/locked', getLockedAccounts);
 router.post('/security/unlock/:id', unlockAccount);
-router.post('/branding/:kind', brandingKind, brandingFile, uploadBranding);
+router.post('/branding/:kind', brandingKind, brandingFile, requireRealPhotos, uploadBranding);
 router.delete('/branding/:kind', brandingKind, resetBranding);
 router.get('/admin-link', getAdminLink);
 router.post('/admin-link/rotate', rotateAdminLink);
