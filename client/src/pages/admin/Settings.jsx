@@ -302,6 +302,173 @@ function SecurityOption({ id, icon, title, description, enabled, onToggle, summa
   );
 }
 
+// Sign-in codes for administrators: after the right password, a 6-digit code from
+// their email. Turning them on needs a code sent to your own email first, so they
+// can't be switched on for an address that gets no mail. Changes apply right away
+// (not with the Save button below).
+function SignInCodeOption({ enabled, adminAccounts, onChanged }) {
+  const [step, setStep] = useState('idle'); // idle | code (turning on) | off (confirm turning off)
+  const [sentTo, setSentTo] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [wait, setWait] = useState(0);
+  const codeRef = useRef(null);
+
+  useEffect(() => {
+    if (wait <= 0) return undefined;
+    const timer = setTimeout(() => setWait(w => w - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
+
+  async function sendCode() {
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await api.post('/settings/security/sign-in-code/start');
+      setSentTo(data.email);
+      setWait(data.resendAfterSeconds ?? 60);
+      setCode('');
+      setStep('code');
+      setTimeout(() => codeRef.current?.focus(), 0);
+    } catch (err) {
+      const data = err.response?.data || {};
+      if (data.retryAfter) { setWait(data.retryAfter); setStep('code'); }
+      setError(data.error || 'Could not send the code');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function turnOn() {
+    if (!/^\d{6}$/.test(code)) {
+      setError('Please type the 6-digit code from the email.');
+      codeRef.current?.focus();
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/settings/security/sign-in-code', { enabled: true, code });
+      onChanged(true);
+      setStep('idle');
+      toast.success('Sign-in codes are on. Administrators now get a code by email each time they sign in.');
+    } catch (err) {
+      const data = err.response?.data || {};
+      setError(data.error || 'Could not turn on sign-in codes');
+      setCode('');
+      codeRef.current?.focus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function turnOff() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/settings/security/sign-in-code', { enabled: false });
+      onChanged(false);
+      setStep('idle');
+      toast.success('Sign-in codes are off. Administrators sign in with their password only.');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not turn off sign-in codes');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const emails = adminAccounts.map(a => a.email).join(', ');
+  const shownOn = enabled || step === 'code';
+  return (
+    <div className="py-6 first:pt-0 last:pb-0">
+      <div className="flex items-start gap-4">
+        <div className={`hidden sm:flex w-10 h-10 rounded-xl items-center justify-center flex-shrink-0 ${
+          enabled ? 'bg-blue-50 text-primary dark:text-blue-300' : 'bg-gray-100 text-gray-400'
+        }`}>
+          <Icon name="shield" className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 id="sec-code" className="font-semibold text-gray-800 dark:text-slate-100">Sign-in code for administrators</h3>
+              <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
+                After the right password, administrators also type a 6-digit code sent to their email. Changes apply right away.
+              </p>
+            </div>
+            <Toggle checked={shownOn} labelledBy="sec-code"
+              onChange={on => {
+                setError('');
+                if (on) sendCode();
+                else if (enabled) setStep('off');
+                else setStep('idle');
+              }} />
+          </div>
+
+          {step === 'code' && !enabled && (
+            <div className="mt-4 rounded-xl border border-blue-200 dark:border-blue-500/40 bg-blue-50 p-4 space-y-3">
+              <p className="text-sm text-blue-800">
+                {sentTo
+                  ? <>We sent a 6-digit code to <strong className="break-all">{sentTo}</strong>. Type it here to turn sign-in codes on.</>
+                  : 'Send yourself a code to turn sign-in codes on.'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <input ref={codeRef} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); turnOn(); } }}
+                  inputMode="numeric" autoComplete="one-time-code" aria-label="6-digit code from the email" placeholder="6-digit code"
+                  className="w-40 px-3 py-2.5 border border-gray-300 rounded-lg text-base font-semibold tracking-[0.3em] placeholder:tracking-normal placeholder:font-normal bg-white focus:outline-none focus:ring-2 focus:ring-primary" />
+                <button type="button" onClick={turnOn} disabled={busy}
+                  className="px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                  {busy ? 'Checking...' : 'Turn on'}
+                </button>
+                <button type="button" onClick={() => { setStep('idle'); setError(''); }} disabled={busy}
+                  className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+              </div>
+              <p className="text-xs text-gray-600">
+                Didn't get it? Check the Spam folder, or{' '}
+                {wait > 0
+                  ? <span className="font-semibold tabular-nums">send a new code in {wait}s</span>
+                  : <button type="button" onClick={sendCode} disabled={busy} className="font-semibold underline text-blue-700">send a new code</button>}
+              </p>
+            </div>
+          )}
+
+          {step === 'off' && enabled && (
+            <div className="mt-4 rounded-xl border border-amber-200 dark:border-amber-500/40 bg-amber-50 p-4">
+              <p className="text-sm text-amber-900 dark:text-amber-200">Turn off sign-in codes? Administrators will sign in with their password only.</p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button type="button" onClick={turnOff} disabled={busy}
+                  className="px-4 py-2.5 bg-amber-700 text-white rounded-lg text-sm font-semibold hover:bg-amber-800 disabled:opacity-50 transition-colors">
+                  {busy ? 'Turning off...' : 'Turn off'}
+                </button>
+                <button type="button" onClick={() => setStep('idle')} disabled={busy}
+                  className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                  Keep them on
+                </button>
+              </div>
+            </div>
+          )}
+
+          <p aria-live="polite" className={error ? 'mt-3 text-sm font-medium text-red-700' : 'sr-only'}>{error}</p>
+
+          <p className={`mt-4 flex items-start gap-2 rounded-lg px-3.5 py-2.5 text-sm ${
+            enabled ? 'bg-blue-50 text-blue-800 dark:text-blue-200' : 'bg-gray-50 text-gray-500 dark:bg-slate-900/40'
+          }`}>
+            <Icon name={enabled ? 'check' : 'unlock'} className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>
+              {enabled ? 'On. Every administrator types a code from their email after their password.' : 'Off. Administrators sign in with their password only.'}
+              {emails && <> Codes {enabled ? 'go' : 'would go'} to: <strong className="break-all">{emails}</strong>.</>}
+              {!enabled && ' Make sure these are real inboxes before turning this on.'}
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SectionCard({ title, description, children, footer }) {
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
@@ -320,7 +487,7 @@ function Field({ label, children, hint }) {
     <div>
       <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5">{label}</label>
       {children}
-      {hint && <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">{hint}</p>}
+      {hint && <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">{hint}</p>}
     </div>
   );
 }
@@ -339,19 +506,22 @@ export default function Settings() {
     contactEmail: '',
     contactPhone: '',
     officeAddress: '',
+    emergencyHotline: '',
   });
   const [departments, setDepartments] = useState([]);
   const [unassignedOffice, setUnassignedOffice] = useState('');
-  // Working days for complaints and suggestions (feedback has no deadline).
-  const [deadlines, setDeadlines] = useState({ COMPLAINT: 7, SUGGESTION: 15 });
+  // Working days for complaints by urgency (COMPLAINT is Normal) and for suggestions
+  // (feedback has no deadline).
+  const [deadlines, setDeadlines] = useState({ URGENT: 3, COMPLAINT: 7, LOW: 15, SUGGESTION: 15 });
   const [newDept, setNewDept] = useState('');
 
   const [profile, setProfile] = useState({ fullName: '', email: '', citizenId: '' });
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
   const [security, setSecurity] = useState({
     lockoutEnabled: true, maxLoginAttempts: 5, lockoutMinutes: 15,
-    idleTimeoutEnabled: true, idleTimeoutMinutes: 30,
+    idleTimeoutEnabled: true, idleTimeoutMinutes: 30, adminSignInCode: false,
   });
+  const [adminAccounts, setAdminAccounts] = useState([]); // where sign-in codes go
   const [locked, setLocked] = useState(null);
   const [unlocking, setUnlocking] = useState('');
   const [adminPath, setAdminPath] = useState(null);
@@ -369,11 +539,13 @@ export default function Settings() {
           contactEmail: s.data.contactEmail,
           contactPhone: s.data.contactPhone,
           officeAddress: s.data.officeAddress,
+          emergencyHotline: s.data.emergencyHotline || '',
         });
         setDepartments(s.data.departments);
         setUnassignedOffice(s.data.unassignedOffice || '');
         if (s.data.deadlines) setDeadlines(s.data.deadlines);
         if (s.data.security) setSecurity(s.data.security);
+        setAdminAccounts(s.data.adminAccounts || []);
         setBrandingUrls({ sealUrl: s.data.sealUrl, heroImageUrl: s.data.heroImageUrl });
         setProfile({
           fullName: me.data.fullName,
@@ -413,6 +585,7 @@ export default function Settings() {
         contactEmail: res.data.contactEmail,
         contactPhone: res.data.contactPhone,
         officeAddress: res.data.officeAddress,
+        emergencyHotline: res.data.emergencyHotline || '',
       });
       toast.success('System profile updated');
     } catch (err) {
@@ -631,6 +804,13 @@ export default function Settings() {
                     onChange={e => setSystem(p => ({ ...p, contactPhone: e.target.value }))} placeholder="+63 ..." />
                 </Field>
                 <div className="md:col-span-2">
+                  <Field label="Emergency Hotline" hint="Shown next to 911 when a citizen marks a complaint Urgent, for someone in danger right now. Leave it empty to show 911 only.">
+                    <input className={inputClass} value={system.emergencyHotline} maxLength={120}
+                      onChange={e => setSystem(p => ({ ...p, emergencyHotline: e.target.value }))}
+                      placeholder="e.g. the MDRRMO Cantilan hotline, 09XX XXX XXXX" />
+                  </Field>
+                </div>
+                <div className="md:col-span-2">
                   <Field label="Office Address">
                     <textarea className={`${inputClass} resize-none`} rows={3} value={system.officeAddress}
                       onChange={e => setSystem(p => ({ ...p, officeAddress: e.target.value }))}
@@ -644,7 +824,7 @@ export default function Settings() {
           <form onSubmit={saveDeadlines}>
             <SectionCard
               title="Resolution Deadlines"
-              description="How many working days (Monday–Friday) the assigned office has to resolve complaints and suggestions"
+              description="How many working days (Monday–Friday) the assigned office has to resolve a report. Citizens choose how urgent a complaint is; suggestions have their own time."
               footer={
                 <button type="submit" disabled={saving === 'deadlines'}
                   className="px-6 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
@@ -652,8 +832,8 @@ export default function Settings() {
                 </button>
               }
             >
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                {[['COMPLAINT', 'Complaints'], ['SUGGESTION', 'Suggestions']].map(([key, label]) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {[['URGENT', 'Urgent complaints'], ['COMPLAINT', 'Normal complaints'], ['LOW', 'Can-wait complaints'], ['SUGGESTION', 'Suggestions']].map(([key, label]) => (
                   <Field key={key} label={label} hint="Working days, 1–60">
                     <div className="relative">
                       <input type="number" min={1} max={60} step={1} required className={`${inputClass} pr-24`}
@@ -664,9 +844,10 @@ export default function Settings() {
                   </Field>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 dark:text-slate-500 mt-4">
-                The deadline is set when a citizen submits a report and shown to them, to staff and on the dashboards.
-                Changes apply to new reports; existing reports keep the deadline they were given.
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-4">
+                Urgent must be the shortest time and Can wait the longest. The deadline is set when a citizen submits a report
+                and shown to them, to staff and on the dashboards. Changes apply to new reports; existing reports keep the deadline
+                they were given, unless the office changes their urgency.
               </p>
             </SectionCard>
           </form>
@@ -828,6 +1009,9 @@ export default function Settings() {
                     </select>
                   </Field>
                 </SecurityOption>
+
+                <SignInCodeOption enabled={security.adminSignInCode} adminAccounts={adminAccounts}
+                  onChanged={on => setSecurity(p => ({ ...p, adminSignInCode: on }))} />
               </div>
             </SectionCard>
           </form>

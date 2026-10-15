@@ -3,6 +3,36 @@ import { Link, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { BrandImg } from '../../context/BrandingContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useLang, useText } from '../../i18n/LanguageContext';
+import LanguageSwitcher from '../citizen/LanguageSwitcher';
+
+// The frame's wording in English, Filipino and Bisaya (official names stay as they are).
+const TEXT = {
+  en: {
+    nav: ['Back to Home', 'Submit a Report', 'Track My Report', 'Guidelines'],
+    tagline: ['A Cleaner, Safer, Stronger', 'Cantilan for Everyone'],
+    about: 'About', help: 'Help', close: 'Close', developedBy: 'Developed by',
+    helpText: 'For assistance, visit or call Cantilan Town Hall during office hours.',
+    aboutText: 'CIVIX helps citizens of Cantilan, Surigao del Sur report concerns, track their status, and share feedback with the local government — using AI to automatically route each report to the correct municipal office.',
+    rights: 'All rights reserved.',
+  },
+  fil: {
+    nav: ['Bumalik sa Home', 'Magpadala ng Ulat', 'Subaybayan ang Ulat', 'Mga Gabay'],
+    tagline: ['Mas Malinis, Mas Ligtas, Mas Matatag', 'na Cantilan para sa Lahat'],
+    about: 'Tungkol', help: 'Tulong', close: 'Isara', developedBy: 'Binuo ng',
+    helpText: 'Para sa tulong, bumisita o tumawag sa Munisipyo ng Cantilan sa oras ng opisina.',
+    aboutText: 'Tinutulungan ng CIVIX ang mga mamamayan ng Cantilan, Surigao del Sur na mag-ulat ng mga hinaing, subaybayan ang kalagayan nito, at magbahagi ng puna sa lokal na pamahalaan — gamit ang AI upang awtomatikong maipadala ang bawat ulat sa tamang tanggapan ng munisipyo.',
+    rights: 'Lahat ng karapatan ay nakalaan.',
+  },
+  ceb: {
+    nav: ['Balik sa Home', 'Ipadala ang Report', 'Sundan ang Report', 'Mga Giya'],
+    tagline: ['Mas Limpyo, Mas Luwas, Mas Lig-on', 'nga Cantilan alang sa Tanan'],
+    about: 'Mahitungod', help: 'Tabang', close: 'Isira', developedBy: 'Gihimo sa',
+    helpText: 'Para sa tabang, bisitaha o tawagi ang Munisipyo sa Cantilan sa oras sa opisina.',
+    aboutText: 'Gitabangan sa CIVIX ang mga lumulupyo sa Cantilan, Surigao del Sur nga mag-report sa ilang mga kabalaka, sundan ang kahimtang niini, ug mohatag og feedback sa lokal nga gobyerno — gamit ang AI aron awtomatikong mapadala ang matag report sa saktong opisina sa munisipyo.',
+    rights: 'Tanang katungod gitagana.',
+  },
+};
 
 const TEAM = [
   'Tristan M. Frias',
@@ -29,13 +59,14 @@ const aboutCss = `
 `;
 
 function AboutModal({ onClose }) {
+  const t = useText(TEXT);
   return (
     <div className="about-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
       onClick={onClose}>
       <style>{aboutCss}</style>
       <div className="about-card bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden relative" onClick={e => e.stopPropagation()}>
-        <button type="button" onClick={onClose} aria-label="Close"
+        <button type="button" onClick={onClose} aria-label={t.close}
           className="about-close-x absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center text-white/90 z-10">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M6 18L18 6M6 6l12 12" />
@@ -44,19 +75,17 @@ function AboutModal({ onClose }) {
         <div className="px-6 py-6 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0b2f66, #2563eb)' }}>
           <BrandImg kind="seal" className="about-seal absolute -right-4 -bottom-4 w-24 h-24 object-contain opacity-15" />
           <div className="relative">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/70">About</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/70">{t.about}</p>
             <h2 className="text-xl font-bold">CIVIX</h2>
             <p className="text-sm text-white/85 mt-0.5">Citizen Complaint and Feedback Management System</p>
           </div>
         </div>
         <div className="p-6 space-y-4">
           <p className="about-row text-sm text-gray-600 leading-relaxed" style={{ animationDelay: '.06s' }}>
-            CIVIX helps citizens of Cantilan, Surigao del Sur report concerns, track their status, and
-            share feedback with the local government — using AI to automatically route each report to the
-            correct municipal office.
+            {t.aboutText}
           </p>
           <div className="about-row" style={{ animationDelay: '.12s' }}>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Developed by</p>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">{t.developedBy}</p>
             <ul className="space-y-1">
               {TEAM.map((name, i) => (
                 <li key={name} className="about-row text-sm font-medium text-gray-800 flex items-center gap-2"
@@ -76,7 +105,7 @@ function AboutModal({ onClose }) {
         <div className="px-6 pb-6">
           <button type="button" onClick={onClose}
             className="w-full py-2.5 rounded-lg font-semibold text-sm text-white bg-primary hover:bg-blue-700 transition-all hover:shadow-[0_6px_18px_rgba(37,99,235,0.35)]">
-            Close
+            {t.close}
           </button>
         </div>
       </div>
@@ -94,33 +123,39 @@ const NAV_ITEMS = [
 export default function CitizenPortalLayout({ children }) {
   const location = useLocation();
   const { dark } = useTheme();
+  const { lang } = useLang();
+  const t = useText(TEXT);
   const [aboutOpen, setAboutOpen] = useState(false);
   const isActive = (to) => location.pathname === to;
 
   const FOOTER_ITEMS = [
-    { label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', onClick: () => setAboutOpen(true) },
-    { label: 'Help', icon: 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-      onClick: () => toast('For assistance, visit or call Cantilan Town Hall during office hours.', { icon: '📞' }) },
+    { label: t.about, icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', onClick: () => setAboutOpen(true) },
+    { label: t.help, icon: 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+      onClick: () => toast(t.helpText, { icon: '📞' }) },
   ];
 
   return (
-    <div className="citizen-portal min-h-screen" style={{ background: dark ? '#0f172a' : '#eef2f9' }}>
-      {/* Header banner */}
-      <div className="relative overflow-hidden" style={{ height: 130 }}>
-        <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(15,45,110,0.94) 0%, rgba(20,60,140,0.75) 45%, rgba(30,80,170,0.35) 100%)' }} />
-        <div className="relative z-10 h-full flex items-center px-4 sm:px-8 gap-3 sm:gap-4">
-          <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-12 h-12 sm:w-16 sm:h-16 object-contain flex-shrink-0" />
-          <div>
-            <p className="text-white/70 text-xs font-semibold tracking-wide">Municipality of Cantilan</p>
-            <h1 className="text-white text-lg sm:text-xl font-extrabold tracking-tight leading-tight">Surigao Del Sur - Philippines</h1>
-          </div>
-          <div className="ml-auto flex items-center gap-4">
-            <div className="hidden lg:block text-right text-white/85 text-sm italic font-medium max-w-xs">
-              A Cleaner, Safer, Stronger<br />Cantilan for Everyone
+    <div className="citizen-portal min-h-screen" style={{ background: dark ? '#0f172a' : '#eef2f9' }} lang={lang}>
+      {/* Header banner. The language button sits outside the clipped banner, so its
+          list can open over the page below. */}
+      <div className="relative">
+        <div className="relative overflow-hidden" style={{ height: 130 }}>
+          <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(15,45,110,0.94) 0%, rgba(20,60,140,0.75) 45%, rgba(30,80,170,0.35) 100%)' }} />
+          <div className="relative z-10 h-full flex items-center px-4 sm:px-8 gap-3 sm:gap-4">
+            <BrandImg kind="seal" alt="Municipality of Cantilan" className="w-12 h-12 sm:w-16 sm:h-16 object-contain flex-shrink-0" />
+            <div>
+              <p className="text-white/70 text-xs font-semibold tracking-wide">Municipality of Cantilan</p>
+              <h1 className="text-white text-lg sm:text-xl font-extrabold tracking-tight leading-tight">Surigao Del Sur - Philippines</h1>
+            </div>
+            <div className="ml-auto flex items-center gap-4">
+              <div className="hidden lg:block text-right text-white/85 text-sm italic font-medium max-w-xs">
+                {t.tagline[0]}<br />{t.tagline[1]}
+              </div>
             </div>
           </div>
         </div>
+        <LanguageSwitcher className="absolute top-2 right-2 sm:right-4 z-30" />
       </div>
 
       {/* Phone tab bar (the sidebar below is hidden under md) */}
@@ -132,7 +167,7 @@ export default function CitizenPortalLayout({ children }) {
             <svg className="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d={item.icon} />
             </svg>
-            <span className="truncate max-w-full">{item.label}</span>
+            <span className="truncate max-w-full">{t.nav[i]}</span>
           </Link>
         ))}
       </nav>
@@ -150,7 +185,7 @@ export default function CitizenPortalLayout({ children }) {
                 <svg className="w-4.5 h-4.5 flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d={item.icon} />
                 </svg>
-                {item.label}
+                {t.nav[i]}
               </Link>
             ))}
           </nav>
@@ -177,7 +212,7 @@ export default function CitizenPortalLayout({ children }) {
       </div>
 
       <div className="border-t bg-white px-4 sm:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-1 text-center sm:text-left text-xs text-gray-400">
-        <span>© {new Date().getFullYear()} Municipality of Cantilan. All rights reserved.</span>
+        <span>© {new Date().getFullYear()} Municipality of Cantilan. {t.rights}</span>
         <span>Cantilan Town Hall &nbsp;|&nbsp; Citizen Report and Concerns System</span>
       </div>
 

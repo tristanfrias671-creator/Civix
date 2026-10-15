@@ -18,6 +18,7 @@ const {
   rotateAdminLink,
   updateDeadlines,
 } = require('../controllers/settings');
+const { startCodeSetting, setCodeSetting } = require('../controllers/auth');
 
 // Rejects unknown kinds before anything is written to disk.
 function brandingKind(req, res, next) {
@@ -45,6 +46,9 @@ router.patch('/security', updateSecurity);
 router.patch('/deadlines', updateDeadlines);
 router.get('/security/locked', getLockedAccounts);
 router.post('/security/unlock/:id', unlockAccount);
+// Sign-in codes for administrators: turning them on needs a code from your email.
+router.post('/security/sign-in-code/start', startCodeSetting);
+router.post('/security/sign-in-code', setCodeSetting);
 router.post('/branding/:kind', brandingKind, brandingFile, requireRealPhotos, uploadBranding);
 router.delete('/branding/:kind', brandingKind, resetBranding);
 router.get('/admin-link', getAdminLink);

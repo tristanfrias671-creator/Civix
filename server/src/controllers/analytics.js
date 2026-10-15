@@ -1,4 +1,10 @@
 const prisma = require('../utils/prisma');
+const { PRIORITY_LABELS } = require('../utils/urgency');
+
+// Reports staff marked as spam or invalid (status SPAM) are left out of every
+// figure, chart and alert here.
+const NOT_SPAM = { status: { not: 'SPAM' } };
+const CLOSED = ['RESOLVED', 'SPAM'];
 
 // Year and month (1-12) on the Philippine calendar. The server clock may be UTC,
 // where a report filed early on the 1st (PH time) still falls in the month before.
@@ -16,7 +22,7 @@ async function getAlerts(req, res) {
     const now = new Date();
     const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
     // Feedback has no workflow (no office acts on it), so it never needs attention here.
-    const open = { status: { not: 'RESOLVED' }, type: { not: 'FEEDBACK' } };
+    const open = { status: { notIn: CLOSED }, type: { not: 'FEEDBACK' } };
     const select = {
       id: true, trackingId: true, type: true, department: true, status: true,
       priority: true, dueAt: true, createdAt: true, updatedAt: true,
@@ -47,16 +53,16 @@ async function getSummary(req, res) {
     // Feedback rates the municipality's service as a whole and has no workflow, so
     // the case figures (pending, resolved, overdue, response rate, resolution time)
     // count complaints and suggestions only. The total counts every submission.
-    const cases = { type: { not: 'FEEDBACK' } };
+    const cases = { type: { not: 'FEEDBACK' }, ...NOT_SPAM };
     const [total, caseTotal, pending, reviewing, inProgress, resolved, overdue] = await Promise.all([
-      prisma.submission.count(),
+      prisma.submission.count({ where: NOT_SPAM }),
       prisma.submission.count({ where: cases }),
       prisma.submission.count({ where: { ...cases, status: 'PENDING' } }),
       prisma.submission.count({ where: { ...cases, status: 'REVIEWING' } }),
       prisma.submission.count({ where: { ...cases, status: 'IN_PROGRESS' } }),
       prisma.submission.count({ where: { ...cases, status: 'RESOLVED' } }),
       // Past their resolve-by date and not yet resolved.
-      prisma.submission.count({ where: { ...cases, status: { not: 'RESOLVED' }, dueAt: { lt: new Date() } } }),
+      prisma.submission.count({ where: { ...cases, status: { notIn: CLOSED }, dueAt: { lt: new Date() } } }),
     ]);
 
     const resolvedSubmissions = await prisma.submission.findMany({
@@ -74,9 +80,19 @@ async function getSummary(req, res) {
 
     const responseRate = caseTotal > 0 ? parseFloat(((caseTotal - pending) / caseTotal * 100).toFixed(1)) : 0;
 
-    const citizens = await prisma.user.count({ where: { role: 'CITIZEN' } });
+    // Urgent reports: how many are still open, and how many of the resolved ones were
+    // finished by their resolve-by date (the same rule as the deadline badges).
+    const [citizens, urgentOpen, urgentDone] = await Promise.all([
+      prisma.user.count({ where: { role: 'CITIZEN' } }),
+      prisma.submission.count({ where: { ...cases, priority: 'URGENT', status: { notIn: CLOSED } } }),
+      prisma.submission.findMany({ where: { ...cases, priority: 'URGENT', status: 'RESOLVED' }, select: { updatedAt: true, dueAt: true } }),
+    ]);
+    const urgentOnTime = urgentDone.filter(s => !s.dueAt || s.updatedAt <= s.dueAt).length;
 
-    res.json({ total, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate, citizens });
+    res.json({
+      total, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate, citizens,
+      urgentOpen, urgentResolved: urgentDone.length, urgentOnTime,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch analytics summary' });
@@ -86,6 +102,7 @@ async function getSummary(req, res) {
 async function getQuarterly(req, res) {
   try {
     const submissions = await prisma.submission.findMany({
+      where: NOT_SPAM,
       select: { createdAt: true, type: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -110,9 +127,9 @@ async function getQuarterly(req, res) {
 async function getSentiment(req, res) {
   try {
     const [positive, neutral, negative] = await Promise.all([
-      prisma.submission.count({ where: { sentiment: 'POSITIVE' } }),
-      prisma.submission.count({ where: { sentiment: 'NEUTRAL' } }),
-      prisma.submission.count({ where: { sentiment: 'NEGATIVE' } }),
+      prisma.submission.count({ where: { ...NOT_SPAM, sentiment: 'POSITIVE' } }),
+      prisma.submission.count({ where: { ...NOT_SPAM, sentiment: 'NEUTRAL' } }),
+      prisma.submission.count({ where: { ...NOT_SPAM, sentiment: 'NEGATIVE' } }),
     ]);
     res.json([
       { name: 'Positive', value: positive, color: '#16A34A' },
@@ -125,9 +142,32 @@ async function getSentiment(req, res) {
   }
 }
 
+// GET /api/analytics/office-updates?limit=6 — the offices' latest status updates,
+// newest first, with the photos staff attached as proof of the work (Dashboard).
+async function getOfficeUpdates(req, res) {
+  try {
+    const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 6));
+    const updates = await prisma.statusUpdateLog.findMany({
+      where: { updatedByRole: 'STAFF', status: { not: 'SPAM' }, submission: NOT_SPAM },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true, status: true, note: true, createdAt: true, updatedByName: true, submissionId: true, trackingId: true,
+        submission: { select: { type: true, department: true, status: true } },
+        photos: { select: { id: true, filePath: true }, orderBy: { createdAt: 'asc' } },
+      },
+    });
+    res.json(updates);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load the latest office updates' });
+  }
+}
+
 async function getMonthly(req, res) {
   try {
     const submissions = await prisma.submission.findMany({
+      where: NOT_SPAM,
       select: { createdAt: true, type: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -160,6 +200,7 @@ async function getMonthly(req, res) {
 async function getBreakdown(req, res) {
   try {
     const submissions = await prisma.submission.findMany({
+      where: NOT_SPAM,
       select: { department: true, priority: true, type: true, citizenDepartment: true, status: true },
     });
 
@@ -175,12 +216,13 @@ async function getBreakdown(req, res) {
       HEALTH: 'Health',
       UNASSIGNED: 'Unassigned',
     };
-    const priorityLabels = { URGENT: 'Urgent', STANDARD: 'Standard', LOW: 'Low' };
+    const priorityLabels = PRIORITY_LABELS;
     const typeLabels = { COMPLAINT: 'Complaint', SUGGESTION: 'Suggestion', FEEDBACK: 'Feedback' };
 
     for (const s of submissions) {
       department[s.department] = (department[s.department] || 0) + 1;
-      priority[s.priority] = (priority[s.priority] || 0) + 1;
+      // Feedback has no urgency (no office acts on it).
+      if (s.type !== 'FEEDBACK') priority[s.priority] = (priority[s.priority] || 0) + 1;
       type[s.type] = (type[s.type] || 0) + 1;
       citizenDeptMap[s.citizenDepartment] = (citizenDeptMap[s.citizenDepartment] || 0) + 1;
     }
@@ -201,7 +243,7 @@ async function getBreakdown(req, res) {
       HEALTH: '#7C3AED',
       UNASSIGNED: '#6B7280',
     };
-    const priorityColors = { URGENT: '#DC2626', STANDARD: '#1D4ED8', LOW: '#6B7280' };
+    const priorityColors = { URGENT: '#B91C1C', STANDARD: '#1D4ED8', LOW: '#475569' };
     const typeColors = { COMPLAINT: '#DC2626', SUGGESTION: '#1D4ED8', FEEDBACK: '#16A34A' };
 
     res.json({
@@ -225,7 +267,7 @@ async function getCitizens(req, res) {
       where: { role: 'CITIZEN' },
       select: {
         id: true, fullName: true, citizenId: true, email: true, gmail: true, mobileNumber: true, createdAt: true,
-        _count: { select: { submissions: true } },
+        _count: { select: { submissions: { where: NOT_SPAM } } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -237,6 +279,7 @@ async function getCitizens(req, res) {
 }
 
 module.exports = {
+  getOfficeUpdates,
   getAlerts,
   getSummary,
   getQuarterly,

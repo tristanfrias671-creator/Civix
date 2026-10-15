@@ -1,14 +1,52 @@
 const bcrypt = require('bcryptjs');
 const { Prisma } = require('@prisma/client');
-const { sendStatusUpdateEmail } = require('../utils/mailer');
+const { sendStatusUpdateEmail, sendUrgencyChangeEmail } = require('../utils/mailer');
 const { sendStatusUpdateSms } = require('../utils/sms');
-const { phDayStart, phMonthStart } = require('../utils/deadline');
-const { getDepartmentList, getReceivingOffice } = require('./settings');
+const { phDayStart, phMonthStart, deadlineDays, dueAfterUrgencyChange } = require('../utils/deadline');
+const { PRIORITIES, PRIORITY_LABELS } = require('../utils/urgency');
+const { getDepartmentList, getReceivingOffice, ensureSettings } = require('./settings');
 const prisma = require('../utils/prisma');
+const { logSignIn } = require('../utils/signInLog');
+const { forgetPasswordChange } = require('../middleware/auth');
+const { savedPhotoPath } = require('../middleware/upload');
+const { discardUploads } = require('../utils/uploadSafety');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STATUSES = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 const TYPES = ['COMPLAINT', 'SUGGESTION', 'FEEDBACK'];
+// Spam / Invalid: set by the office's staff, with a reason. Such reports leave every
+// list, count, alert and map except the Spam tab; an administrator may delete them.
+const SPAM = 'SPAM';
+const NOT_SPAM = { status: { not: SPAM } };
+const CLOSED = ['RESOLVED', SPAM];
+const NEEDS_SPAM_REASON = 'Please say why this report is spam or invalid.';
+
+// Proof of the work: moving a report forward to In Progress or Resolved needs at
+// least one photo (of the work being done, or of the finished work or the reply).
+// Going back a step doesn't, so a mistake can be undone. While a report stays at
+// a step, staff can still post progress photos (a log entry with the same status).
+const PROOF_STEPS = ['IN_PROGRESS', 'RESOLVED'];
+const NEEDS_PROOF = {
+  IN_PROGRESS: 'Add at least one photo that shows the work has started.',
+  RESOLVED: 'Add at least one photo that shows the finished work (or the reply that was sent).',
+};
+const NEEDS_PROGRESS_PHOTO = 'Add at least one photo to post a progress update.';
+// Each status update with its proof photos, newest first.
+const LOGS_WITH_PHOTOS = { orderBy: { createdAt: 'desc' }, include: { photos: { orderBy: { createdAt: 'asc' } } } };
+// What the report window shows of a report.
+const REPORT_DETAIL = {
+  user: { select: { fullName: true, email: true, citizenId: true } },
+  location: true,
+  media: true,
+  statusLogs: LOGS_WITH_PHOTOS,
+};
+// Changes to how urgent a report is, newest first (they are kept apart from the
+// report, like office moves).
+const urgencyChangesOf = submissionId => prisma.priorityChangeLog.findMany({
+  where: { submissionId }, orderBy: { createdAt: 'desc' }, take: 50,
+});
+// The office's reason for changing the urgency is shown to the citizen.
+const URGENCY_REASON_MIN = 10;
 
 // A short preview of a report's text for lists.
 const excerpt = text => (text && text.length > 140 ? `${text.slice(0, 140).trimEnd()}…` : text || '');
@@ -117,7 +155,15 @@ async function updateStaff(req, res) {
     if (password) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       const hashed = await bcrypt.hash(password, 12);
-      await prisma.$executeRaw`UPDATE User SET password = ${hashed} WHERE id = ${id}`;
+      // A new password from the administrator signs the staff member out everywhere
+      // and unlocks the account.
+      await prisma.$executeRaw`
+        UPDATE User SET password = ${hashed}, passwordChangedAt = ${new Date()}, failedLoginAttempts = 0, lockedUntil = NULL
+        WHERE id = ${id}
+      `;
+      forgetPasswordChange(id);
+      const [staffUser] = await prisma.$queryRaw`SELECT id, fullName, email, role FROM User WHERE id = ${id} LIMIT 1`;
+      await logSignIn(req, { user: staffUser, outcome: 'PASSWORD_CHANGED', method: 'ADMIN', detail: `Set by ${req.user.fullName || req.user.email}` });
     }
 
     const [updated] = await prisma.$queryRaw`
@@ -179,8 +225,11 @@ async function getMyStats(req, res) {
         SUM(CASE WHEN status='RESOLVED' AND updatedAt >= ${phMonthStart(now)} THEN 1 ELSE 0 END) as resolvedThisMonth,
         SUM(CASE WHEN department='UNASSIGNED' THEN 1 ELSE 0 END) as unassigned
       FROM Submission
-      WHERE department IN (${Prisma.join(scope.departments)}) ${onlyType}
+      WHERE department IN (${Prisma.join(scope.departments)}) AND status <> 'SPAM' ${onlyType}
     `;
+    const spam = await prisma.submission.count({
+      where: { department: { in: scope.departments }, status: SPAM, ...(TYPES.includes(req.query.type) ? { type: req.query.type } : {}) },
+    });
 
     const n = v => Number(v ?? 0);
     res.json({
@@ -201,6 +250,7 @@ async function getMyStats(req, res) {
       // The receiving office also sees reports with no office yet.
       receivingOffice: scope.receiving,
       unassigned: n(totals.unassigned),
+      spam,
     });
   } catch (err) {
     console.error(err);
@@ -218,7 +268,7 @@ async function getMyAlerts(req, res) {
     if (!scope) return res.status(400).json({ error: NO_OFFICE });
     const now = new Date();
     const soon = new Date(now.getTime() + 2 * DAY_MS);
-    const open = { department: { in: scope.departments }, status: { not: 'RESOLVED' } };
+    const open = { department: { in: scope.departments }, status: { notIn: CLOSED } };
     const notUrgent = { priority: { not: 'URGENT' } };
     const select = {
       id: true, trackingId: true, type: true, department: true, status: true,
@@ -263,13 +313,14 @@ async function getMySubmissions(req, res) {
     const offset = (page - 1) * limit;
     const search = String(req.query.search || '').trim().slice(0, 100);
 
-    // Build dynamic query with optional filters using Prisma
-    const where = { department: { in: scope.departments } };
+    // Build dynamic query with optional filters using Prisma. Spam shows only when
+    // asked for (the Spam tab).
+    const where = { department: { in: scope.departments }, ...NOT_SPAM };
     if (req.query.unassigned === '1' && scope.receiving) where.department = 'UNASSIGNED';
     if (overdue === '1') {
-      where.status = { not: 'RESOLVED' };
+      where.status = { notIn: CLOSED };
       where.dueAt = { lt: new Date() };
-    } else if (STATUSES.includes(status)) {
+    } else if (STATUSES.includes(status) || status === SPAM) {
       where.status = status;
     }
     if (TYPES.includes(type)) where.type = type;
@@ -330,47 +381,59 @@ async function getMySubmissionDetail(req, res) {
     const scope = await officeScope(req.user.id);
     if (!scope) return res.status(400).json({ error: NO_OFFICE });
 
-    const submission = await prisma.submission.findUnique({
-      where: { id: req.params.id },
-      include: {
-        user:       { select: { fullName: true, email: true, citizenId: true } },
-        location:   true,
-        media:      true,
-        statusLogs: { orderBy: { createdAt: 'desc' } },
-      },
-    });
+    const submission = await prisma.submission.findUnique({ where: { id: req.params.id }, include: REPORT_DETAIL });
     if (!submission) return res.status(404).json({ error: 'Report not found' });
     if (!inScope(scope, submission.department)) return res.status(403).json({ error: OTHER_OFFICE });
 
-    res.json(submission);
+    res.json({ ...submission, urgencyChanges: await urgencyChangesOf(submission.id) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch submission' });
   }
 }
 
-// PATCH /api/staff/portal/submission/:id — staff updates status of a submission in their dept
+// PATCH /api/staff/portal/submission/:id — staff update a report of their office:
+// { status, note } as JSON, or as a form with up to 5 `photos` of the work.
 async function updateMySubmission(req, res) {
+  // Photos are saved before this runs; a refused update deletes them again.
+  const refuse = (code, body) => { discardUploads(req); return res.status(code).json(body); };
   try {
     const scope = await officeScope(req.user.id);
-    if (!scope) return res.status(400).json({ error: NO_OFFICE });
+    if (!scope) return refuse(400, { error: NO_OFFICE });
 
     const submission = await prisma.submission.findUnique({ where: { id: req.params.id } });
-    if (!submission) return res.status(404).json({ error: 'Report not found' });
-    if (!inScope(scope, submission.department)) return res.status(403).json({ error: OTHER_OFFICE });
+    if (!submission) return refuse(404, { error: 'Report not found' });
+    if (!inScope(scope, submission.department)) return refuse(403, { error: OTHER_OFFICE });
 
-    const { status, note } = req.body;
-    const allowed = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
-    if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const { status } = req.body;
+    const note = String(req.body.note || '').trim().slice(0, 1000);
+    if (![...STATUSES, SPAM].includes(status)) return refuse(400, { error: 'Invalid status' });
+    if (status === SPAM && status !== submission.status && !note) {
+      return refuse(400, { error: NEEDS_SPAM_REASON });
+    }
 
     const statusChanged = status !== submission.status;
+    // Marking spam (or putting a report back) takes no photos.
+    const photos = status === SPAM || submission.status === SPAM ? [] : (req.files || []);
+    if (photos.length < (req.files || []).length) discardUploads(req);
+    const forward = STATUSES.indexOf(status) > STATUSES.indexOf(submission.status);
+    if (statusChanged && forward && PROOF_STEPS.includes(status) && !photos.length) {
+      return refuse(400, { error: NEEDS_PROOF[status], code: 'PROOF_NEEDED' });
+    }
+    // Same step: a progress update, which needs a photo (a note alone changes nothing).
+    const progressUpdate = !statusChanged && status !== SPAM;
+    if (progressUpdate && !photos.length) {
+      if (note) return refuse(400, { error: NEEDS_PROGRESS_PHOTO, code: 'PROOF_NEEDED' });
+      return refuse(400, { error: 'Choose a different step, or add photos to post a progress update.' });
+    }
 
-    if (statusChanged) {
+    if (statusChanged || progressUpdate) {
       await prisma.statusUpdateLog.create({
         data: {
           submissionId: submission.id, trackingId: submission.trackingId, status,
-          note: note?.trim() || null,
+          note: note || null,
           updatedById: req.user.id, updatedByName: req.user.fullName || req.user.email, updatedByRole: req.user.role,
+          photos: { create: photos.map(file => ({ filePath: savedPhotoPath(file, 'proof') })) },
         },
       });
     }
@@ -378,10 +441,7 @@ async function updateMySubmission(req, res) {
     const updated = await prisma.submission.update({
       where: { id: req.params.id },
       data:  { status },
-      include: {
-        user: { select: { fullName: true, email: true } }, location: true, media: true,
-        statusLogs: { orderBy: { createdAt: 'desc' } },
-      },
+      include: REPORT_DETAIL,
     });
 
     // Notify citizen
@@ -391,24 +451,80 @@ async function updateMySubmission(req, res) {
       RESOLVED:    `Your submission ${submission.trackingId} has been resolved. Thank you!`,
     };
     if (messages[status] && statusChanged) {
-      const fullMessage = note?.trim() ? `${messages[status]} Note: ${note.trim()}` : messages[status];
+      const fullMessage = note ? `${messages[status]} Note: ${note}` : messages[status];
       if (submission.userId) {
         await prisma.notification.create({ data: { userId: submission.userId, message: fullMessage } });
       }
-      if (updated.email) sendStatusUpdateEmail(updated, status, note?.trim());
+      if (updated.email) sendStatusUpdateEmail(updated, status, note || undefined);
       sendStatusUpdateSms(updated, status);
     }
 
-    res.json(updated);
+    res.json({ ...updated, urgencyChanges: await urgencyChangesOf(updated.id) });
   } catch (err) {
     console.error(err);
+    discardUploads(req);
     res.status(500).json({ error: 'Failed to update submission' });
+  }
+}
+
+// PATCH /api/staff/portal/urgency/:id { priority, reason } — the office changes how
+// urgent a report is (Urgent / Normal / Can wait; the citizen chose it for a
+// complaint). The resolve-by date is counted again (utils/deadline.js). A reason is
+// required: the citizen sees it on the Track page and by email, and administrators
+// see every change (report page and Audit Log).
+async function updateMyUrgency(req, res) {
+  try {
+    const scope = await officeScope(req.user.id);
+    if (!scope) return res.status(400).json({ error: NO_OFFICE });
+    const submission = await prisma.submission.findUnique({ where: { id: req.params.id } });
+    if (!submission) return res.status(404).json({ error: 'Report not found' });
+    if (!inScope(scope, submission.department)) return res.status(403).json({ error: OTHER_OFFICE });
+    if (submission.type === 'FEEDBACK') return res.status(400).json({ error: 'Feedback has no urgency or deadline.' });
+    if (CLOSED.includes(submission.status)) {
+      return res.status(400).json({ error: 'This report is closed, so its urgency can no longer be changed.' });
+    }
+    const priority = String(req.body.priority || '').trim().toUpperCase();
+    if (!PRIORITIES.includes(priority)) return res.status(400).json({ error: 'Choose Urgent, Normal or Can wait.' });
+    if (priority === submission.priority) return res.status(400).json({ error: `This report is already ${PRIORITY_LABELS[priority]}.` });
+    const reason = String(req.body.reason || '').trim().replace(/\s+/g, ' ').slice(0, 500);
+    if (reason.length < URGENCY_REASON_MIN) {
+      return res.status(400).json({ error: 'Please say why in a few words. The citizen will see your reason.' });
+    }
+
+    const settings = await ensureSettings();
+    const dueAt = dueAfterUrgencyChange({
+      createdAt: submission.createdAt, dueAt: submission.dueAt,
+      from: submission.priority, to: priority, days: deadlineDays(settings, submission.type, priority),
+    });
+    const [change, updated] = await prisma.$transaction([
+      prisma.priorityChangeLog.create({
+        data: {
+          submissionId: submission.id, trackingId: submission.trackingId,
+          fromPriority: submission.priority, toPriority: priority,
+          fromDueAt: submission.dueAt, toDueAt: dueAt, reason,
+          changedById: req.user.id, changedByName: req.user.fullName || req.user.email, changedByRole: req.user.role,
+        },
+      }),
+      prisma.submission.update({ where: { id: submission.id }, data: { priority, dueAt }, include: REPORT_DETAIL }),
+    ]);
+
+    if (submission.userId) {
+      await prisma.notification.create({
+        data: { userId: submission.userId, message: `Your submission ${submission.trackingId} is now marked ${PRIORITY_LABELS[priority]}. Reason: ${reason}` },
+      });
+    }
+    if (updated.email) sendUrgencyChangeEmail(updated, change);
+
+    res.json({ ...updated, urgencyChanges: await urgencyChangesOf(submission.id) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to change the urgency' });
   }
 }
 
 // GET /api/staff/portal/activity — what happened in this staff member's office in
 // the last 30 days, newest first: reports that arrived, reports moved in or out,
-// status updates (with who made them) and deadlines that passed.
+// status updates and urgency changes (with who made them) and deadlines that passed.
 async function getMyActivity(req, res) {
   try {
     const scope = await officeScope(req.user.id);
@@ -419,8 +535,8 @@ async function getMyActivity(req, res) {
     const since = new Date(now.getTime() - 30 * DAY_MS);
     const report = { id: true, trackingId: true, type: true, priority: true, reaction: true, department: true, createdAt: true, dueAt: true };
 
-    const [arrived, moves, updates, lapsed] = await Promise.all([
-      prisma.submission.findMany({ where: { department: mine, createdAt: { gte: since } }, select: report, orderBy: { createdAt: 'desc' }, take: 60 }),
+    const [arrived, moves, updates, lapsed, urgencyLogs] = await Promise.all([
+      prisma.submission.findMany({ where: { department: mine, ...NOT_SPAM, createdAt: { gte: since } }, select: report, orderBy: { createdAt: 'desc' }, take: 60 }),
       prisma.departmentChangeLog.findMany({
         where: { createdAt: { gte: since }, OR: [{ toDepartment: mine }, { fromDepartment: mine }] },
         orderBy: { createdAt: 'desc' }, take: 60,
@@ -430,10 +546,16 @@ async function getMyActivity(req, res) {
         include: { submission: { select: { type: true } } }, orderBy: { createdAt: 'desc' }, take: 60,
       }),
       prisma.submission.findMany({
-        where: { department: mine, status: { not: 'RESOLVED' }, dueAt: { gte: since, lt: now } },
+        where: { department: mine, status: { notIn: CLOSED }, dueAt: { gte: since, lt: now } },
         select: report, orderBy: { dueAt: 'desc' }, take: 60,
       }),
+      prisma.priorityChangeLog.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: 'desc' }, take: 200 }),
     ]);
+    // Urgency changes are kept apart from the reports: keep the ones on this office's reports.
+    const ours = new Set((await prisma.submission.findMany({
+      where: { id: { in: [...new Set(urgencyLogs.map(u => u.submissionId))] }, department: mine, ...NOT_SPAM },
+      select: { id: true },
+    })).map(s => s.id));
 
     // A report that was moved here shows as "moved in", not as a new arrival.
     const movedIn = new Set(moves.filter(m => inScope(scope, m.toDepartment)).map(m => m.submissionId));
@@ -457,6 +579,11 @@ async function getMyActivity(req, res) {
       ...lapsed.map(s => ({
         id: `overdue:${s.id}`, kind: 'overdue', at: s.dueAt, submissionId: s.id, trackingId: s.trackingId, type: s.type,
       })),
+      ...urgencyLogs.filter(u => ours.has(u.submissionId)).slice(0, 60).map(u => ({
+        id: `urgency:${u.id}`, kind: 'urgency', at: u.createdAt, submissionId: u.submissionId, trackingId: u.trackingId,
+        fromPriority: u.fromPriority, toPriority: u.toPriority, reason: u.reason,
+        ...byWhom(u.changedById, u.changedByName, u.changedByRole),
+      })),
     ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 80);
 
     res.json({ department: dept, receivingOffice: scope.receiving, since, events });
@@ -473,7 +600,7 @@ async function getMyMapReports(req, res) {
     const scope = await officeScope(req.user.id);
     if (!scope) return res.status(400).json({ error: NO_OFFICE });
     const reports = await prisma.submission.findMany({
-      where: { department: { in: scope.departments } },
+      where: { department: { in: scope.departments }, ...NOT_SPAM },
       select: {
         id: true, trackingId: true, type: true, status: true, priority: true, description: true, address: true,
         department: true, citizenDepartment: true, createdAt: true, dueAt: true, updatedAt: true,
@@ -515,8 +642,10 @@ async function assignSubmission(req, res) {
       data.department = target;
     }
     if (status) {
-      const allowed = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
-      if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      if (![...STATUSES, SPAM].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      if (status === SPAM && status !== existing.status && !String(note || '').trim()) {
+        return res.status(400).json({ error: NEEDS_SPAM_REASON });
+      }
       data.status = status;
     }
 
@@ -585,6 +714,6 @@ async function assignSubmission(req, res) {
 module.exports = {
   getMyAlerts, getMyActivity, getMyMapReports,
   getStaff, createStaff, updateStaff, deleteStaff,
-  getMyStats, getMySubmissions, getMySubmissionDetail, updateMySubmission,
+  getMyStats, getMySubmissions, getMySubmissionDetail, updateMySubmission, updateMyUrgency,
   assignSubmission,
 };

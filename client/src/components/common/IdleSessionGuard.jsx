@@ -1,22 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { useAuth, ACTIVITY_KEY } from '../../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import formatMinutes from '../../utils/formatMinutes';
+import { portalOf, activityKey, getSession } from '../../utils/session';
 
 const WARN_SECONDS = 60;
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'wheel', 'touchstart'];
 const RING_R = 28;
 const RING_C = 2 * Math.PI * RING_R;
 
-// Activity time is kept in localStorage so every open tab shares one clock:
-// working in one tab keeps the others signed in, and a sign-out ends them all.
-function readActivity() {
-  return Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
+// Activity time is kept in localStorage so every open tab of a portal shares one
+// clock: working in one admin tab keeps the other admin tabs signed in, and signing
+// out ends them all. The staff portal has its own clock (utils/session.js).
+function readActivity(key) {
+  try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; }
 }
-function markActivity() {
-  localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
+function markActivity(key) {
+  try { localStorage.setItem(key, String(Date.now())); } catch { /* storage unavailable */ }
 }
 
 // Signs the admin/staff user out after the inactivity limit set in
@@ -24,6 +26,8 @@ function markActivity() {
 export default function IdleSessionGuard({ loginPath }) {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const portal = portalOf(useLocation().pathname);
+  const key = activityKey(portal);
   const [minutes, setMinutes] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(null);
 
@@ -39,27 +43,27 @@ export default function IdleSessionGuard({ loginPath }) {
 
   const signOut = useCallback(message => {
     setSecondsLeft(null);
-    logout();
+    logout(portal);
     navigate(loginPath, { replace: true });
     if (message) toast(message, { id: 'idle-signout', duration: 8000 });
-  }, [logout, navigate, loginPath]);
+  }, [logout, navigate, loginPath, portal]);
 
   useEffect(() => {
-    if (!minutes) { setSecondsLeft(null); return undefined; }
+    if (!minutes || !key) { setSecondsLeft(null); return undefined; }
     const limitMs = minutes * 60000;
-    if (!readActivity()) markActivity();
+    if (!readActivity(key)) markActivity(key);
 
     let lastWrite = 0;
     const onActivity = () => {
       const now = Date.now();
       if (now - lastWrite < 1000) return;
       lastWrite = now;
-      markActivity();
+      markActivity(key);
     };
     const tick = () => {
-      // Signed out in another tab.
-      if (!localStorage.getItem('civix_token')) { signOut(null); return; }
-      const leftMs = limitMs - (Date.now() - readActivity());
+      // Signed out of this portal in another tab.
+      if (!getSession(portal)) { signOut(null); return; }
+      const leftMs = limitMs - (Date.now() - readActivity(key));
       if (leftMs <= 0) {
         signOut(`You were signed out after ${formatMinutes(minutes)} of inactivity.`);
         return;
@@ -74,7 +78,7 @@ export default function IdleSessionGuard({ loginPath }) {
       clearInterval(timer);
       ACTIVITY_EVENTS.forEach(ev => window.removeEventListener(ev, onActivity));
     };
-  }, [minutes, signOut]);
+  }, [minutes, signOut, key, portal]);
 
   if (secondsLeft == null) return null;
 
@@ -102,7 +106,7 @@ export default function IdleSessionGuard({ loginPath }) {
             className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors">
             Sign out
           </button>
-          <button type="button" autoFocus onClick={() => { markActivity(); setSecondsLeft(null); }}
+          <button type="button" autoFocus onClick={() => { markActivity(key); setSecondsLeft(null); }}
             className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold bg-primary text-white hover:bg-blue-700 transition-colors">
             Stay signed in
           </button>

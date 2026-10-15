@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList,
@@ -32,6 +32,72 @@ const TYPES = [
   { key: 'FEEDBACK',   name: 'Feedback' },
 ];
 const TYPE_KEY = { Complaint: 'COMPLAINT', Suggestion: 'SUGGESTION', Feedback: 'FEEDBACK' };
+
+/* ─── Report period for the PDF and Excel exports ─────────────────────────────
+   Weeks run Monday to Sunday. Dates are Philippine calendar days ("2026-10-13"),
+   worked on as UTC so the browser's own time zone can't shift them. */
+const REPORT_KINDS = [
+  { value: 'week',  label: 'Weekly',   pick: 'Week' },
+  { value: 'month', label: 'Monthly',  pick: 'Month' },
+  { value: 'year',  label: 'Yearly',   pick: 'Year' },
+  { value: 'all',   label: 'All time' },
+];
+const REPORT_KIND_KEY = 'civix_report_period';
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+const phToday = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+const parseDay = s => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+const dayValue = t => t.toISOString().slice(0, 10);
+const addDays = (t, n) => new Date(t.getTime() + n * 86400000);
+const mondayOf = t => addDays(t, -((t.getUTCDay() + 6) % 7));
+const shortDay = t => `${MONTH_NAMES[t.getUTCMonth()].slice(0, 3)} ${t.getUTCDate()}`;
+
+// "Oct 12 – 18, 2026", "Sep 28 – Oct 4, 2026", "Dec 28, 2026 – Jan 3, 2027"
+function weekLabel(start) {
+  const end = addDays(start, 6);
+  const [y1, y2] = [start.getUTCFullYear(), end.getUTCFullYear()];
+  if (y1 !== y2) return `${shortDay(start)}, ${y1} – ${shortDay(end)}, ${y2}`;
+  if (start.getUTCMonth() !== end.getUTCMonth()) return `${shortDay(start)} – ${shortDay(end)}, ${y1}`;
+  return `${shortDay(start)} – ${end.getUTCDate()}, ${y1}`;
+}
+
+// The weeks, months or years to pick from, newest first, back to the first report
+// on record (at most two years of weeks and five of months). `name` reads well in
+// a sentence: "the week of Oct 12 – 18, 2026".
+function periodOptions(kind, first, today) {
+  const t = parseDay(today);
+  const f = parseDay(first && first < today ? first : today);
+  const nth = (i, word) => (i === 0 ? ` (this ${word})` : i === 1 ? ` (last ${word})` : '');
+  const out = [];
+  if (kind === 'week') {
+    for (let w = mondayOf(t), i = 0; w >= mondayOf(f) && i < 104; w = addDays(w, -7), i++) {
+      out.push({ value: dayValue(w), label: weekLabel(w) + nth(i, 'week'), name: weekLabel(w) });
+    }
+  } else if (kind === 'month') {
+    const firstMonth = Date.UTC(f.getUTCFullYear(), f.getUTCMonth(), 1);
+    for (let i = 0; i < 60; i++) {
+      const m = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - i, 1));
+      if (m.getTime() < firstMonth) break;
+      const name = `${MONTH_NAMES[m.getUTCMonth()]} ${m.getUTCFullYear()}`;
+      out.push({ value: dayValue(m), label: name + nth(i, 'month'), name });
+    }
+  } else if (kind === 'year') {
+    for (let y = t.getUTCFullYear(), i = 0; y >= f.getUTCFullYear(); y--, i++) {
+      out.push({ value: `${y}-01-01`, label: y + nth(i, 'year'), name: String(y) });
+    }
+  }
+  return out;
+}
+
+// A failed download's reason (the reply is read as a file, so parse it back).
+async function downloadError(err, fallback) {
+  try {
+    return JSON.parse(await err.response.data.text()).error || fallback;
+  } catch {
+    return err.response ? fallback : err.message;
+  }
+}
 
 const analyticsCss = `
 /* Raised card surface: layered shadow + a light top edge */
@@ -103,6 +169,8 @@ function useChartTheme() {
     surface: dark ? '#1e293b' : '#ffffff',
     ink: dark ? '#e2e8f0' : '#1f2937',
     inkMuted: dark ? '#94a3b8' : '#6b7280',
+    // Muted text on the page background itself (slate-100), where #6b7280 is only 4.4:1.
+    inkPage: dark ? '#94a3b8' : '#4b5563',
     grid: dark ? '#334155' : '#eef0f3',
     axisTick: dark ? '#94a3b8' : '#6b7280',
     tooltip: {
@@ -597,7 +665,7 @@ function QuarterlyChart({ data }) {
 /* ─── Main ───────────────────────────────────────────────────────────────── */
 export default function Analytics() {
   const location = useLocation();
-  const { dark, pal, surface, grid, axisTick, ink, inkMuted, tooltip } = useChartTheme();
+  const { dark, pal, surface, grid, axisTick, ink, inkMuted, inkPage, tooltip } = useChartTheme();
   const monthlyId = useSvgId('m');
   const deptId = useSvgId('d');
   const [summary, setSummary]     = useState(null);
@@ -608,7 +676,31 @@ export default function Analytics() {
   const [loading, setLoading]     = useState(true);
   const [exporting, setExporting] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
+  // What the exports cover: a week, month or year (the current one until another
+  // is picked), or everything. The kind is remembered on this device.
+  const [reportKind, setReportKind] = useState(() => {
+    try {
+      const saved = localStorage.getItem(REPORT_KIND_KEY);
+      return REPORT_KINDS.some(k => k.value === saved) ? saved : 'month';
+    } catch { return 'month'; }
+  });
+  const [reportDate, setReportDate] = useState('');
+  const [span, setSpan] = useState({ first: null, today: phToday() });
+  const periodChoices = useMemo(() => periodOptions(reportKind, span.first, span.today), [reportKind, span]);
+  const chosen = periodChoices.find(o => o.value === reportDate) || periodChoices[0];
+  const kindInfo = REPORT_KINDS.find(k => k.value === reportKind);
+  const reportName = reportKind === 'all' ? 'All-time report' : `${kindInfo.label} report for ${chosen?.name}`;
   const gate = useSkeletonGate();
+
+  useEffect(() => {
+    api.get('/reports/periods').then(r => setSpan(r.data)).catch(() => {});
+  }, []);
+
+  function chooseKind(kind) {
+    setReportKind(kind);
+    setReportDate('');
+    try { localStorage.setItem(REPORT_KIND_KEY, kind); } catch { /* private window */ }
+  }
 
   useEffect(() => {
     gate(Promise.all([
@@ -623,30 +715,25 @@ export default function Analytics() {
     }).catch(() => setLoading(false));
   }, [gate]);
 
-  async function exportPDF() {
-    setExporting(true);
+  // Downloads the PDF or Excel report for the chosen period, under the server's
+  // file name (e.g. civix-report-monthly-2026-10.pdf).
+  async function exportReport(format) {
+    const pdf = format === 'pdf';
+    const setBusy = pdf ? setExporting : setExportingExcel;
+    setBusy(true);
     try {
-      const res = await api.get('/reports/pdf', { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      const a = document.createElement('a'); a.href = url;
-      a.download = `civix-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const params = reportKind === 'all' ? { period: 'all' } : { period: reportKind, date: chosen.value };
+      const res = await api.get(pdf ? '/reports/pdf' : '/reports/excel', { params, responseType: 'blob' });
+      const name = /filename="([^"]+)"/.exec(res.headers['content-disposition'] || '')?.[1]
+        || `civix-report-${phToday()}.${pdf ? 'pdf' : 'xlsx'}`;
+      const url = URL.createObjectURL(new Blob([res.data], { type: pdf ? 'application/pdf' : XLSX_TYPE }));
+      const a = document.createElement('a'); a.href = url; a.download = name;
       a.click(); URL.revokeObjectURL(url);
-      toast.success('Report downloaded!');
-    } catch { toast.error('Failed to generate report'); }
-    setExporting(false);
-  }
-
-  async function exportExcel() {
-    setExportingExcel(true);
-    try {
-      const res = await api.get('/reports/excel', { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-      const a = document.createElement('a'); a.href = url;
-      a.download = `civix-report-${new Date().toISOString().slice(0, 10)}.xlsx`;
-      a.click(); URL.revokeObjectURL(url);
-      toast.success('Excel workbook downloaded!');
-    } catch { toast.error('Failed to generate Excel report'); }
-    setExportingExcel(false);
+      toast.success(`${reportName} downloaded (${pdf ? 'PDF' : 'Excel'}).`);
+    } catch (err) {
+      toast.error(await downloadError(err, pdf ? 'Failed to generate report' : 'Failed to generate Excel report'));
+    }
+    setBusy(false);
   }
 
   const sentimentTotal = sentiment.reduce((n, s) => n + s.value, 0);
@@ -680,24 +767,39 @@ export default function Analytics() {
     <div key={location.key} className="p-6 max-w-7xl mx-auto">
       <style>{analyticsCss}</style>
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+      {/* Header: title, then the report period and the two exports */}
+      <div className="flex flex-wrap justify-between items-end gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>Analytics</h1>
-          <p className="text-sm mt-0.5" style={{ color: inkMuted }}>Performance metrics and submission insights</p>
+          <p className="text-sm mt-0.5" style={{ color: inkPage }}>Performance metrics and submission insights</p>
         </div>
-        <div className="flex items-center gap-2.5">
-          <button onClick={exportExcel} disabled={exportingExcel}
+        <div className="flex flex-wrap items-end gap-2.5">
+          <div>
+            <label htmlFor="report-period" className="block text-xs font-semibold mb-1" style={{ color: inkPage }}>Report period</label>
+            <div className="flex flex-wrap gap-2">
+              <select id="report-period" value={reportKind} onChange={e => chooseKind(e.target.value)}
+                className="h-11 px-3 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary">
+                {REPORT_KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
+              </select>
+              {reportKind !== 'all' && (
+                <select aria-label={kindInfo.pick} value={chosen?.value || ''} onChange={e => setReportDate(e.target.value)}
+                  className="h-11 px-3 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary">
+                  {periodChoices.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+          <button onClick={() => exportReport('excel')} disabled={exportingExcel}
             className="flex items-center justify-center gap-2 px-5 py-2.5 text-white rounded-lg font-semibold transition-colors disabled:opacity-50"
-            style={{ background: '#16a34a' }}
-            onMouseEnter={e => { if (!exportingExcel) e.currentTarget.style.background = '#15803d'; }}
-            onMouseLeave={e => e.currentTarget.style.background = '#16a34a'}>
+            style={{ background: '#15803d' }}
+            onMouseEnter={e => { if (!exportingExcel) e.currentTarget.style.background = '#166534'; }}
+            onMouseLeave={e => e.currentTarget.style.background = '#15803d'}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-6h6v6M9 17H7a2 2 0 01-2-2V5a2 2 0 012-2h6.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2" />
             </svg>
             {exportingExcel ? 'Generating...' : 'Export Excel'}
           </button>
-          <button onClick={exportPDF} disabled={exporting}
+          <button onClick={() => exportReport('pdf')} disabled={exporting}
             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -806,6 +908,55 @@ export default function Analytics() {
               </BarChart>
             </ResponsiveContainer>
           )}
+        </ChartCard>
+      </div>
+
+      {/* Urgency: how urgent complaints and suggestions are, and urgent ones finished on time */}
+      <div className="mb-6">
+        <ChartCard title="Urgency" subtitle="How urgent complaints and suggestions are: chosen by the citizen, or changed by the office with a reason">
+          {(() => {
+            const levels = [
+              { label: 'Urgent',   color: '#B91C1C' },
+              { label: 'Normal',   color: '#1D4ED8' },
+              { label: 'Can wait', color: '#475569' },
+            ].map(l => ({ ...l, value: breakdown?.priority?.find(p => p.name === l.label)?.value || 0 }));
+            const all = levels.reduce((n, l) => n + l.value, 0);
+            const done = summary?.urgentResolved || 0;
+            const onTime = summary?.urgentOnTime || 0;
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-3">
+                  {levels.map(l => {
+                    const pct = all > 0 ? Math.round((l.value / all) * 100) : 0;
+                    return (
+                      <div key={l.label}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="font-medium" style={{ color: dark ? '#cbd5e1' : '#374151' }}>{l.label}</span>
+                          <span style={{ color: inkMuted }}>{l.value} ({pct}%)</span>
+                        </div>
+                        <div className="an-track w-full rounded-full h-2.5" style={{ background: dark ? 'rgba(255,255,255,0.08)' : '#f1f5f9' }}>
+                          <div className="an-fill h-2.5 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: l.color }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <dl className="grid grid-cols-2 lg:grid-cols-1 gap-3">
+                  <div className="rounded-xl px-4 py-3" style={{ background: dark ? 'rgba(220,38,38,0.12)' : '#fef2f2' }}>
+                    <dt className="text-xs font-semibold" style={{ color: dark ? '#fca5a5' : '#991b1b' }}>Urgent, still open</dt>
+                    <dd className="text-2xl font-bold mt-0.5" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>{summary?.urgentOpen ?? 0}</dd>
+                  </div>
+                  <div className="rounded-xl px-4 py-3" style={{ background: dark ? 'rgba(22,163,74,0.12)' : '#f0fdf4' }}>
+                    <dt className="text-xs font-semibold" style={{ color: dark ? '#86efac' : '#166534' }}>Urgent, finished on time</dt>
+                    <dd className="text-2xl font-bold mt-0.5" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>
+                      {done ? `${onTime} of ${done}` : '—'}
+                    </dd>
+                    <p className="text-xs mt-0.5" style={{ color: inkMuted }}>{done ? `${Math.round((onTime / done) * 100)}% by their finish-by date` : 'None resolved yet'}</p>
+                  </div>
+                </dl>
+              </div>
+            );
+          })()}
         </ChartCard>
       </div>
 

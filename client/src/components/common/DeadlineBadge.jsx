@@ -16,21 +16,32 @@ export function formatDueDate(dueAt, withWeekday = false) {
   });
 }
 
+// The badge's wording. The citizen Track page passes the same keys in its language.
+export const DEADLINE_WORDS = {
+  onTime: 'Resolved on time',
+  late: 'Resolved late',
+  overdue: d => `Overdue by ${d} day${d === 1 ? '' : 's'}`,
+  today: 'Due today',
+  dueIn: d => `Due in ${d} day${d === 1 ? '' : 's'}`,
+  left: d => `${d} days left`,
+  due: date => `Due ${date}`,
+};
+
 // Where a report stands against its resolve-by date (Submission.dueAt).
 // Resolved reports count as on time if they were last updated by the deadline.
-export function deadlineInfo({ dueAt, status, updatedAt }) {
-  if (!dueAt) return null;
+export function deadlineInfo({ dueAt, status, updatedAt }, words = DEADLINE_WORDS) {
+  if (!dueAt || status === 'SPAM') return null; // spam or invalid: no deadline to meet
   const due = new Date(dueAt);
   const dateText = formatDueDate(dueAt);
   if (status === 'RESOLVED') {
     const onTime = !updatedAt || new Date(updatedAt) <= due;
-    return { tone: onTime ? 'good' : 'muted', label: onTime ? 'Resolved on time' : 'Resolved late', dateText };
+    return { tone: onTime ? 'good' : 'muted', label: onTime ? words.onTime : words.late, dateText };
   }
   const days = Math.round((phDay(due) - phDay(new Date())) / DAY_MS);
-  if (days < 0) return { tone: 'bad', label: `Overdue by ${-days} day${days === -1 ? '' : 's'}`, dateText };
-  if (days === 0) return { tone: 'warn', label: 'Due today', dateText };
-  if (days <= 2) return { tone: 'warn', label: `Due in ${days} day${days === 1 ? '' : 's'}`, dateText };
-  return { tone: 'ok', label: `${days} days left`, dateText };
+  if (days < 0) return { tone: 'bad', label: words.overdue(-days), dateText };
+  if (days === 0) return { tone: 'warn', label: words.today, dateText };
+  if (days <= 2) return { tone: 'warn', label: words.dueIn(days), dateText };
+  return { tone: 'ok', label: words.left(days), dateText };
 }
 
 const TONE = {
@@ -41,8 +52,8 @@ const TONE = {
   muted: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
 };
 
-export default function DeadlineBadge({ submission, showDate = false }) {
-  const info = deadlineInfo(submission);
+export default function DeadlineBadge({ submission, showDate = false, words = DEADLINE_WORDS }) {
+  const info = deadlineInfo(submission, words);
   if (!info) return <span className="text-xs text-gray-500">—</span>;
   return (
     <span className="inline-flex flex-col items-start">
@@ -52,7 +63,7 @@ export default function DeadlineBadge({ submission, showDate = false }) {
         </svg>
         {info.label}
       </span>
-      {showDate && <span className="text-[11px] text-gray-500 mt-0.5 whitespace-nowrap">Due {info.dateText}</span>}
+      {showDate && <span className="text-[11px] text-gray-500 mt-0.5 whitespace-nowrap">{words.due(info.dateText)}</span>}
     </span>
   );
 }

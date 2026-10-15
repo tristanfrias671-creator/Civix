@@ -14,12 +14,16 @@ const fileFilter = (req, file, cb) => {
   else cb(Object.assign(new Error('Only JPG and PNG photos are allowed.'), { status: 400, code: 'BAD_PHOTO' }), false);
 };
 
-let storage, avatarStorage, brandingStorage;
+let storage, avatarStorage, brandingStorage, proofStorage;
 
 if (cloudinary.configured) {
   storage = new CloudinaryStorage({
     cloudinary: cloudinary.instance,
     params: { folder: 'civix/submissions', allowed_formats: ['jpg', 'jpeg', 'png'] },
+  });
+  proofStorage = new CloudinaryStorage({
+    cloudinary: cloudinary.instance,
+    params: { folder: 'civix/proof', allowed_formats: ['jpg', 'jpeg', 'png'] },
   });
   avatarStorage = new CloudinaryStorage({
     cloudinary: cloudinary.instance,
@@ -48,6 +52,14 @@ if (cloudinary.configured) {
     filename: (req, file, cb) => cb(null, `avatar-${req.user.id}-${Date.now()}.jpg`),
   });
 
+  // Photos staff attach to a status update as proof of the work.
+  const proofDir = path.join(uploadDir, 'proof');
+  if (!fs.existsSync(proofDir)) fs.mkdirSync(proofDir, { recursive: true });
+  proofStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, proofDir),
+    filename: (req, file, cb) => cb(null, `proof-${Date.now()}-${Math.round(Math.random() * 1e9)}${extensionFor(file)}`),
+  });
+
   // Seal and homepage photo; the file name starts with the kind (seal / hero).
   const brandingDir = path.join(uploadDir, 'branding');
   if (!fs.existsSync(brandingDir)) fs.mkdirSync(brandingDir, { recursive: true });
@@ -66,5 +78,10 @@ const ONE_IMAGE = { fileSize: 5 * 1024 * 1024, files: 1, fields: 10, fieldSize: 
 const upload = multer({ storage, fileFilter, limits: PHOTO_LIMITS });
 const avatarUpload = multer({ storage: avatarStorage, fileFilter, limits: ONE_IMAGE });
 const brandingUpload = multer({ storage: brandingStorage, fileFilter, limits: ONE_IMAGE });
+// Proof photos: up to 5 of 5 MB each with a status update (status and a note).
+const proofUpload = multer({ storage: proofStorage, fileFilter, limits: { ...PHOTO_LIMITS, fields: 10, fieldSize: 8 * 1024 } });
 
-module.exports = { upload, avatarUpload, brandingUpload };
+// Where a saved photo is served from: its Cloudinary address, or /uploads/... here.
+const savedPhotoPath = (file, folder = '') => (cloudinary.configured ? file.path : `/uploads/${folder ? `${folder}/` : ''}${file.filename}`);
+
+module.exports = { upload, avatarUpload, brandingUpload, proofUpload, savedPhotoPath };

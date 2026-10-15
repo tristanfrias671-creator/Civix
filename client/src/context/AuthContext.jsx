@@ -1,47 +1,57 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import {
+  PORTALS, portalOf, portalOfRole, getSession, saveSession, clearSession, activityKey, isSessionKey, moveOldSession,
+} from '../utils/session';
 
 const AuthContext = createContext(null);
 
-// Last time the signed-in user did something; read by IdleSessionGuard.
-export const ACTIVITY_KEY = 'civix_last_activity';
+// The signed-in user of each portal ({ ADMIN, STAFF }), from this browser's storage.
+const readUsers = () => Object.fromEntries(PORTALS.map(p => [p, getSession(p)?.user || null]));
 
+// `user` is the signed-in user of the portal the current page belongs to: the
+// administrator on admin pages, the staff member on staff pages, nobody elsewhere.
+// Signing in or out only touches that portal, so an admin and a staff sign-in can
+// share one browser (see utils/session.js).
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { pathname } = useLocation();
+  const [users, setUsers] = useState(readUsers);
 
+  // Signed in or out in another tab.
   useEffect(() => {
-    const stored = localStorage.getItem('civix_user');
-    const token = localStorage.getItem('civix_token');
-    if (stored && token) {
-      try { setUser(JSON.parse(stored)); } catch { /* ignore */ }
-    }
-    setLoading(false);
+    const onStorage = e => {
+      if (e.key !== null && !isSessionKey(e.key) && e.key !== 'civix_token') return;
+      moveOldSession();
+      setUsers(readUsers());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  function login(token, userData) {
-    localStorage.setItem('civix_token', token);
-    localStorage.setItem('civix_user', JSON.stringify(userData));
-    localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
-    setUser(userData);
-  }
+  const login = useCallback((token, userData) => {
+    const portal = portalOfRole(userData?.role);
+    if (!portal) return;
+    saveSession(portal, token, userData);
+    try { localStorage.setItem(activityKey(portal), String(Date.now())); } catch { /* storage unavailable */ }
+    setUsers(readUsers());
+  }, []);
 
-  function logout() {
-    localStorage.removeItem('civix_token');
-    localStorage.removeItem('civix_user');
-    localStorage.removeItem(ACTIVITY_KEY);
+  // Signs out of the current page's portal (or the one given) only.
+  const logout = useCallback((portal = portalOf()) => {
+    clearSession(portal);
     // Alerts already shown this session (admin bell); the next sign-in starts fresh.
     try { sessionStorage.removeItem('civix_seen_alerts'); } catch { /* storage unavailable */ }
-    setUser(null);
-  }
+    setUsers(readUsers());
+  }, []);
 
-  function updateUser(userData, token) {
-    if (token) localStorage.setItem('civix_token', token);
-    localStorage.setItem('civix_user', JSON.stringify(userData));
-    setUser(userData);
-  }
+  const updateUser = useCallback((userData, token) => {
+    saveSession(portalOfRole(userData?.role) || portalOf(), token, userData);
+    setUsers(readUsers());
+  }, []);
 
+  const portal = portalOf(pathname);
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser, loading }}>
+    <AuthContext.Provider value={{ user: portal ? users[portal] : null, users, login, logout, updateUser, loading: false }}>
       {children}
     </AuthContext.Provider>
   );

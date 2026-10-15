@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
+import { OutcomeBadge, NewDeviceTag, FAILED, METHOD, whenText } from './SignInHistory';
 import { mediaUrl } from '../../utils/mediaUrl';
 import Avatar from './Avatar';
 
@@ -244,6 +245,74 @@ function ChangePasswordModal({ open, onClose }) {
   );
 }
 
+// ── Sign-in activity: the person's own latest sign-ins and password changes, so
+//    they can spot one that wasn't them ──
+function SignInActivityModal({ open, onClose, rows }) {
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-center p-4 overflow-y-auto"
+      style={{ background: 'rgba(15,23,42,0.55)' }}
+      onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full my-auto" style={{ maxWidth: 440 }}
+        role="dialog" aria-modal="true" aria-labelledby="sign-in-activity-title"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-xl bg-blue-50 text-primary flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+              </svg>
+            </span>
+            <div>
+              <h2 id="sign-in-activity-title" className="text-base font-bold text-gray-900">Sign-in activity</h2>
+              <p className="text-xs text-gray-600">Your latest sign-ins and password changes.</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close"
+            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div className="px-6 py-4">
+          {rows === null ? (
+            <p className="py-4 text-sm text-gray-600">Loading...</p>
+          ) : rows.length === 0 ? (
+            <p className="py-4 text-sm text-gray-600">No sign-ins recorded yet.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {rows.map(r => (
+                <li key={r.id} className="py-3">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <OutcomeBadge outcome={r.outcome} />
+                    {r.newDevice && <NewDeviceTag />}
+                  </span>
+                  <p className="text-sm font-medium text-gray-800 mt-1">{whenText(r.createdAt)}</p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    {[r.device, r.network && `IP ${r.network}`, METHOD[r.method]].filter(Boolean).join(' · ')}
+                  </p>
+                  {r.detail && <p className="text-xs text-gray-600 mt-0.5">{r.detail}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-3 mb-1 text-xs text-gray-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            See something that wasn't you? Change your password now, then tell the administrator.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // `links`: extra rows under Change Password, each { label, description, icon, onClick }.
 export default function ProfileModal({ open, onClose, links = [] }) {
@@ -259,6 +328,9 @@ export default function ProfileModal({ open, onClose, links = [] }) {
 
   const [passwordOpen, setPasswordOpen] = useState(false);
   const closePassword = useCallback(() => setPasswordOpen(false), []);
+  const [activity, setActivity] = useState(null); // latest sign-in history rows
+  const [activityOpen, setActivityOpen] = useState(false);
+  const closeActivity = useCallback(() => setActivityOpen(false), []);
 
   const fileRef = useRef(null);
 
@@ -271,8 +343,20 @@ export default function ProfileModal({ open, onClose, links = [] }) {
       setCropBlob(null);
       setFullName(user?.fullName || '');
       setPasswordOpen(false);
+      setActivityOpen(false);
     }
   }, [open, user]);
+
+  // The sign-in history is read each time the window opens.
+  React.useEffect(() => {
+    if (!open) return undefined;
+    let outdated = false;
+    setActivity(null);
+    api.get('/auth/my-sign-ins')
+      .then(r => { if (!outdated) setActivity(r.data); })
+      .catch(() => { if (!outdated) setActivity([]); });
+    return () => { outdated = true; };
+  }, [open]);
 
   if (!open) return null;
 
@@ -426,6 +510,32 @@ export default function ProfileModal({ open, onClose, links = [] }) {
                 </svg>
               </button>
 
+              {(() => {
+                const failed = (activity || []).filter(r => FAILED.includes(r.outcome)).length;
+                const last = (activity || []).find(r => r.outcome === 'SIGNED_IN');
+                const summary = activity === null ? 'Loading...'
+                  : failed ? `${failed} failed sign-in attempt${failed === 1 ? '' : 's'} recently. Please check.`
+                  : last ? `Last sign-in: ${whenText(last.createdAt)}${last.device ? ` · ${last.device}` : ''}`
+                  : 'See when and where your account was used.';
+                return (
+                  <button type="button" onClick={() => setActivityOpen(true)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors text-left">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+                      </svg>
+                      <span className="min-w-0">
+                        <span className="block">Sign-in activity</span>
+                        <span className={`block text-xs font-normal mt-0.5 ${failed ? 'text-amber-800 dark:text-amber-200 font-semibold' : 'text-gray-600'}`}>{summary}</span>
+                      </span>
+                    </span>
+                    <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
+                    </svg>
+                  </button>
+                );
+              })()}
+
               {links.map(link => (
                 <button key={link.label} type="button" onClick={link.onClick}
                   className="w-full flex items-center justify-between gap-3 px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors text-left">
@@ -468,6 +578,7 @@ export default function ProfileModal({ open, onClose, links = [] }) {
       </div>
     </div>
     <ChangePasswordModal open={passwordOpen} onClose={closePassword} />
+    <SignInActivityModal open={activityOpen} onClose={closeActivity} rows={activity} />
     </>
   );
 }

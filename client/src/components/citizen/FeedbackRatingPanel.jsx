@@ -1,4 +1,85 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useText } from '../../i18n/LanguageContext';
+
+// What the citizen sees, in English, Filipino and Bisaya. The saved values (reaction
+// ids and the English tag names) stay the same in every language.
+export const PANEL_TEXT = {
+  en: {
+    title: 'How was your experience?',
+    lead: 'Tap a face. Your reaction helps the government improve services.',
+    group: 'Your reaction',
+    reactions: { EXCELLENT: 'Excellent', GOOD: 'Good', OKAY: 'Okay', POOR: 'Poor', TERRIBLE: 'Terrible' },
+    messages: {
+      EXCELLENT: "Thank you! We're glad you had a great experience.",
+      GOOD: 'Thank you! Good to hear things went well.',
+      OKAY: 'Thanks. Tell us below what could make it better.',
+      POOR: "Sorry it wasn't better. Your feedback helps us improve.",
+      TERRIBLE: "We're sorry. Please tell us what went wrong so we can fix it.",
+    },
+    faceLabel: (label, n) => `${label}, ${n} out of 5`,
+    starLabel: n => `${n} star${n === 1 ? '' : 's'}`,
+    overall: 'Overall rating',
+    outOf5: n => `${n} out of 5`,
+    tapHint: 'Tap a face or a star',
+    standOut: 'What stood out?',
+    optional: '(optional)',
+    tags: {},
+    youRated: (label, n) => `You rated: ${label} (${n}/5)`,
+    yourRating: 'Your rating',
+  },
+  fil: {
+    title: 'Kumusta ang iyong karanasan?',
+    lead: 'Pumindot ng mukha. Nakatutulong ang iyong reaksyon para mapabuti ng pamahalaan ang serbisyo.',
+    group: 'Ang iyong reaksyon',
+    reactions: { EXCELLENT: 'Napakaganda', GOOD: 'Maganda', OKAY: 'Okay lang', POOR: 'Hindi maganda', TERRIBLE: 'Napakasama' },
+    messages: {
+      EXCELLENT: 'Salamat! Natutuwa kaming maganda ang iyong naging karanasan.',
+      GOOD: 'Salamat! Mabuti at maayos ang lahat.',
+      OKAY: 'Salamat. Sabihin sa ibaba kung ano ang makapagpapabuti nito.',
+      POOR: 'Paumanhin at hindi ito naging mas maganda. Nakatutulong ang iyong puna para kami ay umunlad.',
+      TERRIBLE: 'Paumanhin. Pakisabi kung ano ang naging problema para maayos namin ito.',
+    },
+    faceLabel: (label, n) => `${label}, ${n} sa 5`,
+    starLabel: n => `${n} bituin`,
+    overall: 'Kabuuang rating',
+    outOf5: n => `${n} sa 5`,
+    tapHint: 'Pumindot ng mukha o bituin',
+    standOut: 'Ano ang napansin mo?',
+    optional: '(opsyonal)',
+    tags: {
+      'Helpful staff': 'Matulunging kawani', 'Quick response': 'Mabilis na tugon', 'Easy to use': 'Madaling gamitin',
+      'Clear updates': 'Malinaw na update', 'Needs improvement': 'Kailangang pagbutihin', 'Slow follow-up': 'Mabagal na follow-up',
+    },
+    youRated: (label, n) => `Ang rating mo: ${label} (${n}/5)`,
+    yourRating: 'Ang iyong rating',
+  },
+  ceb: {
+    title: 'Kumusta ang imong kasinatian?',
+    lead: 'Pindota ang usa ka nawong. Ang imong reaksyon motabang sa gobyerno nga mapalambo ang serbisyo.',
+    group: 'Ang imong reaksyon',
+    reactions: { EXCELLENT: 'Maayo kaayo', GOOD: 'Maayo', OKAY: 'Okay ra', POOR: 'Dili maayo', TERRIBLE: 'Daotan kaayo' },
+    messages: {
+      EXCELLENT: 'Salamat! Nalipay kami nga maayo ang imong kasinatian.',
+      GOOD: 'Salamat! Maayo nga hapsay ang tanan.',
+      OKAY: 'Salamat. Isulti sa ubos kon unsa ang makapaayo pa niini.',
+      POOR: 'Pasayloa nga wala kini nahimong mas maayo. Ang imong feedback motabang kanamo nga mouswag.',
+      TERRIBLE: 'Pasayloa kami. Palihug isulti kon unsa ang sayop aron among maayo kini.',
+    },
+    faceLabel: (label, n) => `${label}, ${n} sa 5`,
+    starLabel: n => `${n} ka bituon`,
+    overall: 'Kinatibuk-ang rating',
+    outOf5: n => `${n} sa 5`,
+    tapHint: 'Pindota ang nawong o bituon',
+    standOut: 'Unsa ang imong namatikdan?',
+    optional: '(opsyonal)',
+    tags: {
+      'Helpful staff': 'Matinabangon nga kawani', 'Quick response': 'Paspas nga tubag', 'Easy to use': 'Sayon gamiton',
+      'Clear updates': 'Klaro nga update', 'Needs improvement': 'Kinahanglan pauswagon', 'Slow follow-up': 'Hinay nga follow-up',
+    },
+    youRated: (label, n) => `Imong rating: ${label} (${n}/5)`,
+    yourRating: 'Ang imong rating',
+  },
+};
 
 // `code` names the animated emoji in public/emoji/<code>.json (`rest` is the frame
 // shown while it is paused, the one that best shows its expression) — Noto Animated Emoji
@@ -111,7 +192,7 @@ function AnimatedEmoji({ code, rest = 0, fallback, playing, className }) {
   );
 }
 
-function Star({ n, filled, pop, onClick, onHover }) {
+function Star({ n, filled, pop, onClick, onHover, label }) {
   return (
     <button
       type="button"
@@ -119,7 +200,7 @@ function Star({ n, filled, pop, onClick, onHover }) {
       onMouseEnter={onHover}
       onFocus={onHover}
       className="w-10 h-10 transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-lg"
-      aria-label={`${n} star${n === 1 ? '' : 's'}`}
+      aria-label={label}
     >
       <svg viewBox="0 0 24 24" className={`w-full h-full ${pop ? 'rx-star-pop' : ''} ${filled ? 'text-amber-400 fill-amber-400' : 'text-gray-300 fill-gray-200 dark:text-slate-600 dark:fill-slate-600'}`}
         style={pop ? { animationDelay: `${(n - 1) * 60}ms`, filter: 'drop-shadow(0 2px 4px rgba(245,158,11,0.35))' } : undefined}>
@@ -130,6 +211,7 @@ function Star({ n, filled, pop, onClick, onHover }) {
 }
 
 export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingChange, onReactionChange, onTagsChange }) {
+  const t = useText(PANEL_TEXT);
   const [hoverStar, setHoverStar] = useState(0);
   const [hoverReaction, setHoverReaction] = useState(null);
   const [visible, setVisible] = useState(true);
@@ -160,11 +242,11 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
     <div className="rounded-2xl border border-green-200 bg-gradient-to-br from-green-50 via-white to-emerald-50/40 dark:border-emerald-800/60 dark:from-emerald-950/40 dark:via-slate-800 dark:to-slate-800 p-5 space-y-5">
       <style>{panelCss}</style>
       <div>
-        <h3 className="text-base font-bold text-gray-800">How was your experience?</h3>
-        <p className="text-sm text-gray-500 mt-0.5">Tap a face. Your reaction helps the government improve services.</p>
+        <h3 className="text-base font-bold text-gray-800">{t.title}</h3>
+        <p className="text-sm text-gray-500 mt-0.5">{t.lead}</p>
       </div>
 
-      <div ref={gridRef} className="grid grid-cols-5 gap-2 sm:gap-3" role="radiogroup" aria-label="Your reaction">
+      <div ref={gridRef} className="grid grid-cols-5 gap-2 sm:gap-3" role="radiogroup" aria-label={t.group}>
         {REACTIONS.map(r => {
           const active = reaction === r.id;
           // Before a choice, every face animates; after it, only the chosen one
@@ -176,7 +258,7 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
               type="button"
               role="radio"
               aria-checked={active}
-              aria-label={`${r.label}, ${r.rating} out of 5`}
+              aria-label={t.faceLabel(t.reactions[r.id], r.rating)}
               onClick={() => selectReaction(r)}
               onMouseEnter={() => setHoverReaction(r.id)}
               onMouseLeave={() => setHoverReaction(null)}
@@ -195,7 +277,7 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
               )}
               <AnimatedEmoji code={r.code} rest={r.rest} fallback={r.emoji} playing={playing} className="w-10 h-10 sm:w-14 sm:h-14" />
               <span className={`text-[11px] sm:text-sm font-semibold ${active ? 'rx-tint' : 'text-gray-600'}`} style={active ? { '--rx-c': r.color } : undefined}>
-                {r.label}
+                {t.reactions[r.id]}
               </span>
             </button>
           );
@@ -203,7 +285,7 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
       </div>
 
       <div className="flex flex-col items-center py-3 border-y border-green-100/80 dark:border-slate-700">
-        <p className="text-sm font-medium text-gray-500 mb-1.5">Overall rating</p>
+        <p className="text-sm font-medium text-gray-500 mb-1.5">{t.overall}</p>
         <div className="flex gap-1" onMouseLeave={() => setHoverStar(0)}>
           {[1, 2, 3, 4, 5].map(star => (
             <Star
@@ -217,18 +299,19 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
                 if (match) onReactionChange(match.id);
               }}
               onHover={() => setHoverStar(star)}
+              label={t.starLabel(star)}
             />
           ))}
         </div>
         <p className="text-base font-semibold text-gray-700 mt-1.5 min-h-[1.5rem]">
           {displayStars > 0
-            ? <>{displayStars} out of 5{starReaction && <span style={{ color: starReaction.color }}> · {starReaction.label}</span>}</>
-            : 'Tap a face or a star'}
+            ? <>{t.outOf5(displayStars)}{starReaction && <span style={{ color: starReaction.color }}> · {t.reactions[starReaction.id]}</span>}</>
+            : t.tapHint}
         </p>
       </div>
 
       <div>
-        <p className="text-sm font-medium text-gray-600 mb-2">What stood out? <span className="text-gray-400 font-normal">(optional)</span></p>
+        <p className="text-sm font-medium text-gray-600 mb-2">{t.standOut} <span className="text-gray-500 font-normal">{t.optional}</span></p>
         <div className="flex flex-wrap gap-2">
           {EXPERIENCE_TAGS.map(tag => {
             const on = tags.includes(tag);
@@ -244,7 +327,7 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
                     : 'bg-white text-gray-600 border-gray-200 hover:border-primary/40'
                 }`}
               >
-                {on ? '✓ ' : ''}{tag}
+                {on ? '✓ ' : ''}{t.tags[tag] || tag}
               </button>
             );
           })}
@@ -256,8 +339,8 @@ export default function FeedbackRatingPanel({ rating, reaction, tags, onRatingCh
           style={{ '--rx-c': selectedReaction.color, background: `${selectedReaction.color}1a`, border: `1px solid ${selectedReaction.color}33` }}>
           <span className="text-2xl leading-none" aria-hidden>{selectedReaction.emoji}</span>
           <span>
-            {selectedReaction.message}
-            <span className="rx-tint-soft block text-xs font-semibold opacity-80 mt-0.5">You rated: {selectedReaction.label} ({rating}/5)</span>
+            {t.messages[selectedReaction.id]}
+            <span className="rx-tint-soft block text-xs font-semibold opacity-80 mt-0.5">{t.youRated(t.reactions[selectedReaction.id], rating)}</span>
           </span>
         </div>
       )}

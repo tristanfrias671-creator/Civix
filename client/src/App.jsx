@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { BrandingProvider } from './context/BrandingContext';
+import { LanguageProvider } from './i18n/LanguageContext';
 import { SkeletonAppShell } from './components/common/Skeleton';
 import api from './utils/api';
 
@@ -38,10 +39,13 @@ function homeFor(role) {
   return '/submit';
 }
 
+// Each portal has its own sign-in (an admin and a staff sign-in can share one
+// browser). Signed out of the staff portal: its sign-in page; of the admin portal:
+// the homepage (the admin sign-in page is private).
 function PrivateRoute({ children, role }) {
   const { user, loading } = useAuth();
   if (loading) return <SkeletonAppShell />;
-  if (!user) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to={role === 'STAFF' ? '/staff-login' : '/'} replace />;
   if (role && user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
   return children;
 }
@@ -72,11 +76,10 @@ function PrivateAdminEntry() {
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
   return (
     <Routes>
-      {/* Landing page */}
-      <Route path="/" element={user ? <Navigate to={homeFor(user.role)} replace /> : <RoleSelect />} />
+      {/* Landing page (the citizens' homepage, also when staff or an admin are signed in) */}
+      <Route path="/" element={<RoleSelect />} />
       <Route path="/staff-login" element={<Login role="STAFF" />} />
       <Route path="/staff-register" element={<StaffRegister />} />
       <Route path="/login" element={<Navigate to="/" replace />} />
@@ -184,14 +187,17 @@ function AppToaster() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrandingProvider>
+      <BrandingProvider>
+        <LanguageProvider>
           <BrowserRouter>
-            <AppRoutes />
-            <AppToaster />
+            {/* Inside the router: which portal's sign-in applies depends on the page. */}
+            <AuthProvider>
+              <AppRoutes />
+              <AppToaster />
+            </AuthProvider>
           </BrowserRouter>
-        </BrandingProvider>
-      </AuthProvider>
+        </LanguageProvider>
+      </BrandingProvider>
     </ThemeProvider>
   );
 }

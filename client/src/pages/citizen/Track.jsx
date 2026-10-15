@@ -8,6 +8,9 @@ import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay
 import { Skel } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import { useTheme } from '../../context/ThemeContext';
+import { useText } from '../../i18n/LanguageContext';
+import TRACK_TEXT from '../../i18n/trackText';
+import { officeLabel } from '../../data/officeNames';
 import api from '../../utils/api';
 import { mediaUrl } from '../../utils/mediaUrl';
 
@@ -80,56 +83,62 @@ function withMinDuration(promise) {
   return Promise.all([promise, wait]).then(([result]) => result);
 }
 
-// Per-status look for the banner, strip and history dots. Messages match the
-// wording shown to staff and on the Guidelines page.
+// Per-status look for the banner, strip and history dots. The titles and
+// messages are in i18n/trackText.js (tones), in each language.
 const STATUS_TONE = {
   PENDING: {
-    color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb', darkBg: 'rgba(148,163,184,0.10)', darkBorder: 'rgba(148,163,184,0.25)',
-    icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', title: 'Received',
-    message: 'Your submission has been received and is awaiting review.',
+    color: '#6b7280', textDark: '#cbd5e1', bg: '#f9fafb', border: '#e5e7eb', darkBg: 'rgba(148,163,184,0.10)', darkBorder: 'rgba(148,163,184,0.25)',
+    icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
   },
   REVIEWING: {
-    color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', darkBg: 'rgba(37,99,235,0.10)', darkBorder: 'rgba(37,99,235,0.35)',
-    icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', title: 'Under review',
-    message: 'Your submission is currently being reviewed by the concerned office.',
+    color: '#2563eb', textDark: '#60a5fa', bg: '#eff6ff', border: '#bfdbfe', darkBg: 'rgba(37,99,235,0.10)', darkBorder: 'rgba(37,99,235,0.35)',
+    icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
   },
   IN_PROGRESS: {
-    color: '#d97706', bg: '#fffbeb', border: '#fde68a', darkBg: 'rgba(245,158,11,0.10)', darkBorder: 'rgba(245,158,11,0.35)',
-    icon: 'M13 10V3L4 14h7v7l9-11h-7z', title: 'Being worked on',
-    message: 'The concerned office is actively working on your submission.',
+    color: '#d97706', text: '#b45309', textDark: '#fbbf24', bg: '#fffbeb', border: '#fde68a', darkBg: 'rgba(245,158,11,0.10)', darkBorder: 'rgba(245,158,11,0.35)',
+    icon: 'M13 10V3L4 14h7v7l9-11h-7z',
   },
   RESOLVED: {
-    color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', darkBg: 'rgba(22,163,74,0.10)', darkBorder: 'rgba(22,163,74,0.35)',
-    icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', title: 'Resolved',
-    message: 'Your submission has been resolved. Thank you for your feedback!',
+    color: '#16a34a', text: '#15803d', textDark: '#4ade80', bg: '#f0fdf4', border: '#bbf7d0', darkBg: 'rgba(22,163,74,0.10)', darkBorder: 'rgba(22,163,74,0.35)',
+    icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+  },
+  // Marked by the office as spam or not a valid report: closed, no steps or deadline.
+  SPAM: {
+    color: '#475569', textDark: '#cbd5e1', bg: '#f1f5f9', border: '#cbd5e1', darkBg: 'rgba(148,163,184,0.12)', darkBorder: 'rgba(148,163,184,0.35)',
+    icon: 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636',
   },
 };
+
+// History dot for an urgency change, by the new urgency.
+const URGENCY_DOT = { URGENT: '#b91c1c', STANDARD: '#1d4ed8', LOW: '#475569' };
 
 // Feedback rates the municipality's service as a whole: no office, no status steps.
 const FEEDBACK_TONE = {
   color: '#15803d', textDark: '#4ade80', bg: '#f0fdf4', border: '#bbf7d0', darkBg: 'rgba(22,163,74,0.10)', darkBorder: 'rgba(22,163,74,0.35)',
-  icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', title: 'Feedback received',
-  message: 'Thank you! Your rating helps the Municipality of Cantilan improve its services.',
+  icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
 };
+
+const lookupError = err => (err.response?.status === 404 ? 'notFound' : err.response?.status === 429 ? 'tooMany' : 'offline');
 
 const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const fmtDateTime = d => new Date(d).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
 function PhotoTile({ src, index, onOpen }) {
+  const t = useText(TRACK_TEXT);
   const [failed, setFailed] = useState(false);
   return (
     <button type="button" onClick={onOpen} disabled={failed}
       className="group relative aspect-square overflow-hidden rounded-xl border border-gray-200 hover:shadow-md transition-shadow trk-checker disabled:cursor-default">
       {failed ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-50 text-gray-400">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-50 text-gray-500">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <span className="text-[10px] font-medium">Image unavailable</span>
+          <span className="text-[10px] font-medium">{t.imageUnavailable}</span>
         </div>
       ) : (
         <>
-          <img src={src} alt={`Attached photo ${index + 1}`} onError={() => setFailed(true)}
+          <img src={src} alt={t.photoAlt(index + 1)} onError={() => setFailed(true)}
             className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
             <svg className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -138,12 +147,13 @@ function PhotoTile({ src, index, onOpen }) {
           </div>
         </>
       )}
-      <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-black/55 text-white">Photo {index + 1}</span>
+      <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-black/55 text-white">{t.photo(index + 1)}</span>
     </button>
   );
 }
 
 function Lightbox({ media, index, onClose, onNavigate }) {
+  const t = useText(TRACK_TEXT);
   useEffect(() => {
     function onKey(e) {
       if (e.key === 'Escape') onClose();
@@ -160,7 +170,7 @@ function Lightbox({ media, index, onClose, onNavigate }) {
     <div className="lb-overlay fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: 'rgba(15,23,42,0.85)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
       onClick={onClose}>
-      <button type="button" onClick={onClose} aria-label="Close"
+      <button type="button" onClick={onClose} aria-label={t.close}
         className="lb-btn absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 18L18 6M6 6l12 12" />
@@ -169,13 +179,13 @@ function Lightbox({ media, index, onClose, onNavigate }) {
 
       {media.length > 1 && (
         <>
-          <button type="button" onClick={e => { e.stopPropagation(); onNavigate(-1); }} aria-label="Previous"
+          <button type="button" onClick={e => { e.stopPropagation(); onNavigate(-1); }} aria-label={t.previous}
             className="lb-nav absolute left-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-white">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <button type="button" onClick={e => { e.stopPropagation(); onNavigate(1); }} aria-label="Next"
+          <button type="button" onClick={e => { e.stopPropagation(); onNavigate(1); }} aria-label={t.next}
             className="lb-nav absolute right-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-white">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 5l7 7-7 7" />
@@ -184,7 +194,7 @@ function Lightbox({ media, index, onClose, onNavigate }) {
         </>
       )}
 
-      <img key={item.id} src={mediaUrl(item.filePath)} alt="attachment"
+      <img key={item.id} src={mediaUrl(item.filePath)} alt={t.photoAlt(index + 1)}
         className="lb-image max-w-full max-h-[80vh] rounded-xl shadow-2xl object-contain"
         onClick={e => e.stopPropagation()} />
 
@@ -198,20 +208,18 @@ function Lightbox({ media, index, onClose, onNavigate }) {
   );
 }
 
-const STATUS_STEPS = [
-  { key: 'PENDING',     label: 'Submitted' },
-  { key: 'REVIEWING',   label: 'Reviewing' },
-  { key: 'IN_PROGRESS', label: 'In Progress' },
-  { key: 'RESOLVED',    label: 'Resolved' },
-];
+const STATUS_STEPS = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'].map(key => ({ key }));
 
 // Four-stage stepper. Each stage shows when it was reached (from the status log);
 // stages the office skipped have no date. Resolved turns the whole track green.
 function ProgressTimeline({ result }) {
   const { dark } = useTheme();
+  const t = useText(TRACK_TEXT);
   const idx = STATUS_STEPS.findIndex(s => s.key === result.status);
   const resolved = result.status === 'RESOLVED';
   const accent = resolved ? '#16a34a' : '#2563eb';
+  const accentText = dark ? (resolved ? '#4ade80' : '#60a5fa') : (resolved ? '#15803d' : accent);
+  const mutedText = dark ? '#94a3b8' : '#6b7280';
   const inactiveLine = dark ? '#334155' : '#e5e7eb';
   // statusLogs arrive newest-first; the oldest matching entry is when the stage was first reached.
   const reachedAt = key => key === 'PENDING'
@@ -230,16 +238,16 @@ function ProgressTimeline({ result }) {
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${current ? 'trk-pulse' : ''}`}
                 style={complete || current
                   ? { background: accent, borderColor: accent, color: 'white' }
-                  : { background: dark ? '#1e293b' : 'white', borderColor: inactiveLine, color: dark ? '#475569' : '#9ca3af' }}>
+                  : { background: dark ? '#1e293b' : 'white', borderColor: inactiveLine, color: mutedText }}>
                 {complete ? (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
                 ) : i + 1}
               </div>
               <p className="text-[11px] sm:text-xs mt-1.5 font-semibold text-center leading-tight"
-                style={{ color: complete || current ? accent : (dark ? '#64748b' : '#9ca3af') }}>
-                {s.label}
+                style={{ color: complete || current ? accentText : mutedText }}>
+                {t.steps[s.key]}
               </p>
-              <p className="text-[10px] mt-0.5 text-gray-400 h-3">{at ? fmtDate(at).replace(/, \d{4}$/, '') : ''}</p>
+              <p className="text-[10px] mt-0.5 text-gray-500 h-3">{at ? fmtDate(at).replace(/, \d{4}$/, '') : ''}</p>
             </div>
             {i < STATUS_STEPS.length - 1 && (
               <div className="flex-1 h-1 mt-3.5 rounded-full transition-all"
@@ -254,11 +262,12 @@ function ProgressTimeline({ result }) {
 
 export default function Track() {
   const { dark } = useTheme();
+  const t = useText(TRACK_TEXT);
   const routerLocation = useLocation();
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(''); // a TRACK_TEXT key: notFound, tooMany or offline
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
   useEffect(() => {
@@ -270,13 +279,7 @@ export default function Track() {
     setError('');
     withMinDuration(api.get(`/submissions/track/${prefill.trim().toUpperCase()}`))
       .then(res => setResult(res.data))
-      .catch(err => {
-        if (err.response?.status === 404) {
-          setError('No submission found with that Transaction Code. Please double-check and try again.');
-        } else {
-          setError('Could not reach the server. Please try again later.');
-        }
-      })
+      .catch(err => setError(lookupError(err)))
       .finally(() => setLoading(false));
   }, []); // runs once on mount
 
@@ -290,11 +293,7 @@ export default function Track() {
       const res = await withMinDuration(api.get(`/submissions/track/${target}`));
       setResult(res.data);
     } catch (err) {
-      if (err.response?.status === 404) {
-        setError('No submission found with that Transaction Code. Please double-check and try again.');
-      } else {
-        setError('Could not reach the server. Please try again later.');
-      }
+      setError(lookupError(err));
     } finally {
       setLoading(false);
     }
@@ -307,8 +306,8 @@ export default function Track() {
 
   function copyTrackingId(id) {
     navigator.clipboard.writeText(id)
-      .then(() => toast.success('Tracking code copied!'))
-      .catch(() => toast.error('Could not copy to clipboard'));
+      .then(() => toast.success(t.copied))
+      .catch(() => toast.error(t.copyFailed));
   }
 
   return (
@@ -324,21 +323,21 @@ export default function Track() {
             </svg>
           </div>
           <div className="flex-1">
-            <h1 className="text-xl font-bold text-gray-800">Track Your Report</h1>
-            <p className="text-gray-500 text-sm mt-0.5">Enter the Transaction Code you received after submission to view the real-time status.</p>
+            <h1 className="text-xl font-bold text-gray-800">{t.title}</h1>
+            <p className="text-gray-600 text-sm mt-0.5">{t.lead}</p>
           </div>
         </div>
 
         {/* Search box */}
         <form onSubmit={handleSubmit} className="track-fade-1 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6 transition-shadow hover:shadow-md">
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Code</label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">{t.codeLabel}</label>
           {/* Phones: the box and button stack, so the whole code fits and the page
               never gets wider than the screen. */}
           <div className="flex flex-col sm:flex-row gap-3">
             <input
               value={code}
               onChange={e => setCode(e.target.value.toUpperCase())}
-              placeholder="e.g. ENG-20240527-0001"
+              placeholder={t.codePlaceholder}
               className="flex-1 min-w-0 w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono tracking-wider outline-none transition-all focus:ring-2 focus:bg-white hover:border-primary"
               style={{ '--tw-ring-color': '#2563eb' }}
               spellCheck={false}
@@ -350,19 +349,19 @@ export default function Track() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
                   </svg>
-                  Check Status
+                  {t.check}
                 </span>
                 <span className="tk-label tk-label-loading" aria-hidden={!loading}>
                   <svg className="tk-spinner" viewBox="0 0 50 50" aria-hidden="true">
                     <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="5" />
                     <circle className="tk-spinner-arc" cx="25" cy="25" r="20" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="round" />
                   </svg>
-                  <span className="sr-only">Checking status</span>
+                  <span className="sr-only">{t.checking}</span>
                 </span>
               </span>
             </button>
           </div>
-          <p className="text-xs text-gray-400 mt-2">Format: DEPT-YYYYMMDD-XXXX (e.g. ENG-20240527-0001)</p>
+          <p className="text-xs text-gray-500 mt-2">{t.format}</p>
         </form>
 
         {/* Error */}
@@ -371,7 +370,7 @@ export default function Track() {
             <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
               <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
-            {error}
+            {t[error] || t.offline}
           </div>
         )}
 
@@ -399,14 +398,20 @@ export default function Track() {
         {/* Result */}
         {result && (() => {
           const isFeedback = result.type === 'FEEDBACK';
-          const tone = isFeedback ? FEEDBACK_TONE : (STATUS_TONE[result.status] || STATUS_TONE.PENDING);
+          const isSpam = result.status === 'SPAM'; // closed as spam / invalid by the office
+          const tone = isSpam ? STATUS_TONE.SPAM : isFeedback ? FEEDBACK_TONE : (STATUS_TONE[result.status] || STATUS_TONE.PENDING);
+          const words = isFeedback
+            ? t.tones[isSpam ? 'FEEDBACK_SPAM' : 'FEEDBACK']
+            : (t.tones[result.status] || t.tones.PENDING);
           const latestNote = result.statusLogs?.find(l => l.status === result.status && l.note)?.note;
-          // statusLogs are newest-first; the submission itself is the oldest event.
+          // Status updates and urgency changes, newest first; the submission itself is
+          // the oldest event.
           const history = [
             ...(result.statusLogs || []).map(l => ({ key: `${l.status}-${l.createdAt}`, status: l.status, at: l.createdAt, note: l.note })),
-            { key: 'submitted', status: null, at: result.createdAt, note: null },
-          ];
-          const office = result.department && result.department !== 'UNASSIGNED' ? result.department : 'Not yet assigned';
+            ...(result.urgencyChanges || []).map(u => ({ key: `urgency-${u.createdAt}`, urgency: u, at: u.createdAt, note: u.reason })),
+          ].sort((a, b) => new Date(b.at) - new Date(a.at));
+          history.push({ key: 'submitted', status: null, at: result.createdAt, note: null });
+          const office = result.department && result.department !== 'UNASSIGNED' ? officeLabel(result.department) : t.notAssigned;
           const sectionTitle = 'text-xs font-bold text-gray-500 uppercase tracking-wide mb-3';
           return (
             <div className="track-fade-2 bg-white rounded-2xl border border-gray-100 overflow-hidden"
@@ -417,30 +422,34 @@ export default function Track() {
               <div className="px-5 sm:px-6 pt-5 pb-5 border-b border-gray-100">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Transaction code</p>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{t.resultCode}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="font-mono text-lg sm:text-xl font-bold text-gray-900 tracking-wide break-all">{result.trackingId}</span>
-                      <button type="button" onClick={() => copyTrackingId(result.trackingId)} title="Copy tracking code" aria-label="Copy tracking code"
-                        className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors">
+                      <button type="button" onClick={() => copyTrackingId(result.trackingId)} title={t.copyTitle} aria-label={t.copyTitle}
+                        className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                           <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
                         </svg>
-                        Copy
+                        {t.copy}
                       </button>
                     </div>
                   </div>
-                  {!isFeedback && <StatusBadge status={result.status} />}
+                  {(!isFeedback || isSpam) && <StatusBadge status={result.status} label={t.status[result.status]} />}
                 </div>
-                <h3 className="font-bold text-gray-900 text-lg mt-3">{isFeedback ? 'Feedback on our services' : office}</h3>
+                <h3 className="font-bold text-gray-900 text-lg mt-3">{isFeedback ? t.feedbackHeading : office}</h3>
                 <div className="flex items-center gap-2 flex-wrap mt-2">
-                  <TypeBadge type={result.type} />
-                  {!isFeedback && <PriorityBadge priority={result.priority} />}
+                  <TypeBadge type={result.type} label={t.types[result.type]} />
+                  {!isFeedback && !isSpam && <PriorityBadge priority={result.priority} label={t.priority[result.priority]} />}
+                  {/* Why it is urgent, as the citizen said (while it is still Urgent) */}
+                  {!isFeedback && !isSpam && result.priority === 'URGENT' && t.urgencyReasons[result.urgencyReason] && (
+                    <span className="text-xs font-medium text-gray-700">{t.urgencyReasons[result.urgencyReason]}</span>
+                  )}
                 </div>
               </div>
 
               <div className="px-5 sm:px-6 py-5 space-y-6">
                 {/* Progress */}
-                {!isFeedback && <ProgressTimeline result={result} />}
+                {!isFeedback && !isSpam && <ProgressTimeline result={result} />}
 
                 {/* Status banner, with the office's latest note */}
                 <div className="flex items-start gap-3 rounded-xl px-4 py-3.5 border"
@@ -449,11 +458,11 @@ export default function Track() {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={tone.icon} /></svg>
                   </span>
                   <div className="min-w-0">
-                    <p className="font-bold text-sm" style={{ color: dark && tone.textDark ? tone.textDark : tone.color }}>{tone.title}</p>
-                    <p className="text-sm text-gray-700 mt-0.5">{tone.message}</p>
+                    <p className="font-bold text-sm" style={{ color: dark && tone.textDark ? tone.textDark : (tone.text || tone.color) }}>{words.title}</p>
+                    <p className="text-sm text-gray-700 mt-0.5">{words.message}</p>
                     {latestNote && (
                       <div className="mt-2.5 rounded-lg bg-white/80 border border-white dark:bg-slate-900/50 dark:border-slate-700 px-3 py-2">
-                        <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Note from the concerned office</p>
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t.officeNote}</p>
                         <p className="text-sm text-gray-800 mt-0.5">{latestNote}</p>
                       </div>
                     )}
@@ -463,22 +472,22 @@ export default function Track() {
                 {/* Details */}
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    { label: 'Location', value: result.address || 'Not specified', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' },
-                    { label: 'Filed', value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
-                    ...(isFeedback ? [] : [{ label: 'Last updated', value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' }]),
-                    ...(result.dueAt && !isFeedback ? [{
-                      label: 'Resolve by',
+                    { label: t.location, value: result.address || t.notSpecified, icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' },
+                    { label: t.filed, value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+                    ...(isFeedback ? [] : [{ label: t.lastUpdated, value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' }]),
+                    ...(result.dueAt && !isFeedback && !isSpam ? [{
+                      label: t.resolveBy,
                       value: (
                         <span className="flex flex-wrap items-center gap-2">
                           {formatDueDate(result.dueAt, true)}
-                          <DeadlineBadge submission={result} />
+                          <DeadlineBadge submission={result} words={t.deadline} />
                         </span>
                       ),
                       icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
                     }] : []),
                   ].map(d => (
                     <div key={d.label} className="rounded-xl bg-gray-50 px-3.5 py-3">
-                      <dt className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                      <dt className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-500">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d.icon} /></svg>
                         {d.label}
                       </dt>
@@ -489,7 +498,7 @@ export default function Track() {
 
                 {/* Description */}
                 <div>
-                  <h4 className={sectionTitle}>{isFeedback ? 'Your feedback' : 'Description'}</h4>
+                  <h4 className={sectionTitle}>{isFeedback ? t.yourFeedback : t.description}</h4>
                   <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line break-words rounded-xl border-l-4 border-gray-200 bg-gray-50/70 dark:bg-slate-900/40 px-4 py-3">
                     {result.description}
                   </p>
@@ -498,14 +507,14 @@ export default function Track() {
                 {/* Feedback panel */}
                 {result.type === 'FEEDBACK' && (result.rating || result.reaction) && (
                   <div className="p-3 bg-green-50 rounded-xl border border-green-100">
-                    <FeedbackRatingDisplay rating={result.rating} reaction={result.reaction} feedbackTags={result.feedbackTags} />
+                    <FeedbackRatingDisplay rating={result.rating} reaction={result.reaction} feedbackTags={result.feedbackTags} citizen />
                   </div>
                 )}
 
                 {/* Photos */}
                 {result.media?.length > 0 && (
                   <div>
-                    <h4 className={sectionTitle}>Attached photos ({result.media.length})</h4>
+                    <h4 className={sectionTitle}>{t.photos(result.media.length)}</h4>
                     <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
                       {result.media.map((m, i) => (
                         <PhotoTile key={m.id} src={mediaUrl(m.filePath)} index={i} onOpen={() => setLightboxIndex(i)} />
@@ -516,22 +525,34 @@ export default function Track() {
 
                 {/* Activity history (feedback has no status steps) */}
                 {!isFeedback && <div>
-                  <h4 className={sectionTitle}>Activity history</h4>
+                  <h4 className={sectionTitle}>{t.history}</h4>
                   <ol className="relative">
                     {history.map((h, i) => {
-                      const t = h.status ? STATUS_TONE[h.status] : null;
+                      const dot = h.status ? STATUS_TONE[h.status].color : h.urgency ? URGENCY_DOT[h.urgency.toPriority] : '#9ca3af';
                       const last = i === history.length - 1;
                       return (
                         <li key={h.key} className="relative flex gap-3 pb-4 last:pb-0">
                           {!last && <span className="absolute left-[7px] top-4 bottom-0 w-0.5 bg-gray-100" aria-hidden="true" />}
                           <span className="relative mt-1 w-4 h-4 rounded-full border-[3px] border-white flex-shrink-0"
-                            style={{ background: t ? t.color : '#9ca3af', boxShadow: '0 0 0 1px #e5e7eb' }} />
+                            style={{ background: dot, boxShadow: '0 0 0 1px #e5e7eb' }} />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
-                              {h.status ? <StatusBadge status={h.status} /> : <span className="text-sm font-semibold text-gray-800">Report submitted</span>}
-                              <span className="text-xs text-gray-400">{fmtDateTime(h.at)}</span>
+                              {h.status ? <StatusBadge status={h.status} label={t.status[h.status]} />
+                                : h.urgency ? (
+                                  <>
+                                    <span className="text-sm font-semibold text-gray-800">{t.urgencyChanged}</span>
+                                    <PriorityBadge priority={h.urgency.toPriority} label={t.priority[h.urgency.toPriority]} />
+                                  </>
+                                ) : <span className="text-sm font-semibold text-gray-800">{t.submitted}</span>}
+                              <span className="text-xs text-gray-500">{fmtDateTime(h.at)}</span>
                             </div>
-                            {h.note && <p className="text-sm text-gray-700 mt-1.5 rounded-lg bg-gray-50 px-3 py-2">{h.note}</p>}
+                            {h.urgency?.toDueAt && <p className="text-sm font-medium text-gray-800 mt-1">{t.newTarget(formatDueDate(h.urgency.toDueAt, true))}</p>}
+                            {h.note && (
+                              <div className="text-sm text-gray-700 mt-1.5 rounded-lg bg-gray-50 px-3 py-2">
+                                {h.urgency && <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t.officeReason}</p>}
+                                <p>{h.note}</p>
+                              </div>
+                            )}
                           </div>
                         </li>
                       );
@@ -545,12 +566,12 @@ export default function Track() {
 
         {/* Empty state */}
         {!result && !error && !loading && (
-          <div className="track-fade-2 text-center py-12 px-4 text-gray-400">
+          <div className="track-fade-2 text-center py-12 px-4 text-gray-600">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
               <Icon name="inbox" className="w-8 h-8 text-gray-300" />
             </div>
-            <p className="text-sm font-medium text-gray-500">Enter your Transaction Code above to check the status of your submission.</p>
-            <p className="text-xs mt-1.5">Your code is shown right after you submit, and it is in the confirmation email we send you.</p>
+            <p className="text-sm font-medium text-gray-700">{t.emptyTitle}</p>
+            <p className="text-xs mt-1.5">{t.emptyText}</p>
           </div>
         )}
       </div>

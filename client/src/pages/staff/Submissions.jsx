@@ -6,9 +6,12 @@ import { SkeletonTable, Skel, useSkeletonGate } from '../../components/common/Sk
 import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
 import ReportMiniMap from '../../components/common/ReportMiniMap';
+import PhotoViewer from '../../components/common/PhotoViewer';
 import { useTheme } from '../../context/ThemeContext';
 import { mediaUrl } from '../../utils/mediaUrl';
+import { shrinkPhoto } from '../../utils/shrinkPhoto';
 import { formatDate, formatDateTime, plural } from '../../utils/format';
+import { PRIORITY_ORDER, PRIORITY_LABEL, URGENCY_REASON_LABEL } from '../../data/urgency';
 import api from '../../utils/api';
 
 const STEPS = [
@@ -18,8 +21,10 @@ const STEPS = [
   { key: 'RESOLVED',    label: 'Resolved',    hint: 'Fixed or answered' },
 ];
 const STEP_INDEX = Object.fromEntries(STEPS.map((s, i) => [s.key, i]));
-const STATUS_LABEL = Object.fromEntries(STEPS.map(s => [s.key, s.label]));
-const STATUS_DOT = { PENDING: '#6B7280', REVIEWING: '#1D4ED8', IN_PROGRESS: '#CA8A04', RESOLVED: '#16A34A' };
+const STATUS_LABEL = { ...Object.fromEntries(STEPS.map(s => [s.key, s.label])), SPAM: 'Spam / Invalid' };
+const STATUS_DOT = { PENDING: '#6B7280', REVIEWING: '#1D4ED8', IN_PROGRESS: '#a16207', RESOLVED: '#15803d', SPAM: '#475569' }; // white text on each ≥ 4.5:1
+// Ready-made reasons for marking a report as spam or invalid.
+const SPAM_REASONS = ['A test or joke message', 'An advertisement or scam', 'Not about Cantilan', 'The same report sent many times'];
 const TYPE_LABEL = { COMPLAINT: 'Complaint', SUGGESTION: 'Suggestion', FEEDBACK: 'Feedback' };
 
 // Ready-made notes for each step. Staff can change them before saving.
@@ -30,6 +35,94 @@ const QUICK_REPLIES = {
   RESOLVED:    ['This has been fixed. Thank you for reporting it.', 'We have acted on your concern. Thank you for your feedback.'],
 };
 
+// Photos of the work: moving a report forward to In Progress or Resolved needs at
+// least one (the server checks too, see controllers/staff.js); going back doesn't.
+// At the same step, staff can post progress photos.
+const PROOF_STEPS = ['IN_PROGRESS', 'RESOLVED'];
+const PHOTO_HINT = {
+  PENDING:     'You can add photos if they help.',
+  REVIEWING:   'For example, a photo taken while checking the place.',
+  IN_PROGRESS: 'A photo that shows the work has started.',
+  RESOLVED:    'A photo of the finished work, or of the reply that was sent.',
+};
+const PHOTO_NEEDED = {
+  IN_PROGRESS: 'Add at least one photo that shows the work has started.',
+  RESOLVED:    'Add at least one photo that shows the finished work (or the reply that was sent).',
+};
+const MAX_PHOTOS = 5;
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+// How urgent a report is: the dot in the history, and the reason the citizen sees
+// when the office changes it (the server asks for at least 10 characters).
+const URGENCY_DOT = { URGENT: '#b91c1c', STANDARD: '#1D4ED8', LOW: '#475569' };
+const URGENCY_REASON_MIN = 10;
+
+const CameraIcon = props => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+    <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" />
+  </svg>
+);
+
+// The photos chosen for the next update, with a button that opens the camera or
+// the gallery on phones (and a file picker on computers).
+function ProofPhotoPicker({ photos, required, hint, error, adding, onPick, onRemove, inputRef, buttonRef }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-800">
+          Photos of the work{' '}
+          {required ? <span className="text-red-700">(required)</span> : <span className="font-normal text-gray-600">(optional)</span>}
+        </p>
+        <span className="text-xs text-gray-600 tabular-nums">{photos.length} / {MAX_PHOTOS}</span>
+      </div>
+      <p className="text-xs text-gray-600 mt-0.5">{hint}</p>
+      <div className="mt-2 grid grid-cols-3 sm:grid-cols-5 gap-2">
+        {photos.map((p, i) => (
+          <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200">
+            <img src={p.url} alt={`Photo ${i + 1} to attach`} className="w-full h-full object-cover" />
+            <button type="button" onClick={() => onRemove(p.id)} aria-label={`Remove photo ${i + 1}`}
+              className="absolute top-1 right-1 w-7 h-7 rounded-full flex items-center justify-center text-white hover:bg-black/80 transition-colors"
+              style={{ background: 'rgba(0,0,0,0.6)' }}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        ))}
+        {photos.length < MAX_PHOTOS && (
+          <button ref={buttonRef} type="button" onClick={() => inputRef.current?.click()} disabled={adding}
+            className="aspect-square rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 text-blue-800 flex flex-col items-center justify-center gap-1 px-1 text-xs font-semibold text-center hover:bg-blue-100 disabled:opacity-60 transition-colors">
+            <CameraIcon className="w-6 h-6" />
+            {adding ? 'Adding...' : photos.length ? 'Add more' : 'Take or choose photos'}
+          </button>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png" multiple className="hidden" onChange={onPick}
+        aria-label="Photos of the work" />
+      <p aria-live="polite" className={error ? 'mt-2 text-sm font-medium text-red-700' : 'sr-only'}>{error}</p>
+    </div>
+  );
+}
+
+// Thumbnails of the photos saved with one update; a tap opens them full size.
+function SavedProofPhotos({ photos, onOpen }) {
+  if (!photos?.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {photos.map((p, i) => (
+        <button key={p.id} type="button" onClick={() => onOpen(i)} aria-label={`Open photo ${i + 1} of ${photos.length}`}
+          className="ss-photo w-16 h-16 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+          <img src={mediaUrl(p.filePath)} alt="" className="w-full h-full object-cover" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// "set it to In Progress", or "added progress photos" when the step didn't change.
+// Logs are newest first, so logs[i + 1] is the one before.
+const updateVerb = (logs, i) => (i < logs.length - 1 && logs[i + 1].status === logs[i].status
+  ? <>added progress photos</>
+  : <>set it to <span className="font-semibold">{STATUS_LABEL[logs[i].status]}</span></>);
+
 const TABS = [
   { key: '',            label: 'All',         count: c => c.total },
   { key: 'PENDING',     label: 'Pending',     count: c => c.pending },
@@ -38,6 +131,7 @@ const TABS = [
   { key: 'OVERDUE',     label: 'Overdue',     count: c => c.overdue, alert: true },
   { key: 'RESOLVED',    label: 'Resolved',    count: c => c.resolved },
   { key: 'UNASSIGNED',  label: 'No office yet', count: c => c.unassigned, alert: true, receivingOnly: true },
+  { key: 'SPAM',        label: 'Spam',        count: c => c.spam },
 ];
 const SORTS = [
   { key: '',         label: 'Newest first' },
@@ -79,7 +173,7 @@ function PhotoLightbox({ media, index, onClose, onNavigate }) {
   return (
     <div className="ss-overlay fixed inset-0 z-[60] flex items-center justify-center p-6"
       style={{ background: 'rgba(15,23,42,0.85)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
-      onClick={onClose}>
+      onClick={e => { e.stopPropagation(); onClose(); }}>
       <button type="button" onClick={onClose} aria-label="Close"
         className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white hover:bg-white/20 transition-colors">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18L18 6M6 6l12 12"/></svg>
@@ -132,6 +226,22 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
   const [moveTo, setMoveTo] = useState('');
   const [moveReason, setMoveReason] = useState('');
   const [moving, setMoving] = useState(false);
+  const [spamOpen, setSpamOpen] = useState(false);
+  const [spamReason, setSpamReason] = useState('');
+  const [markingSpam, setMarkingSpam] = useState(false);
+  const [photos, setPhotos] = useState([]);              // { id, file, url } for the next update
+  const [photoError, setPhotoError] = useState('');
+  const [addingPhotos, setAddingPhotos] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false); // progress photos at the same step
+  const [viewer, setViewer] = useState(null);            // { photos, index, caption }: saved proof photos
+  const [urgencyOpen, setUrgencyOpen] = useState(false);  // changing how urgent it is
+  const [urgencyTo, setUrgencyTo] = useState('');
+  const [urgencyWhy, setUrgencyWhy] = useState('');
+  const [savingUrgency, setSavingUrgency] = useState(false);
+  const photoInputRef = useRef(null);
+  const photoButtonRef = useRef(null);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
 
   useEffect(() => {
     api.get(`/staff/portal/submission/${id}`)
@@ -140,12 +250,54 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Escape closes the window (the photo viewer handles its own Escape first).
+  // The chosen photos' previews are freed when the window closes.
+  useEffect(() => () => photosRef.current.forEach(p => URL.revokeObjectURL(p.url)), []);
+
+  // Escape closes the window (the photo viewers handle their own Escape first).
   useEffect(() => {
-    const onKey = e => { if (e.key === 'Escape' && lightboxIndex === null) onClose(); };
+    const onKey = e => { if (e.key === 'Escape' && lightboxIndex === null && !viewer) onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose, lightboxIndex]);
+  }, [onClose, lightboxIndex, viewer]);
+
+  // Large phone photos are made smaller first (faster on mobile data).
+  async function pickPhotos(e) {
+    const chosen = [...(e.target.files || [])];
+    e.target.value = '';
+    if (!chosen.length) return;
+    const room = MAX_PHOTOS - photos.length;
+    let problem = chosen.length > room ? `You can add up to ${MAX_PHOTOS} photos to one update.` : '';
+    setAddingPhotos(true);
+    const added = [];
+    for (const file of chosen.slice(0, Math.max(0, room))) {
+      if (!['image/jpeg', 'image/png'].includes(file.type)) { problem = 'Only JPG and PNG photos can be added.'; continue; }
+      try {
+        const small = await shrinkPhoto(file);
+        if (small.size > MAX_PHOTO_BYTES) { problem = 'Each photo must be 5 MB or smaller.'; continue; }
+        added.push({ id: `${Date.now()}-${added.length}-${Math.random().toString(36).slice(2)}`, file: small, url: URL.createObjectURL(small) });
+      } catch {
+        problem = 'A photo could not be opened. Please choose another.';
+      }
+    }
+    setPhotos(prev => [...prev, ...added]);
+    setPhotoError(problem);
+    setAddingPhotos(false);
+  }
+
+  function removePhoto(photoId) {
+    setPhotos(prev => {
+      const gone = prev.find(p => p.id === photoId);
+      if (gone) URL.revokeObjectURL(gone.url);
+      return prev.filter(p => p.id !== photoId);
+    });
+    setPhotoError('');
+  }
+
+  function clearPhotos() {
+    photos.forEach(p => URL.revokeObjectURL(p.url));
+    setPhotos([]);
+    setPhotoError('');
+  }
 
   function addReply(text) {
     setNote(prev => {
@@ -155,20 +307,97 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
     });
   }
 
+  // Saves the chosen step (or, with progressOpen, progress photos at the same step).
+  // With photos it is sent as a form; the server keeps them with this update.
   async function saveStatus() {
-    if (!detail || nextStatus === detail.status) return;
+    if (!detail) return;
+    const progress = progressOpen && nextStatus === detail.status;
+    if (!progress && nextStatus === detail.status) return;
+    const status = progress ? detail.status : nextStatus;
+    const needsPhoto = progress || (STEP_INDEX[status] > STEP_INDEX[detail.status] && PROOF_STEPS.includes(status));
+    if (needsPhoto && !photos.length) {
+      setPhotoError(progress ? 'Add at least one photo to post a progress update.' : PHOTO_NEEDED[status]);
+      photoButtonRef.current?.focus();
+      return;
+    }
     setSaving(true);
     try {
-      const res = await api.patch(`/staff/portal/submission/${detail.id}`, { status: nextStatus, note: note.trim() || undefined });
+      let body = { status, note: note.trim() || undefined };
+      if (photos.length) {
+        body = new FormData();
+        body.append('status', status);
+        if (note.trim()) body.append('note', note.trim());
+        photos.forEach(p => body.append('photos', p.file, p.file.name));
+      }
+      const res = await api.patch(`/staff/portal/submission/${detail.id}`, body);
       setDetail(res.data);
       setNextStatus(res.data.status);
       setNote('');
+      clearPhotos();
+      setProgressOpen(false);
       onUpdated(res.data);
-      toast.success(`Saved as ${STATUS_LABEL[res.data.status]}. The citizen will see this update when they track the report.`);
+      toast.success(progress
+        ? 'Progress photos posted. The administrators can see them in this report.'
+        : `Saved as ${STATUS_LABEL[res.data.status]}. The citizen will see this update when they track the report.`);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Could not save the update');
+      const data = err.response?.data || {};
+      if (['PROOF_NEEDED', 'BAD_PHOTO', 'LIMIT_FILE_SIZE', 'LIMIT_FILE_COUNT', 'TOO_LARGE'].includes(data.code)) setPhotoError(data.error);
+      toast.error(data.error || err.message || 'Could not save the update');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function cancelUpdate() {
+    setNextStatus(detail.status);
+    setNote('');
+    clearPhotos();
+    setProgressOpen(false);
+  }
+
+  // How urgent it is (the citizen chose it for a complaint). The server counts the
+  // finish-by date again; the citizen sees the change and the reason.
+  async function saveUrgency() {
+    if (!urgencyTo || urgencyTo === detail.priority) return;
+    if (urgencyWhy.trim().length < URGENCY_REASON_MIN) {
+      toast.error('Please say why in a few words. The citizen will see your reason.');
+      return;
+    }
+    setSavingUrgency(true);
+    try {
+      const res = await api.patch(`/staff/portal/urgency/${detail.id}`, { priority: urgencyTo, reason: urgencyWhy.trim() });
+      setDetail(res.data);
+      setUrgencyOpen(false);
+      setUrgencyTo('');
+      setUrgencyWhy('');
+      onUpdated(res.data);
+      toast.success(`Now ${PRIORITY_LABEL[res.data.priority]}${res.data.dueAt ? `, finish by ${formatDueDate(res.data.dueAt, true)}` : ''}. The citizen gets an email and sees it when they track the report.`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Could not change the urgency');
+    } finally {
+      setSavingUrgency(false);
+    }
+  }
+
+  // Spam / Invalid: the report leaves every list (except the Spam tab) and the
+  // administrator may delete it. "Not spam" puts it back as Pending.
+  async function setSpam(isSpam) {
+    if (isSpam && !spamReason.trim()) return toast.error('Please say why this report is spam or invalid.');
+    setMarkingSpam(true);
+    try {
+      await api.patch(`/staff/portal/submission/${detail.id}`, {
+        status: isSpam ? 'SPAM' : 'PENDING',
+        note: isSpam ? spamReason.trim() : 'Not spam — put back on the list.',
+      });
+      toast.success(isSpam
+        ? 'Marked as spam / invalid. It left your lists; an administrator can delete it.'
+        : 'Put back on your list as Pending.');
+      onMoved(detail.id);
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Could not save the change');
+    } finally {
+      setMarkingSpam(false);
     }
   }
 
@@ -349,8 +578,93 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 </section>
               )}
 
+              {/* Marked as spam: who, why, and the way back */}
+              {detail.status === 'SPAM' && (() => {
+                const spamLog = (detail.statusLogs || []).find(l => l.status === 'SPAM');
+                return (
+                  <section className="rounded-2xl border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-800/60 p-4 sm:p-5">
+                    <h3 className="text-base font-bold text-gray-900">Marked as spam / invalid</h3>
+                    <p className="text-sm text-gray-700 mt-1">
+                      {spamLog && <>By <strong>{spamLog.updatedByName}</strong> on {formatDateTime(spamLog.createdAt)}. </>}
+                      It is left out of every list and count. An administrator can delete it for good.
+                    </p>
+                    {spamLog?.note && <p className="text-sm text-gray-800 mt-2 bg-white dark:bg-slate-900/50 rounded-lg px-3 py-2">“{spamLog.note}”</p>}
+                    <button type="button" onClick={() => setSpam(false)} disabled={markingSpam}
+                      className="mt-3 px-4 py-2.5 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50 transition-colors">
+                      {markingSpam ? 'Saving...' : 'Not spam — put it back'}
+                    </button>
+                  </section>
+                );
+              })()}
+
+              {/* How urgent: what the citizen chose, the finish-by date, and changing it */}
+              {detail.type !== 'FEEDBACK' && detail.status !== 'SPAM' && (() => {
+                // The citizen's own choice: before the first change, if there was one.
+                const changes = detail.urgencyChanges || [];
+                const chosen = changes.length ? changes[changes.length - 1].fromPriority : detail.priority;
+                const why = URGENCY_REASON_LABEL[detail.urgencyReason];
+                return (
+                  <section className="rounded-2xl border border-gray-200 p-4 sm:p-5" aria-labelledby="urgency-title">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 id="urgency-title" className="text-base font-bold text-gray-900">How urgent</h3>
+                      <PriorityBadge priority={detail.priority} />
+                    </div>
+                    <p className="text-sm text-gray-700 mt-1">
+                      {detail.type === 'COMPLAINT'
+                        ? <>The citizen chose <strong>{PRIORITY_LABEL[chosen]}</strong>{why ? <>: “{why}”</> : ''}. </>
+                        : 'Suggestions start as Normal. '}
+                      {detail.dueAt && <>Finish by <strong>{formatDueDate(detail.dueAt, true)}</strong>.</>}
+                    </p>
+                    {detail.status === 'RESOLVED' ? (
+                      <p className="text-sm text-gray-600 mt-2">This report is resolved, so its urgency stays as it is.</p>
+                    ) : !urgencyOpen ? (
+                      <button type="button" onClick={() => { setUrgencyOpen(true); setUrgencyTo(''); setUrgencyWhy(''); }}
+                        className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
+                        Change urgency
+                      </button>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        <p className="text-sm text-gray-700">
+                          Choose the right urgency and say why. The finish-by date is counted again from the day the report was sent;
+                          raising the urgency never gives more time. The citizen sees your reason, and the administrators see every change.
+                        </p>
+                        <div className="grid grid-cols-3 gap-2" role="group" aria-label="New urgency">
+                          {PRIORITY_ORDER.map(key => (
+                            <button key={key} type="button" aria-pressed={urgencyTo === key} disabled={key === detail.priority}
+                              onClick={() => setUrgencyTo(key)}
+                              className={`rounded-xl border-2 px-2 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                urgencyTo === key ? 'border-blue-600 bg-blue-50 text-gray-900' : 'border-gray-200 text-gray-800 hover:bg-gray-50'
+                              }`}>
+                              <span className="flex items-center justify-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: URGENCY_DOT[key] }} aria-hidden="true" />
+                                {PRIORITY_LABEL[key]}
+                              </span>
+                              {key === detail.priority && <span className="block text-xs font-medium text-gray-600">Now</span>}
+                            </button>
+                          ))}
+                        </div>
+                        <textarea value={urgencyWhy} onChange={e => setUrgencyWhy(e.target.value)} rows={2} maxLength={500}
+                          aria-label="Reason (the citizen sees it)"
+                          placeholder="Reason (required, the citizen sees it), e.g. We checked the place: the leak is small and no one is in danger."
+                          className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-none" />
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => { setUrgencyOpen(false); setUrgencyTo(''); setUrgencyWhy(''); }} disabled={savingUrgency}
+                            className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
+                            Cancel
+                          </button>
+                          <button type="button" onClick={saveUrgency} disabled={!urgencyTo || savingUrgency}
+                            className="flex-1 py-2.5 bg-blue-700 text-white text-sm font-semibold rounded-xl hover:bg-blue-800 disabled:opacity-50 transition-colors">
+                            {savingUrgency ? 'Saving...' : urgencyTo ? `Save as ${PRIORITY_LABEL[urgencyTo]}` : 'Choose the new urgency'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
+
               {/* Status steps */}
-              <section className="rounded-2xl border border-gray-200 p-4 sm:p-5">
+              {detail.status !== 'SPAM' && <section className="rounded-2xl border border-gray-200 p-4 sm:p-5">
                 <h3 className="text-base font-bold text-gray-900">Update the status</h3>
                 <p className="text-sm text-gray-600 mt-0.5">Choose the step this report is at now.</p>
                 <ol className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -385,58 +699,102 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                   })}
                 </ol>
 
-                {changing ? (
+                {changing || progressOpen ? (() => {
+                  const progress = !changing;
+                  const photoRequired = progress || (STEP_INDEX[nextStatus] > currentIndex && PROOF_STEPS.includes(nextStatus));
+                  return (
                   <div className="mt-4 space-y-3">
-                    <p className="text-sm text-gray-700">
-                      Change from <strong>{STATUS_LABEL[detail.status]}</strong> to <strong>{STATUS_LABEL[nextStatus]}</strong>.
-                      Add a note for the citizen (optional) — tap one to use it:
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {QUICK_REPLIES[nextStatus].map(text => (
-                        <button key={text} type="button" onClick={() => addReply(text)}
-                          className="px-3 py-1.5 rounded-full border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 text-left transition-colors">
-                          + {text}
-                        </button>
-                      ))}
-                    </div>
+                    {progress ? (
+                      <p className="text-sm text-gray-700">
+                        Post photos of the work so far. The report stays at <strong>{STATUS_LABEL[detail.status]}</strong>.
+                        The administrators see the photos; the citizen sees only your note (optional).
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-sm text-gray-700">
+                          Change from <strong>{STATUS_LABEL[detail.status]}</strong> to <strong>{STATUS_LABEL[nextStatus]}</strong>.
+                          Add a note for the citizen (optional) — tap one to use it:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {QUICK_REPLIES[nextStatus].map(text => (
+                            <button key={text} type="button" onClick={() => addReply(text)}
+                              className="px-3 py-1.5 rounded-full border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 text-left transition-colors">
+                              + {text}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                     <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} maxLength={1000}
                       aria-label="Note for the citizen"
-                      placeholder="Write a short note, or tap a ready-made one above"
+                      placeholder={progress ? 'What was done so far (optional)' : 'Write a short note, or tap a ready-made one above'}
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-none" />
+                    <ProofPhotoPicker photos={photos} required={photoRequired}
+                      hint={progress ? 'Photos that show how the work is going.' : PHOTO_HINT[nextStatus]}
+                      error={photoError} adding={addingPhotos} onPick={pickPhotos} onRemove={removePhoto}
+                      inputRef={photoInputRef} buttonRef={photoButtonRef} />
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => { setNextStatus(detail.status); setNote(''); }} disabled={saving}
+                      <button type="button" onClick={cancelUpdate} disabled={saving}
                         className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
                         Cancel
                       </button>
-                      <button type="button" onClick={saveStatus} disabled={saving}
+                      <button type="button" onClick={saveStatus} disabled={saving || addingPhotos}
                         className="flex-1 py-2.5 bg-blue-700 text-white text-sm font-semibold rounded-xl hover:bg-blue-800 disabled:opacity-50 transition-colors">
-                        {saving ? 'Saving...' : `Save as ${STATUS_LABEL[nextStatus]}`}
+                        {saving ? (photos.length ? 'Uploading photos...' : 'Saving...') : progress ? 'Post progress photos' : `Save as ${STATUS_LABEL[nextStatus]}`}
                       </button>
                     </div>
                   </div>
-                ) : (
-                  <p className="mt-3 text-sm text-gray-600">
-                    {detail.status === 'RESOLVED'
-                      ? 'This report is resolved. Choose another step only if more work is needed.'
-                      : 'When the work moves forward, choose the next step.'}
-                  </p>
+                  );
+                })() : (
+                  <div className="mt-3">
+                    <p className="text-sm text-gray-600">
+                      {detail.status === 'RESOLVED'
+                        ? 'This report is resolved. Choose another step only if more work is needed.'
+                        : 'When the work moves forward, choose the next step.'}
+                    </p>
+                    {detail.status !== 'PENDING' && (
+                      <button type="button" onClick={() => { setProgressOpen(true); setPhotoError(''); }}
+                        className="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
+                        <CameraIcon className="w-4 h-4" />
+                        Add progress photos
+                      </button>
+                    )}
+                  </div>
                 )}
-              </section>
+              </section>}
 
               {/* History */}
               <section>
                 <h3 className={SECTION}>History</h3>
                 <ol className="border-l-2 border-gray-200 ml-1.5 space-y-4">
-                  {(detail.statusLogs || []).map(log => (
+                  {/* Status updates and urgency changes, newest first */}
+                  {[
+                    ...(detail.statusLogs || []).map((log, i) => ({ at: log.createdAt, log, i })),
+                    ...(detail.urgencyChanges || []).map(change => ({ at: change.createdAt, change })),
+                  ].sort((a, b) => new Date(b.at) - new Date(a.at)).map(({ log, i, change }) => (change ? (
+                    <li key={`urgency-${change.id}`} className="relative pl-5">
+                      <span className="absolute -left-[7px] top-1 w-3 h-3 rounded-full ring-2 ring-white dark:ring-slate-800" style={{ background: URGENCY_DOT[change.toPriority] }} aria-hidden="true" />
+                      <p className="text-sm text-gray-800">
+                        <span className="font-semibold">{change.changedByName}</span> changed the urgency from{' '}
+                        <span className="font-semibold">{PRIORITY_LABEL[change.fromPriority]}</span> to <span className="font-semibold">{PRIORITY_LABEL[change.toPriority]}</span>
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        {formatDateTime(change.createdAt)}{change.toDueAt ? ` · Finish by ${formatDueDate(change.toDueAt, true)}` : ''}
+                      </p>
+                      <p className="text-sm text-gray-700 mt-1.5 bg-gray-50 rounded-lg px-3 py-2">“{change.reason}”</p>
+                    </li>
+                  ) : (
                     <li key={log.id} className="relative pl-5">
                       <span className="absolute -left-[7px] top-1 w-3 h-3 rounded-full ring-2 ring-white dark:ring-slate-800" style={{ background: STATUS_DOT[log.status] }} aria-hidden="true" />
                       <p className="text-sm text-gray-800">
-                        <span className="font-semibold">{log.updatedByName}</span> set it to <span className="font-semibold">{STATUS_LABEL[log.status]}</span>
+                        <span className="font-semibold">{log.updatedByName}</span> {updateVerb(detail.statusLogs, i)}
                       </p>
                       <p className="text-xs text-gray-600">{formatDateTime(log.createdAt)}</p>
                       {log.note && <p className="text-sm text-gray-700 mt-1.5 bg-gray-50 rounded-lg px-3 py-2">“{log.note}”</p>}
+                      <SavedProofPhotos photos={log.photos}
+                        onOpen={index => setViewer({ photos: log.photos, index, caption: `${log.updatedByName} · ${formatDateTime(log.createdAt)}` })} />
                     </li>
-                  ))}
+                  )))}
                   <li className="relative pl-5">
                     <span className="absolute -left-[7px] top-1 w-3 h-3 rounded-full ring-2 ring-white dark:ring-slate-800 bg-gray-400" aria-hidden="true" />
                     <p className="text-sm text-gray-800">Report received</p>
@@ -459,6 +817,51 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 ) : moveForm({ heading: 'Move to another office', onCancel: () => { setMoveOpen(false); setMoveTo(''); setMoveReason(''); } })}
               </section>
               )}
+
+              {/* Not a real report: mark it as spam / invalid */}
+              {detail.status !== 'SPAM' && (
+              <section>
+                {!spamOpen ? (
+                  <button type="button" onClick={() => setSpamOpen(true)}
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-red-700 hover:underline">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" /><path strokeLinecap="round" d="M5.6 5.6l12.8 12.8" />
+                    </svg>
+                    Not a real report? Mark as spam / invalid
+                  </button>
+                ) : (
+                  <div className="rounded-2xl border border-red-200 dark:border-red-500/40 bg-red-50 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-bold text-red-700">Mark as spam / invalid</h3>
+                      <button type="button" onClick={() => { setSpamOpen(false); setSpamReason(''); }}
+                        className="text-sm font-semibold text-red-700 hover:underline">
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-700">
+                      It leaves your lists and counts. The citizen gets no message, but sees “Closed as invalid” if they track it.
+                      Your reason is for the municipality only; the citizen does not see it.
+                      You can put it back from the Spam tab, and an administrator can delete it.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {SPAM_REASONS.map(r => (
+                        <button key={r} type="button" onClick={() => setSpamReason(r)}
+                          className="px-3 py-1.5 rounded-full border border-red-200 dark:border-red-500/40 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                          + {r}
+                        </button>
+                      ))}
+                    </div>
+                    <input type="text" value={spamReason} onChange={e => setSpamReason(e.target.value)} maxLength={500}
+                      aria-label="Reason" placeholder="Reason (required), e.g. a test message"
+                      className="w-full px-3 py-2.5 border border-red-200 dark:border-red-500/40 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-400" />
+                    <button type="button" onClick={() => setSpam(true)} disabled={!spamReason.trim() || markingSpam}
+                      className="w-full py-2.5 bg-red-700 text-white rounded-xl text-sm font-semibold hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                      {markingSpam ? 'Saving...' : 'Mark as spam / invalid'}
+                    </button>
+                  </div>
+                )}
+              </section>
+              )}
             </div>
           </>
         )}
@@ -471,6 +874,10 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
           onClose={() => setLightboxIndex(null)}
           onNavigate={delta => setLightboxIndex(i => (i + delta + detail.media.length) % detail.media.length)}
         />
+      )}
+      {viewer && (
+        <PhotoViewer photos={viewer.photos} index={viewer.index} caption={viewer.caption} alt="Photo of the work"
+          onIndex={index => setViewer(v => ({ ...v, index }))} onClose={() => setViewer(null)} />
       )}
     </div>
   );
@@ -694,8 +1101,7 @@ export default function StaffSubmissions() {
                           {s.trackingId}
                         </button>
                         <TypeBadge type={s.type} />
-                        {s.priority === 'URGENT' && <PriorityBadge priority="URGENT" />}
-                      {s.department === 'UNASSIGNED' && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 dark:text-amber-200">No office yet</span>}
+                        {s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
                         {s.department === 'UNASSIGNED' && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 dark:text-amber-200">No office yet</span>}
                         {freshIds.has(s.id) && <span className="text-xs font-bold text-blue-700">New</span>}
                       </div>
@@ -727,7 +1133,7 @@ export default function StaffSubmissions() {
                     </span>
                     <span className="flex items-center gap-2 flex-wrap mt-2">
                       <TypeBadge type={s.type} />
-                      {s.priority === 'URGENT' && <PriorityBadge priority="URGENT" />}
+                      {s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
                       <DeadlineBadge submission={s} />
                     </span>
                     <span className="block text-[15px] text-gray-800 mt-2 line-clamp-2">{s.description}</span>

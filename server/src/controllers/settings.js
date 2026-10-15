@@ -95,15 +95,21 @@ function formatSecurity(row) {
     lockoutMinutes: row.lockoutMinutes,
     idleTimeoutEnabled: row.idleTimeoutEnabled,
     idleTimeoutMinutes: row.idleTimeoutMinutes,
+    // Changed only through /security/sign-in-code (turning it on needs an emailed code).
+    adminSignInCode: row.adminSignInCode,
   };
 }
 
-// Working days to resolve complaints and suggestions. Feedback has no deadline
-// (it rates the whole municipality's service; no office acts on it).
+// Working days to resolve complaints and suggestions: COMPLAINT is a Normal
+// complaint, URGENT and LOW (Can wait) are what the citizen or the office chose.
+// Feedback has no deadline (it rates the whole municipality's service; no office
+// acts on it).
 function formatDeadlines(row) {
   return {
     COMPLAINT: row.deadlineComplaintDays,
     SUGGESTION: row.deadlineSuggestionDays,
+    URGENT: row.deadlineUrgentDays,
+    LOW: row.deadlineLowDays,
   };
 }
 
@@ -114,6 +120,7 @@ function formatSettings(row) {
     contactEmail: row.contactEmail,
     contactPhone: row.contactPhone,
     officeAddress: row.officeAddress,
+    emergencyHotline: row.emergencyHotline,
     departments: parseJsonArray(row.departmentsJson, DEFAULT_DEPARTMENTS),
     unassignedOffice: receivingOfficeOf(row),
     security: formatSecurity(row),
@@ -135,6 +142,8 @@ async function getPublicProfile(req, res) {
       tagline: settings.tagline,
       departments: parseJsonArray(settings.departmentsJson, DEFAULT_DEPARTMENTS),
       deadlines: formatDeadlines(settings),
+      // Shown on the report form when a citizen marks a complaint Urgent.
+      emergencyHotline: settings.emergencyHotline,
       ...formatBranding(settings),
     });
   } catch (err) {
@@ -146,7 +155,12 @@ async function getPublicProfile(req, res) {
 async function getSettings(req, res) {
   try {
     const settings = await ensureSettings();
-    res.json(formatSettings(settings));
+    // Where administrators' sign-in codes go (Security), so a wrong email is spotted
+    // before the codes are turned on.
+    const adminAccounts = await prisma.$queryRaw`
+      SELECT fullName, email FROM User WHERE role = 'ADMIN' AND accountStatus = 'ACTIVE' ORDER BY fullName
+    `;
+    res.json({ ...formatSettings(settings), adminAccounts });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load settings' });
@@ -155,9 +169,13 @@ async function getSettings(req, res) {
 
 async function updateSystemProfile(req, res) {
   try {
-    const { organizationName, tagline, contactEmail, contactPhone, officeAddress } = req.body;
+    const { organizationName, tagline, contactEmail, contactPhone, officeAddress, emergencyHotline } = req.body;
     if (!organizationName?.trim()) {
       return res.status(400).json({ error: 'Organization name is required' });
+    }
+    const hotline = String(emergencyHotline ?? '').trim().replace(/\s+/g, ' ');
+    if (hotline.length > 120) {
+      return res.status(400).json({ error: 'Please keep the emergency hotline under 120 characters' });
     }
     const settings = await ensureSettings();
     const updated = await prisma.systemSettings.update({
@@ -168,6 +186,8 @@ async function updateSystemProfile(req, res) {
         contactEmail: (contactEmail || '').trim().toLowerCase(),
         contactPhone: (contactPhone || '').trim(),
         officeAddress: (officeAddress || '').trim(),
+        // Left as it is when an older page doesn't send it.
+        ...(emergencyHotline !== undefined ? { emergencyHotline: hotline } : {}),
       },
     });
     res.json(formatSettings(updated));
@@ -291,11 +311,14 @@ async function resetBranding(req, res) {
   }
 }
 
-// PATCH /api/settings/deadlines { COMPLAINT, SUGGESTION } — working days.
+// PATCH /api/settings/deadlines { COMPLAINT, SUGGESTION, URGENT, LOW } — working days.
 // Applies to reports submitted from now on; existing deadlines stay as promised.
 async function updateDeadlines(req, res) {
   try {
-    const fields = { COMPLAINT: 'deadlineComplaintDays', SUGGESTION: 'deadlineSuggestionDays' };
+    const fields = {
+      COMPLAINT: 'deadlineComplaintDays', SUGGESTION: 'deadlineSuggestionDays',
+      URGENT: 'deadlineUrgentDays', LOW: 'deadlineLowDays',
+    };
     const data = {};
     for (const [type, column] of Object.entries(fields)) {
       if (req.body[type] === undefined) continue;
@@ -306,6 +329,11 @@ async function updateDeadlines(req, res) {
       data[column] = n;
     }
     const settings = await ensureSettings();
+    // Urgent must not take longer than Normal, nor Normal longer than Can wait.
+    const next = { ...settings, ...data };
+    if (next.deadlineUrgentDays > next.deadlineComplaintDays || next.deadlineComplaintDays > next.deadlineLowDays) {
+      return res.status(400).json({ error: 'Urgent must be the shortest time and Can wait the longest (Urgent ≤ Normal ≤ Can wait).' });
+    }
     const updated = await prisma.systemSettings.update({ where: { id: settings.id }, data });
     res.json(formatSettings(updated));
   } catch (err) {

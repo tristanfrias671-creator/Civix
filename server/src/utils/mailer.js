@@ -1,6 +1,8 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
 const { ensureSettings } = require('../controllers/settings');
+const { officeLabel } = require('./officeNames');
+const { PRIORITY_LABELS, URGENCY_REASONS } = require('./urgency');
 
 const { EMAIL_USER, EMAIL_APP_PASSWORD, EMAIL_HOST, EMAIL_PORT, RESEND_API_KEY, RESEND_FROM_EMAIL, CLIENT_URL } = process.env;
 
@@ -43,12 +45,14 @@ const NAVY = '#0b2f66';
 const INK = '#0f172a';
 const FONT = "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 const MONO = "Consolas, 'Courier New', monospace";
+// `text` is the darker shade for words on `bg` (labels), at least 4.5:1 for easy reading.
 const TONES = {
-  blue:   { fg: '#2563eb', bg: '#dbeafe' },
-  green:  { fg: '#16a34a', bg: '#dcfce7' },
-  amber:  { fg: '#d97706', bg: '#fef3c7' },
-  violet: { fg: '#7c3aed', bg: '#ede9fe' },
-  red:    { fg: '#dc2626', bg: '#fee2e2' },
+  blue:   { fg: '#2563eb', bg: '#dbeafe', text: '#1d4ed8' },
+  green:  { fg: '#16a34a', bg: '#dcfce7', text: '#166534' },
+  amber:  { fg: '#d97706', bg: '#fef3c7', text: '#92400e' },
+  violet: { fg: '#7c3aed', bg: '#ede9fe', text: '#6d28d9' },
+  red:    { fg: '#dc2626', bg: '#fee2e2', text: '#b91c1c' },
+  gray:   { fg: '#64748b', bg: '#e2e8f0', text: '#334155' },
 };
 
 function escapeHtml(str) {
@@ -158,7 +162,7 @@ function detailRows(rows) {
 
 function pill(text, tone) {
   const t = TONES[tone] || TONES.blue;
-  return `<span style="display:inline-block; padding:3px 10px; border-radius:999px; background:${t.bg}; color:${t.fg}; font-size:12px; font-weight:700;">${text}</span>`;
+  return `<span style="display:inline-block; padding:3px 10px; border-radius:999px; background:${t.bg}; color:${t.text}; font-size:12px; font-weight:700;">${text}</span>`;
 }
 
 function quote(label, text) {
@@ -187,6 +191,16 @@ function button(href, label) {
 
 function small(html) {
   return `<p style="margin:0 0 12px; font-size:13px; line-height:1.55; color:#64748b;">${html}</p>`;
+}
+
+// A one-time code in a dashed box (staff sign-up and password reset emails).
+function codeBox(label, code, minutes) {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
+        <td align="center" bgcolor="#eff6ff" style="background:#eff6ff; border:1px dashed #93c5fd; border-radius:12px; padding:18px 16px;">
+          <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:#1d4ed8;">${label}</div>
+          <div style="margin-top:6px; font-family:${MONO}; font-size:32px; font-weight:700; letter-spacing:8px; color:${INK};">${code}</div>
+          <div style="margin-top:6px; font-size:12px; color:#475569;">Expires in ${minutes} minutes</div>
+        </td></tr></table>`;
 }
 
 const STEPS = [['PENDING', 'Received'], ['REVIEWING', 'Under review'], ['IN_PROGRESS', 'In progress'], ['RESOLVED', 'Resolved']];
@@ -299,12 +313,19 @@ function formatPhDateTime(date) {
   return new Date(date).toLocaleString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// The office's full name, as citizens see it (e.g. "Human Resource Management Office (HR)").
 function officeOf(submission) {
-  return submission.department && submission.department !== 'UNASSIGNED' ? submission.department : submission.citizenDepartment;
+  return officeLabel(submission.department && submission.department !== 'UNASSIGNED' ? submission.department : submission.citizenDepartment);
 }
 
 function trackUrl(trackingId) {
   return `${SITE_URL}/track?id=${encodeURIComponent(trackingId)}`;
+}
+
+// How urgent the report is, as a coloured label (Urgent is red, Can wait grey).
+const URGENCY_TONE = { URGENT: 'red', STANDARD: 'blue', LOW: 'gray' };
+function urgencyPill(priority) {
+  return pill(escapeHtml(PRIORITY_LABELS[priority] || priority), URGENCY_TONE[priority]);
 }
 
 // The start of the report's text, quoted in the email. Anyone can type any text and
@@ -381,6 +402,9 @@ async function buildSubmissionReceivedEmail(submission) {
       ${detailRows([
         ['Type', escapeHtml(TYPE_LABELS[submission.type] || submission.type)],
         office && ['Office', escapeHtml(office)],
+        // Complaints say how urgent they are (and why, when Urgent).
+        submission.type === 'COMPLAINT' && submission.priority && ['How urgent', urgencyPill(submission.priority)],
+        submission.type === 'COMPLAINT' && URGENCY_REASONS[submission.urgencyReason] && ['Why', escapeHtml(URGENCY_REASONS[submission.urgencyReason])],
         ['Submitted', formatPhDateTime(submission.createdAt || new Date())],
         submission.dueAt && ['Target resolution', formatPhDate(submission.dueAt)],
       ])}
@@ -415,6 +439,34 @@ async function buildStatusUpdateEmail(submission, newStatus, note) {
     `,
   });
   return { to: submission.email, subject: `CIVIX — Status Update: ${meta.label} (${submission.trackingId})`, html };
+}
+
+// The office changed how urgent a report is (controllers/staff.js): the citizen gets
+// the new urgency, the new target date and the office's reason.
+async function buildUrgencyChangeEmail(submission, change) {
+  const office = officeOf(submission);
+  const now = PRIORITY_LABELS[change.toPriority] || change.toPriority;
+  const moved = change.toDueAt && change.fromDueAt && formatPhDate(change.fromDueAt) !== formatPhDate(change.toDueAt);
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: `${submission.trackingId} is now marked ${now}.`,
+    icon: '&#8635;', tone: change.toPriority === 'URGENT' ? 'red' : 'blue',
+    title: 'The office changed how urgent your report is',
+    intro: `${escapeHtml(office || 'The concerned office')} looked at your report and changed how urgent it is.`,
+    body: `
+      ${detailRows([
+        ['Tracking ID', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
+        ['Was', urgencyPill(change.fromPriority)],
+        ['Now', urgencyPill(change.toPriority)],
+        change.toDueAt && ['Target resolution', `${formatPhDate(change.toDueAt)}${moved
+          ? `<br><span style="font-size:12px; font-weight:400; color:#64748b;">was ${formatPhDate(change.fromDueAt)}</span>` : ''}`],
+      ])}
+      ${noteBlock('Why the office changed it', change.reason)}
+      ${button(trackUrl(submission.trackingId), 'View my report')}
+      ${small('If you think this is a mistake, please visit or call Cantilan Town Hall during office hours.')}
+    `,
+  });
+  return { to: submission.email, subject: `CIVIX — Your report is now marked ${now} (${submission.trackingId})`, html };
 }
 
 const REQUEST_LABELS = { STAFF_ACCOUNT: 'a staff account', ADMIN_ACCESS: 'administrator access' };
@@ -506,12 +558,7 @@ async function buildVerificationCodeEmail({ email, fullName }, code, minutes) {
     icon: '&#9993;', tone: 'blue', title: 'Confirm your email',
     intro: `Hi ${escapeHtml(fullName || 'there')}, enter this code to send your CIVIX staff account request.`,
     body: `
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
-        <td align="center" bgcolor="#eff6ff" style="background:#eff6ff; border:1px dashed #93c5fd; border-radius:12px; padding:18px 16px;">
-          <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:#1d4ed8;">Verification code</div>
-          <div style="margin-top:6px; font-family:${MONO}; font-size:32px; font-weight:700; letter-spacing:8px; color:${INK};">${code}</div>
-          <div style="margin-top:6px; font-size:12px; color:#475569;">Expires in ${minutes} minutes</div>
-        </td></tr></table>
+      ${codeBox('Verification code', code, minutes)}
       ${paragraph(`Type this code in the window that opened on the CIVIX page. Don't share it with anyone.`)}
       ${small(`If you didn't ask for a CIVIX staff account, you can ignore this email. No account is created without this code.`)}
     `,
@@ -519,11 +566,99 @@ async function buildVerificationCodeEmail({ email, fullName }, code, minutes) {
   return { to: email, subject: `CIVIX — Your verification code is ${code}`, html };
 }
 
+// "Forgot password?" on the staff and admin sign-in pages. The code stays out of
+// the subject and preview line, which show on locked phone screens.
+async function buildPasswordResetCodeEmail({ email, fullName }, code, minutes) {
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: `Use this code within ${minutes} minutes to set a new CIVIX password.`,
+    icon: '&#9993;', tone: 'blue', title: 'Reset your password',
+    intro: `Hi ${escapeHtml(fullName || 'there')}, use this code to set a new password for your CIVIX account.`,
+    body: `
+      ${codeBox('Reset code', code, minutes)}
+      ${paragraph("Type this code on the CIVIX sign-in page, then choose your new password. Don't share it with anyone, not even CIVIX staff.")}
+      ${small("If you didn't ask to reset your password, you can ignore this email. Your password stays the same.")}
+    `,
+  });
+  return { to: email, subject: 'CIVIX — Reset your password', html };
+}
+
+// Administrator sign-in codes (Settings > Security): `purpose` SIGN_IN after the
+// right password on the private admin page, or ENABLE to confirm turning the codes
+// on. Like the reset code, the code stays out of the subject and preview line.
+async function buildSignInCodeEmail({ email, fullName }, code, minutes, purpose = 'SIGN_IN') {
+  const enabling = purpose === 'ENABLE';
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: enabling
+      ? `Use this code within ${minutes} minutes to turn on sign-in codes in CIVIX Settings.`
+      : `Use this code within ${minutes} minutes to finish signing in to CIVIX.`,
+    icon: '&#9993;', tone: 'blue', title: enabling ? 'Confirm sign-in codes' : 'Your sign-in code',
+    intro: enabling
+      ? `Hi ${escapeHtml(fullName || 'there')}, enter this code in CIVIX Settings to turn on sign-in codes for administrators.`
+      : `Hi ${escapeHtml(fullName || 'there')}, your CIVIX administrator password was just entered. Enter this code to finish signing in.`,
+    body: enabling
+      ? `
+      ${codeBox('Confirmation code', code, minutes)}
+      ${paragraph("From then on, every administrator gets a code like this by email each time they sign in. Don't share it with anyone.")}
+      ${small("If you didn't ask for this, someone else may be signed in to your administrator account: change your password now.")}
+    `
+      : `
+      ${codeBox('Sign-in code', code, minutes)}
+      ${paragraph("Type this code on the CIVIX sign-in page. Don't share it with anyone, not even CIVIX staff.")}
+      ${small(`${strong("If you didn't just try to sign in,")} someone else knows your password. Change it now: on your private admin sign-in page, choose &ldquo;Forgot password?&rdquo;.`)}
+    `,
+  });
+  return { to: email, subject: enabling ? 'CIVIX — Confirm sign-in codes' : 'CIVIX — Your sign-in code', html };
+}
+
+// After a password reset, in case it wasn't them.
+async function buildPasswordChangedEmail({ email, fullName }, { when, device }) {
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: 'Your CIVIX password was just changed.',
+    icon: '&#10003;', tone: 'green', title: 'Your password was changed',
+    intro: `Hi ${escapeHtml(fullName || 'there')}, the password for your CIVIX account was just changed.`,
+    body: `
+      ${detailRows([['When', escapeHtml(formatPhDateTime(when))], device && ['Device', escapeHtml(device)]])}
+      ${paragraph('You were signed out on your other phones and computers. Sign in again with your new password.')}
+      ${small("If you didn't change your password, contact the CIVIX administrator at the municipal office right away.")}
+    `,
+  });
+  return { to: email, subject: 'CIVIX — Your password was changed', html };
+}
+
+// A sign-in from a phone or computer the account hasn't used before (see
+// utils/signInLog.js). The admin's private sign-in link is never put in an email.
+async function buildNewDeviceSignInEmail({ email, fullName, role }, { createdAt, device, network }) {
+  const account = role === 'ADMIN' ? 'administrator' : 'staff';
+  const page = role === 'ADMIN' ? 'your private admin sign-in page' : 'the Staff Login page';
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: 'Your CIVIX account was used on a new phone or computer.',
+    icon: '!', tone: 'amber', title: 'New sign-in to your account',
+    intro: `Hi ${escapeHtml(fullName || 'there')}, your CIVIX ${account} account was just used to sign in on a phone or computer it hasn't used before.`,
+    body: `
+      ${detailRows([
+        ['When', escapeHtml(formatPhDateTime(createdAt))],
+        ['Device', escapeHtml(device || 'Unknown')],
+        network && ['Network (IP address)', escapeHtml(network)],
+      ])}
+      ${paragraph(`${strong('If this was you,')} you don't need to do anything.`)}
+      ${paragraph(`${strong("If this wasn't you,")} change your password now: on ${page}, choose &ldquo;Forgot password?&rdquo;. That also signs you out everywhere. Then tell the CIVIX administrator.`)}
+    `,
+  });
+  return { to: email, subject: 'CIVIX — New sign-in to your account', html };
+}
+
 const sendSubmissionReceivedEmail = submission => deliver(buildSubmissionReceivedEmail(submission));
 const sendStatusUpdateEmail = (submission, newStatus, note) => deliver(buildStatusUpdateEmail(submission, newStatus, note));
+const sendUrgencyChangeEmail = (submission, change) => deliver(buildUrgencyChangeEmail(submission, change));
 const sendAccessRequestAlertEmail = (to, request) => deliver(buildAccessRequestAlertEmail(to, request));
 const sendAdminAccessDecisionEmail = (user, approved, note, adminUrl) => deliver(buildAdminAccessDecisionEmail(user, approved, note, adminUrl));
 const sendStaffAccountDecisionEmail = (user, approved, note) => deliver(buildStaffAccountDecisionEmail(user, approved, note));
+const sendPasswordChangedEmail = (user, info) => deliver(buildPasswordChangedEmail(user, info));
+const sendNewDeviceSignInEmail = (user, event) => deliver(buildNewDeviceSignInEmail(user, event));
 
 // Waited for: the caller needs to know whether the code went out. Resolves to
 // true or false.
@@ -536,10 +671,32 @@ async function sendVerificationCodeEmail(person, code, minutes) {
   }
 }
 
+// Waited for, like the code above.
+async function sendPasswordResetCodeEmail(person, code, minutes) {
+  try {
+    return await sendMail(await buildPasswordResetCodeEmail(person, code, minutes));
+  } catch (err) {
+    console.error('[mailer] Failed to build email:', err.message);
+    return false;
+  }
+}
+
+// Waited for, like the codes above.
+async function sendSignInCodeEmail(person, code, minutes, purpose) {
+  try {
+    return await sendMail(await buildSignInCodeEmail(person, code, minutes, purpose));
+  } catch (err) {
+    console.error('[mailer] Failed to build email:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
-  sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail, sendVerificationCodeEmail,
+  sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail, sendUrgencyChangeEmail, sendVerificationCodeEmail,
   sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail,
+  sendPasswordResetCodeEmail, sendPasswordChangedEmail, sendNewDeviceSignInEmail, sendSignInCodeEmail,
   // For previews and tests.
-  buildSubmissionReceivedEmail, buildFeedbackThanksEmail, buildStatusUpdateEmail, buildAccessRequestAlertEmail,
+  buildSubmissionReceivedEmail, buildFeedbackThanksEmail, buildStatusUpdateEmail, buildUrgencyChangeEmail, buildAccessRequestAlertEmail,
   buildAdminAccessDecisionEmail, buildStaffAccountDecisionEmail, buildVerificationCodeEmail, toPlainText,
+  buildPasswordResetCodeEmail, buildPasswordChangedEmail, buildNewDeviceSignInEmail, buildSignInCodeEmail,
 };

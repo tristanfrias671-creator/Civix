@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
+import { StatusBadge, TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
 import DeadlineBadge from '../../components/common/DeadlineBadge';
 import { SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
 
-const STATUS_OPTS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
-const STATUS_LABELS = { '':'All Statuses', PENDING:'Pending', REVIEWING:'Reviewing', IN_PROGRESS:'In Progress', RESOLVED:'Resolved' };
+// Spam: reports staff marked as spam or invalid (left out of every other list); an
+// administrator may delete them from their detail page.
+const STATUS_OPTS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED', 'SPAM'];
+const STATUS_LABELS = { '':'All Statuses', PENDING:'Pending', REVIEWING:'Reviewing', IN_PROGRESS:'In Progress', RESOLVED:'Resolved', SPAM:'Spam' };
 const REACTION_LABELS = { EXCELLENT: 'Excellent', GOOD: 'Good', OKAY: 'Okay', POOR: 'Poor', TERRIBLE: 'Terrible' };
 
 // Feedback rates the municipality's service as a whole: it has no status steps,
@@ -41,16 +43,20 @@ export default function AdminSubmissions({ type: typeFilter }) {
   const tableRef = useMobileTable();
 
   useEffect(() => {
+    // A filter clicked while the last list is still loading: only the newest answer is shown.
+    let outdated = false;
     setLoading(true);
     const params = new URLSearchParams({ page, limit: 15 });
     if (typeFilter) params.append('type', typeFilter);
     if (statusFilter) params.append('status', statusFilter);
     gate(api.get(`/submissions?${params}`)).then(r => {
+      if (outdated) return;
       setSubmissions(r.data.submissions);
       setTotalPages(r.data.pages);
       setTotal(r.data.total ?? r.data.submissions.length);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(() => { if (!outdated) setLoading(false); });
+    return () => { outdated = true; };
   }, [typeFilter, statusFilter, page, gate]);
 
   const filtered = search
@@ -104,18 +110,18 @@ export default function AdminSubmissions({ type: typeFilter }) {
               }} />
           </div>
 
-          {/* Status filter pills (feedback has no status steps) */}
-          {!feedbackPage && <div className="flex gap-1.5 flex-wrap">
-            {STATUS_OPTS.map(s => (
+          {/* Status filter pills (feedback has no status steps: only All and Spam) */}
+          <div className="flex gap-1.5 flex-wrap">
+            {(feedbackPage ? ['', 'SPAM'] : STATUS_OPTS).map(s => (
               <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                 style={statusFilter === s
                   ? { background:'#2563eb', color:'white', boxShadow:'0 2px 8px rgba(37,99,235,0.3)' }
                   : { background: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', color: dark ? '#94a3b8' : '#6b7280' }}>
-                {STATUS_LABELS[s]}
+                {feedbackPage && s === '' ? 'All' : STATUS_LABELS[s]}
               </button>
             ))}
-          </div>}
+          </div>
         </div>
 
         {loading ? (
@@ -158,9 +164,15 @@ export default function AdminSubmissions({ type: typeFilter }) {
                         <td className="px-4 py-3.5"><RatingCell rating={s.rating} reaction={s.reaction} dark={dark} /></td>
                       ) : (
                         <>
-                          <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
                           <td className="px-4 py-3.5">
-                            {s.type === 'FEEDBACK'
+                            {/* How urgent, when it isn't Normal */}
+                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                              <TypeBadge type={s.type} />
+                              {s.type !== 'FEEDBACK' && s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            {s.type === 'FEEDBACK' && s.status !== 'SPAM'
                               ? <span className="text-xs" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>—</span>
                               : <StatusBadge status={s.status} />}
                           </td>

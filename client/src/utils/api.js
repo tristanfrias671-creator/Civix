@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { tokenForPage, portalOf, clearSession } from './session';
 
 // Same-origin by default: in development the CRA dev server proxies /api to the
 // backend (see "proxy" in package.json), so the app also works when opened from
@@ -11,8 +12,10 @@ const api = axios.create({
   baseURL: resolveApiBase(),
 });
 
+// Admin pages send the admin's sign-in, staff pages the staff member's (each
+// portal has its own, see utils/session.js).
 api.interceptors.request.use(config => {
-  const token = localStorage.getItem('civix_token');
+  const token = tokenForPage();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -22,8 +25,8 @@ api.interceptors.response.use(
   err => {
     const isAuthRoute = err.config?.url?.includes('/auth/');
     if (err.response?.status === 401 && !isAuthRoute) {
-      localStorage.removeItem('civix_token');
-      localStorage.removeItem('civix_user');
+      // Only this portal's sign-in has ended; the other portal stays signed in.
+      clearSession(portalOf());
       const path = window.location.pathname;
       // The admin sign-in page is private, so admins go back to the homepage.
       window.location.href = path.startsWith('/staff') ? '/staff-login' : '/';

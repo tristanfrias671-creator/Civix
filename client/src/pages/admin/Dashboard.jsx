@@ -1,13 +1,84 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
+import { StatusBadge, TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
 import { Skel, SkeletonStatCards, SkeletonQuickLinks, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import StatCard from '../../components/common/StatCard';
+import PhotoViewer from '../../components/common/PhotoViewer';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
+import { mediaUrl } from '../../utils/mediaUrl';
 import useMobileTable from '../../utils/useMobileTable';
+
+// "5 min ago", "3 h ago", "Oct 12"
+function timeAgo(date) {
+  const minutes = Math.floor((Date.now() - new Date(date)) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`;
+  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// The offices' latest status updates, with the photos staff attached as proof of
+// the work. A photo opens full size; the tracking code opens the report.
+function OfficeUpdatesCard({ dark }) {
+  const [updates, setUpdates] = useState(null);
+  const [viewer, setViewer] = useState(null);
+  useEffect(() => {
+    api.get('/analytics/office-updates?limit=6').then(r => setUpdates(r.data)).catch(() => setUpdates([]));
+  }, []);
+  const ink = dark ? '#f1f5f9' : '#0f172a';
+  const muted = dark ? '#94a3b8' : '#4b5563';
+  const line = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6';
+  return (
+    <div className="rounded-2xl border mt-7" style={{ background: dark ? '#1e293b' : 'white', borderColor: line, boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+      <div className="px-6 py-4 border-b" style={{ borderColor: line }}>
+        <h2 className="text-[17px] font-bold tracking-tight" style={{ color: ink }}>Latest Office Updates</h2>
+        <p className="text-[13px] mt-0.5" style={{ color: muted }}>What the offices' staff did on their reports, with photos of the work</p>
+      </div>
+      {updates === null ? (
+        <div className="p-6 space-y-3"><Skel className="h-14 w-full" /><Skel className="h-14 w-full" /></div>
+      ) : updates.length === 0 ? (
+        <p className="px-6 py-10 text-center text-sm font-medium" style={{ color: muted }}>No updates from the offices yet.</p>
+      ) : (
+        <ul>
+          {updates.map((u, i) => (
+            <li key={u.id} className="px-6 py-4" style={{ borderTop: i ? `1px solid ${line}` : 'none' }}>
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <StatusBadge status={u.status} />
+                <Link to={`/admin/submissions/${u.submissionId}`} className="font-mono text-xs font-semibold hover:underline" style={{ color: dark ? '#93c5fd' : '#1d4ed8' }}>
+                  {u.trackingId}
+                </Link>
+                <span className="text-xs" style={{ color: muted }}>{timeAgo(u.createdAt)}</span>
+              </div>
+              <p className="text-sm mt-1.5" style={{ color: ink }}>
+                <span className="font-semibold">{u.updatedByName}</span>
+                <span style={{ color: muted }}> · {u.submission?.department}</span>
+              </p>
+              {u.note && <p className="text-sm mt-1 line-clamp-2" style={{ color: muted }}>“{u.note}”</p>}
+              {u.photos.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {u.photos.map((p, k) => (
+                    <button key={p.id} type="button" aria-label={`Open photo ${k + 1} of ${u.photos.length} for ${u.trackingId}`}
+                      onClick={() => setViewer({ photos: u.photos, index: k, caption: `${u.trackingId} · ${u.updatedByName}` })}
+                      className="w-14 h-14 rounded-lg overflow-hidden border hover:opacity-85 transition-opacity" style={{ borderColor: line }}>
+                      <img src={mediaUrl(p.filePath)} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {viewer && (
+        <PhotoViewer photos={viewer.photos} index={viewer.index} caption={viewer.caption} alt="Photo of the work from the office"
+          onIndex={index => setViewer(v => ({ ...v, index }))} onClose={() => setViewer(null)} />
+      )}
+    </div>
+  );
+}
 
 const QUICK_LINKS = [
   { to: '/admin/complaints', label: 'Complaints', icon: 'complaint', color: '#dc2626', bg: '#fef2f2', darkBg: 'rgba(220,38,38,0.12)' },
@@ -150,7 +221,13 @@ export default function AdminDashboard() {
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <td className="px-4 py-3.5 font-mono text-xs" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{s.trackingId}</td>
                   <td className="px-4 py-3.5 font-semibold" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: dark ? '#94a3b8' : '#4b5563', fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
-                  <td className="px-4 py-3.5"><TypeBadge type={s.type} /></td>
+                  <td className="px-4 py-3.5">
+                    {/* How urgent, when it isn't Normal */}
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                      <TypeBadge type={s.type} />
+                      {s.type !== 'FEEDBACK' && s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
+                    </span>
+                  </td>
                   <td className="px-4 py-3.5 max-w-40 truncate" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{s.department}</td>
                   <td className="px-4 py-3.5"><StatusBadge status={s.status} /></td>
                   <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
@@ -161,6 +238,8 @@ export default function AdminDashboard() {
         </div>
         )}
       </div>
+
+      <OfficeUpdatesCard dark={dark} />
     </div>
   );
 }

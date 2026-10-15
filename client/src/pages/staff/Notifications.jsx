@@ -7,10 +7,11 @@ import { Skel, useSkeletonGate } from '../../components/common/Skeleton';
 import { AlertSections } from '../../components/common/alerts';
 import { getReactionMeta } from '../../components/citizen/FeedbackRatingPanel';
 import { formatDateTime, plural, timeAgo } from '../../utils/format';
+import { PRIORITY_LABEL } from '../../data/urgency';
 import api from '../../utils/api';
 
-const STATUS_LABEL = { PENDING: 'Pending', REVIEWING: 'Reviewing', IN_PROGRESS: 'In Progress', RESOLVED: 'Resolved' };
-const STATUS_COLOR = { PENDING: '#6b7280', REVIEWING: '#1d4ed8', IN_PROGRESS: '#b45309', RESOLVED: '#15803d' };
+const STATUS_LABEL = { PENDING: 'Pending', REVIEWING: 'Reviewing', IN_PROGRESS: 'In Progress', RESOLVED: 'Resolved', SPAM: 'Spam / Invalid' };
+const STATUS_COLOR = { PENDING: '#6b7280', REVIEWING: '#1d4ed8', IN_PROGRESS: '#b45309', RESOLVED: '#15803d', SPAM: '#475569' };
 const TYPE_WORD = { COMPLAINT: 'complaint', SUGGESTION: 'suggestion', FEEDBACK: 'feedback' };
 
 // Which feed items this person has already seen, kept in this browser:
@@ -53,6 +54,7 @@ const KIND_STYLE = {
   movedOut: { color: '#64748b', path: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1' },
   status:   { color: '#16a34a', path: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
   overdue:  { color: '#dc2626', path: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+  urgency:  { color: '#b45309', path: 'M3 21V4m0 0h12l-2 4 2 4H3' },
 };
 
 function describe(e) {
@@ -77,6 +79,8 @@ function describe(e) {
       return <><strong>{who}</strong> set {id} to <strong style={{ color: STATUS_COLOR[e.status] }} className="dark:!text-inherit">{STATUS_LABEL[e.status]}</strong></>;
     case 'overdue':
       return <>{id} passed its deadline and is now <strong className="text-red-700">overdue</strong></>;
+    case 'urgency':
+      return <><strong>{who}</strong> changed {id} from <strong>{PRIORITY_LABEL[e.fromPriority]}</strong> to <strong>{PRIORITY_LABEL[e.toPriority]}</strong></>;
     default:
       return id;
   }
@@ -202,7 +206,7 @@ export default function StaffNotifications() {
         <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h2 id="activity-title" className="text-base font-bold text-gray-900">Activity</h2>
-            <p className="text-sm text-gray-600 mt-0.5">New reports, moves between offices, status updates and missed deadlines.</p>
+            <p className="text-sm text-gray-600 mt-0.5">New reports, moves between offices, status updates, urgency changes and missed deadlines.</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex rounded-xl border border-gray-200 overflow-hidden" role="group" aria-label="Show">
@@ -253,7 +257,7 @@ export default function StaffNotifications() {
                   const style = KIND_STYLE[e.kind] || KIND_STYLE.new;
                   const color = e.kind === 'status' ? STATUS_COLOR[e.status] || style.color : style.color;
                   const unread = isUnread(e);
-                  const extra = e.kind === 'status' ? e.note : (e.kind === 'movedIn' || e.kind === 'movedOut') ? e.reason : null;
+                  const extra = e.kind === 'status' ? e.note : ['movedIn', 'movedOut', 'urgency'].includes(e.kind) ? e.reason : null;
                   // A report moved to another office can only be opened by that office now.
                   const canOpen = e.kind !== 'movedOut';
                   const Row = canOpen ? 'button' : 'div';

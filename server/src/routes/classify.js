@@ -9,6 +9,8 @@ const prisma = require('../utils/prisma');
 // at once (the form then just shows none), so a flood can't tie up the server.
 const allSuggestions = createLimiter({ windowMs: 60 * 1000, max: Number(process.env.SUGGESTIONS_PER_MINUTE) || 1200 });
 const NO_SUGGESTION = { department: 'UNASSIGNED', confidence: 0, matchedKeywords: [], allScores: {} };
+// Classifications of reports staff marked as spam or invalid stay out of the review.
+const NOT_SPAM_REPORT = { submission: { status: { not: 'SPAM' } } };
 
 // POST /api/classify  — public: real-time classification while citizen types
 // (the form asks after each pause in typing; the limit is far above that).
@@ -58,14 +60,16 @@ router.get('/audit-log', authenticate, requireAdmin, async (req, res) => {
 // GET /api/classify/stats  — AI accuracy statistics (admin only)
 router.get('/stats', authenticate, requireAdmin, async (req, res) => {
   try {
+    // Reports marked as spam or invalid are left out.
     const [total, withAI, changes] = await Promise.all([
-      prisma.submission.count(),
-      prisma.aIClassification.count(),
+      prisma.submission.count({ where: { status: { not: 'SPAM' } } }),
+      prisma.aIClassification.count({ where: NOT_SPAM_REPORT }),
       prisma.departmentChangeLog.count(),
     ]);
 
     // Count where AI prediction matches the final assigned department
     const classified = await prisma.aIClassification.findMany({
+      where: NOT_SPAM_REPORT,
       select: { predictedDepartment: true, submission: { select: { department: true } } },
     });
 
@@ -98,6 +102,7 @@ router.get('/review', authenticate, requireAdmin, async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [records, total] = await Promise.all([
       prisma.aIClassification.findMany({
+        where: NOT_SPAM_REPORT,
         include: {
           submission: {
             select: {
@@ -111,7 +116,7 @@ router.get('/review', authenticate, requireAdmin, async (req, res) => {
         skip,
         take: parseInt(limit),
       }),
-      prisma.aIClassification.count(),
+      prisma.aIClassification.count({ where: NOT_SPAM_REPORT }),
     ]);
     res.json({ records, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (err) {

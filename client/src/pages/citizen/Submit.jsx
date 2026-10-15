@@ -4,13 +4,18 @@ import toast from 'react-hot-toast';
 import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
 import Icon from '../../components/common/Icons';
 import { formatDueDate } from '../../components/common/DeadlineBadge';
+import { PriorityBadge } from '../../components/common/StatusBadge';
 import FeedbackRatingPanel from '../../components/citizen/FeedbackRatingPanel';
 import LocationPicker from '../../components/citizen/LocationPicker';
 import TurnstileBox from '../../components/citizen/TurnstileBox';
 import { useTheme } from '../../context/ThemeContext';
+import { useLang, useText } from '../../i18n/LanguageContext';
+import SUBMIT_TEXT, { refusalText } from '../../i18n/submitText';
 import api from '../../utils/api';
 import { fetchFormTicket } from '../../utils/reportGuard';
 import { suggestLocations, withBarangay, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
+import { officeLabel } from '../../data/officeNames';
+import { PRIORITY_ORDER, DEFAULT_DEADLINES, urgencyDays, addWorkingDays } from '../../data/urgency';
 
 const fadeCss = `
 @keyframes submitFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
@@ -32,25 +37,95 @@ const DEPARTMENTS = [
   'Sangguniang Bayan Office', 'Office of the Vice Mayor',
 ];
 
-function ConfidenceBadge({ confidence }) {
-  const color = confidence >= 70 ? '#16a34a' : confidence >= 40 ? '#d97706' : '#dc2626';
+function ConfidenceBadge({ confidence, text }) {
+  const color = confidence >= 70 ? '#166534' : confidence >= 40 ? '#92400e' : '#b91c1c';
   const bg    = confidence >= 70 ? '#dcfce7' : confidence >= 40 ? '#fef3c7' : '#fee2e2';
   return (
     <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color, background: bg }}>
-      {confidence}% confidence
+      {text(confidence)}
     </span>
   );
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// The contact number is a PH mobile number: digits only, starting with 09, 11 in
+// all. A pasted "+63 917 123 4567" or "917 123 4567" becomes "09171234567".
+const MOBILE_DIGITS = 11;
+function cleanMobile(raw) {
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.startsWith('63')) return `0${digits.slice(2)}`;
+  if (digits.startsWith('9')) return `0${digits}`;
+  return digits;
+}
+
 // A form ticket only works a few seconds after it was issued (see utils/reportGuard).
 const TICKET_READY_MS = 3200;
+
+const CALENDAR_PATH = 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z';
+const PHONE_PATH = 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z';
+
+// How urgent a complaint is, in the form's own style: three choices with a round
+// radio button (grey border, blue when chosen; Normal to start), each with its
+// working days and one line on when to choose it. Urgent adds a one-line "call 911"
+// note, and the last line gives the date the office should finish by (working days
+// counted like the server).
+function UrgencyField({ t, value, onChange, deadlines, hotline }) {
+  const days = urgencyDays(deadlines, 'COMPLAINT', value);
+  return (
+    <fieldset>
+      <legend className="block text-sm font-medium text-gray-700">{t.urgencyLabel}</legend>
+      <p className="text-sm text-gray-600 mb-2">{t.urgencyHint}</p>
+      <div className="space-y-2">
+        {PRIORITY_ORDER.map(key => {
+          const on = value === key;
+          return (
+            <label key={key} data-urgency={key}
+              className={`flex items-start gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-blue-600 ${
+                on ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-gray-300 bg-white hover:border-gray-400'
+              }`}>
+              <input type="radio" name="urgency" value={key} checked={on} onChange={() => onChange(key)} className="sr-only" />
+              <span aria-hidden="true"
+                className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${on ? 'border-blue-700' : 'border-gray-400'}`}>
+                {on && <span className="w-2.5 h-2.5 rounded-full bg-blue-700" />}
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="text-[15px] font-semibold text-gray-900">{t.urgencyLevels[key].name}</span>
+                  <span className="text-sm text-gray-600">{t.workingDays(urgencyDays(deadlines, 'COMPLAINT', key))}</span>
+                </span>
+                <span className="block text-sm text-gray-600 mt-0.5">{t.urgencyLevels[key].when}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+
+      {value === 'URGENT' && (
+        <p role="note" className="mt-2 flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-500/40 bg-red-50 px-4 py-2.5 text-sm text-gray-800">
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d={PHONE_PATH} />
+          </svg>
+          <span><strong className="font-bold text-red-800">{t.dangerTitle}</strong> {t.dangerText(hotline)}</span>
+        </p>
+      )}
+
+      <p aria-live="polite" data-urgency-target className="mt-3 flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-700">
+        <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d={CALENDAR_PATH} />
+        </svg>
+        <span>{t.targetLead} <strong className="font-semibold text-gray-900">{formatDueDate(addWorkingDays(new Date(), days), true)}</strong></span>
+      </p>
+    </fieldset>
+  );
+}
 
 export default function Submit() {
   const { dark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const { lang } = useLang();
+  const t = useText(SUBMIT_TEXT);
 
   const debounceRef = useRef(null);
 
@@ -61,6 +136,21 @@ export default function Submit() {
   const [trackInput, setTrackInput] = useState('');
   const [photos, setPhotos] = useState([]);
   const [pin, setPin] = useState(null); // { lat, lng, barangay } from the map, optional
+  const [phoneNote, setPhoneNote] = useState(false); // a typed number didn't start with 09
+
+  // Keeps the contact number to 09 and 9 more digits: a key that would break the
+  // 09 start is ignored (with a note under the box), and so is a 12th digit.
+  function handlePhone(raw) {
+    const next = cleanMobile(raw);
+    if (next !== '' && next !== '0' && !next.startsWith('09')) {
+      setPhoneNote(true);
+      return;
+    }
+    setPhoneNote(false);
+    setForm(f => (next.length > MOBILE_DIGITS && f.contactNumber.length >= MOBILE_DIGITS
+      ? f
+      : { ...f, contactNumber: next.slice(0, MOBILE_DIGITS) }));
+  }
 
   // A new pin also puts its barangay in the Location field (keeping what was typed).
   function handlePin(next) {
@@ -72,6 +162,18 @@ export default function Submit() {
   const [loading, setLoading] = useState(false);
   const [trackingId, setTrackingId] = useState(null);
   const [dueAt, setDueAt] = useState(null);
+  // How urgent a complaint is, the working days for each choice and the emergency
+  // hotline (Settings), and what was sent (confirmation).
+  const [priority, setPriority] = useState('STANDARD');
+  const [deadlines, setDeadlines] = useState(DEFAULT_DEADLINES);
+  const [hotline, setHotline] = useState('');
+  const [sentPriority, setSentPriority] = useState(null);
+  useEffect(() => {
+    api.get('/settings/public').then(r => {
+      if (r.data.deadlines) setDeadlines(d => ({ ...d, ...r.data.deadlines }));
+      setHotline(r.data.emergencyHotline || '');
+    }).catch(() => {});
+  }, []);
   // Why the last send didn't go through, shown above Submit: { text, trackingId? }
   // (trackingId when the same report was already sent).
   const [notice, setNotice] = useState(null);
@@ -226,17 +328,16 @@ export default function Submit() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (loading) return;
-    if (!isFeedback && !form.department) return toast.error('Please select a department / office');
-    if (form.description.trim().length < 20) return toast.error('Description must be at least 20 characters');
-    if (!form.contactNumber.trim()) return toast.error('Contact number is required');
-    // Same rule as the server: a PH mobile number (09…, +639… or 639…), since updates are texted.
-    if (!/^(09\d{9}|639\d{9}|9\d{9})$/.test(form.contactNumber.replace(/\D/g, ''))) {
-      return toast.error('Please enter a valid mobile number, e.g. 09171234567');
-    }
-    if (!form.email.trim()) return toast.error('Email address is required');
+    if (!isFeedback && !form.department) return toast.error(t.needOffice);
+    if (form.description.trim().length < 20) return toast.error(t.descMin);
+    if (!form.contactNumber.trim()) return toast.error(t.phoneRequired);
+    // A PH mobile number (so updates can be texted once an SMS service is set up).
+    // The box only lets in digits starting with 09, so this checks all 11 are there.
+    if (!/^09\d{9}$/.test(form.contactNumber)) return toast.error(t.phoneInvalid);
+    if (!form.email.trim()) return toast.error(t.emailRequired);
     if (form.type === 'FEEDBACK') {
-      if (!feedbackRating) return toast.error('Please rate your experience (1–5 stars)');
-      if (!feedbackReaction) return toast.error('Please select how you felt about the service');
+      if (!feedbackRating) return toast.error(t.ratingRequired);
+      if (!feedbackReaction) return toast.error(t.reactionRequired);
     }
     setLoading(true);
     setNotice(null);
@@ -253,6 +354,7 @@ export default function Submit() {
         fd.append('latitude', String(pin.lat));
         fd.append('longitude', String(pin.lng));
       }
+      if (form.type === 'COMPLAINT') fd.append('priority', priority);
       if (form.type === 'FEEDBACK') {
         fd.append('rating', String(feedbackRating));
         fd.append('reaction', feedbackReaction);
@@ -269,7 +371,7 @@ export default function Submit() {
         if (ticket.siteKey && !botToken) {
           botToken = await botCheckToken();
           if (!botToken) {
-            setNotice({ text: 'Please complete the "I\'m not a robot" check just above the Submit button, then press Submit again.' });
+            setNotice({ text: t.botCheck });
             return;
           }
         }
@@ -294,13 +396,12 @@ export default function Submit() {
       }
       setTrackingId(res.data.trackingId);
       setDueAt(res.data.submission?.dueAt || null);
-      toast.success('Submission received!');
+      setSentPriority(form.type === 'COMPLAINT' ? res.data.submission?.priority || priority : null);
+      toast.success(t.sentToast);
     } catch (err) {
       const data = err.response?.data;
       setNotice({
-        text: data?.error || (err.response
-          ? 'Your report could not be sent. Please try again.'
-          : 'Your report could not be sent. Please check your internet connection, then press Submit again.'),
+        text: err.response ? (refusalText(t, lang, data, isFeedback) || t.sendFailed) : t.offline,
         // Already sent: a friendly note (plus a Track link, except for feedback).
         info: data?.code === 'DUPLICATE',
         trackingId: data?.code === 'DUPLICATE' && !isFeedback ? data.trackingId : null,
@@ -323,11 +424,14 @@ export default function Submit() {
     setForm({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
     setPhotos([]);
     setPin(null);
+    setPhoneNote(false);
     setFeedbackRating(0);
     setFeedbackReaction('');
     setFeedbackTags([]);
     setAiResult(null);
     setAiDismissed(false);
+    setPriority('STANDARD');
+    setSentPriority(null);
   }
 
   // Feedback: a thank-you, with no code to keep (nothing to track or wait for).
@@ -341,27 +445,27 @@ export default function Submit() {
                 <Icon name="feedback" className="w-14 h-14" />
               </div>
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Thank you for your feedback!</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">{t.thanksTitle}</h2>
             {feedbackRating > 0 && (
               <p className="mb-3">
                 <span className="text-2xl tracking-wider" aria-hidden="true">
                   <span style={{ color: '#f59e0b' }}>{'★'.repeat(feedbackRating)}</span>
                   <span style={{ color: '#cbd5e1' }}>{'★'.repeat(5 - feedbackRating)}</span>
                 </span>
-                <span className="block text-sm font-semibold text-gray-700 mt-1">You rated us {feedbackRating} out of 5</span>
+                <span className="block text-sm font-semibold text-gray-700 mt-1">{t.youRated(feedbackRating)}</span>
               </p>
             )}
-            <p className="text-gray-600 mb-2">Your rating helps the Municipality of Cantilan improve its services for everyone.</p>
-            <p className="text-sm text-gray-500 mb-1">We've sent a thank-you note to your email.</p>
-            <p className="text-xs text-gray-500 mb-8">Reference no. <span className="font-mono">{trackingId}</span></p>
+            <p className="text-gray-600 mb-2">{t.thanksHelps}</p>
+            <p className="text-sm text-gray-500 mb-1">{t.thanksEmailed}</p>
+            <p className="text-xs text-gray-500 mb-8">{t.referenceNo} <span className="font-mono">{trackingId}</span></p>
             <div className="flex flex-wrap gap-3 justify-center">
               <button onClick={resetForm}
                 className="px-5 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                Send Another
+                {t.sendAnother}
               </button>
               <button onClick={() => navigate('/')}
                 className="px-5 py-2.5 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
-                Back to Home
+                {t.backHome}
               </button>
             </div>
           </div>
@@ -380,32 +484,38 @@ export default function Submit() {
                 <Icon name="checkCircle" className="w-14 h-14" />
               </div>
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Submission Received!</h2>
-            <p className="text-gray-500 mb-2">Your Transaction Code is:</p>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">{t.receivedTitle}</h2>
+            <p className="text-gray-500 mb-2">{t.yourCode}</p>
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-6 py-4 font-mono text-xl font-bold mb-3"
               style={{ color: dark ? '#60a5fa' : '#2563eb' }}>
               {trackingId}
             </div>
+            {sentPriority && (
+              <p className="flex items-center justify-center gap-2 mb-3 text-sm">
+                <span className="text-gray-700">{t.urgencyOnConfirm}</span>
+                <PriorityBadge priority={sentPriority} label={t.urgencyLevels[sentPriority]?.name} />
+              </p>
+            )}
             {dueAt && (
               <div className="flex items-center justify-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 mb-3 text-sm">
                 <Icon name="clock" className="w-4 h-4 flex-shrink-0" />
-                <span className="text-gray-700">Target resolution: <strong className="text-gray-900">{formatDueDate(dueAt, true)}</strong></span>
+                <span className="text-gray-700">{t.targetDate} <strong className="text-gray-900">{formatDueDate(dueAt, true)}</strong></span>
               </div>
             )}
             <p className="text-sm text-gray-500 mb-1 font-medium">
-              Save this code to track the status of your submission.
+              {t.saveCode}
             </p>
             <p className="text-xs text-gray-500 mb-8">
-              No account is required. Enter this code on the Track Complaint page at any time.
+              {t.noAccount}
             </p>
             <div className="flex gap-3 justify-center">
               <button onClick={resetForm}
                 className="px-5 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                Submit Another
+                {t.submitAnother}
               </button>
               <button onClick={() => navigate('/track', { state: { prefill: trackingId } })}
                 className="px-5 py-2.5 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
-                Track This Complaint
+                {t.trackThis}
               </button>
             </div>
           </div>
@@ -426,9 +536,9 @@ export default function Submit() {
             </svg>
           </div>
           <div className="flex-1">
-            <h1 className="text-xl font-bold text-gray-800">Report a Concern</h1>
-            <p className="text-gray-500 text-sm mt-0.5">Help us keep Cantilan clean, safe and organized.</p>
-            <p className="text-gray-500 text-xs mt-0.5">No registration. Just fill out the form and submit your report.</p>
+            <h1 className="text-xl font-bold text-gray-800">{t.pageTitle}</h1>
+            <p className="text-gray-600 text-sm mt-0.5">{t.pageLead}</p>
+            <p className="text-gray-600 text-xs mt-0.5">{t.pageNote}</p>
           </div>
         </div>
 
@@ -438,7 +548,7 @@ export default function Submit() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           <span>
-            In compliance with the <strong>Data Privacy Act of 2012 (Republic Act No. 10173)</strong>, any information you provide (such as your contact number and email) will be used solely for processing and following up on your report, and will not be shared with unauthorized third parties.
+            {t.privacy[0]}<strong>{t.privacy[1]}</strong>{t.privacy[2]}
           </span>
         </div>
 
@@ -447,13 +557,13 @@ export default function Submit() {
             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
-            Submit a Report
+            {t.formTitle}
           </h2>
 
           {/* REPORT TYPE + DEPARTMENT */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type of Concern *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t.typeLabel}</label>
               <select value={form.type}
                 onChange={e => {
                   const type = e.target.value;
@@ -461,9 +571,9 @@ export default function Submit() {
                   if (type === 'FEEDBACK') { setAiResult(null); setAiLoading(false); setDeptOpen(false); }
                 }}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm">
-                <option value="COMPLAINT">Complaint</option>
-                <option value="SUGGESTION">Suggestion</option>
-                <option value="FEEDBACK">Feedback</option>
+                <option value="COMPLAINT">{t.types.COMPLAINT}</option>
+                <option value="SUGGESTION">{t.types.SUGGESTION}</option>
+                <option value="FEEDBACK">{t.types.FEEDBACK}</option>
               </select>
             </div>
             {/* Feedback rates the municipality's service as a whole: no office to choose. */}
@@ -471,21 +581,21 @@ export default function Submit() {
               <div className="flex items-start gap-2.5 sm:self-end rounded-lg border border-green-200 bg-green-50 px-3.5 py-2.5">
                 <Icon name="feedback" className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-700" />
                 <p className="text-sm text-gray-700 leading-snug">
-                  Feedback is about the municipality's service as a whole, so there's no office to choose.
+                  {t.feedbackNoOffice}
                 </p>
               </div>
             ) : (
             <div ref={deptFieldRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Department Concerned *
+                {t.officeLabel}
                 {form.department && (
-                  <span className="ml-2 text-xs text-primary font-normal">(AI auto-selected — you may change)</span>
+                  <span className="ml-2 text-xs text-primary font-normal">{t.officeAuto}</span>
                 )}
               </label>
               <button type="button" onClick={() => setDeptOpen(v => !v)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm text-left bg-white flex items-center justify-between gap-2">
-                <span className={form.department ? 'text-gray-900' : 'text-gray-400'}>
-                  {form.department || 'Select department / office...'}
+                <span className={form.department ? 'text-gray-900' : 'text-gray-500'}>
+                  {form.department ? officeLabel(form.department) : t.officePlaceholder}
                 </span>
                 <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${deptOpen ? 'rotate-180' : ''}`}
                   fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -506,7 +616,7 @@ export default function Submit() {
                       className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                         form.department === d ? 'bg-blue-50 text-primary font-semibold' : 'text-gray-700 hover:bg-gray-50'
                       }`}>
-                      {d}
+                      {officeLabel(d)}
                     </button>
                   ))}
                 </div>
@@ -517,7 +627,7 @@ export default function Submit() {
 
           {/* LOCATION */}
           <div ref={locationFieldRef}>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t.locationLabel}</label>
             <div className="relative">
               <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z" />
@@ -527,12 +637,12 @@ export default function Submit() {
                 onChange={e => handleAddressChange(e.target.value)}
                 onFocus={() => showLocationSuggestionsFor(form.address)}
                 onKeyDown={e => { if (e.key === 'Escape') setShowLocationSuggestions(false); }}
-                placeholder="Choose or type your barangay"
+                placeholder={t.locationPlaceholder}
                 autoComplete="off" maxLength={191}
                 role="combobox" aria-expanded={showLocationSuggestions} aria-controls="location-suggestions" aria-autocomplete="list"
                 className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
               <button type="button" onClick={toggleBarangayList} tabIndex={-1}
-                aria-label={showLocationSuggestions ? 'Close the list' : 'Show the barangay list'}
+                aria-label={showLocationSuggestions ? t.closeList : t.showList}
                 className="absolute right-0 top-0 h-full px-3 flex items-center text-gray-400 hover:text-gray-600">
                 <svg className={`w-4 h-4 transition-transform ${showLocationSuggestions ? 'rotate-180' : ''}`}
                   fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -545,7 +655,7 @@ export default function Submit() {
                   className="absolute z-20 left-0 right-0 mt-1.5 bg-white rounded-lg border border-gray-200 shadow-lg overflow-y-auto"
                   style={{ maxHeight: '16rem' }}>
                   {listingBarangays && (
-                    <p className="px-4 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Barangays of Cantilan</p>
+                    <p className="px-4 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">{t.barangaysTitle}</p>
                   )}
                   {locationSuggestions.map(loc => (
                     <button key={loc} type="button" role="option" aria-selected={false}
@@ -561,17 +671,17 @@ export default function Submit() {
                 </div>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">Choose your barangay from the list. You can then add a purok, street or landmark after it.</p>
+            <p className="text-xs text-gray-500 mt-1">{t.locationHint}</p>
             {pin?.barangay && (pinAgrees ? (
               <p className="text-xs font-medium text-green-700 mt-1">
-                ✓ Barangay {pin.barangay} was filled in from your map pin. You can still edit it.
+                {t.pinFilled(pin.barangay)}
               </p>
             ) : (
               <p className="text-xs font-medium text-amber-700 mt-1">
-                Your map pin is in Barangay {pin.barangay}.{' '}
+                {t.pinElsewhere(pin.barangay)}{' '}
                 <button type="button" onClick={() => setForm(f => ({ ...f, address: withBarangay(f.address, pin.barangay) }))}
                   className="font-semibold underline">
-                  Use Barangay {pin.barangay}
+                  {t.useBarangay(pin.barangay)}
                 </button>
               </p>
             ))}
@@ -582,29 +692,27 @@ export default function Submit() {
 
           {/* CONTACT NUMBER (REQUIRED) */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Contact Number *</label>
-            <input type="tel" value={form.contactNumber} required maxLength={20}
-              onChange={e => setForm(p => ({ ...p, contactNumber: e.target.value }))}
-              placeholder="e.g. 09XX XXX XXXX"
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t.phoneLabel}</label>
+            <input type="tel" inputMode="numeric" autoComplete="tel" value={form.contactNumber} required
+              onChange={e => handlePhone(e.target.value)}
+              placeholder={t.phonePlaceholder}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-            <p className="text-xs text-gray-500 mt-1">
-              {isFeedback
-                ? 'Mobile number, in case the municipality needs to reach you about your feedback.'
-                : "Mobile number. We'll text you your tracking code and each status update."}
-            </p>
+            <p aria-live="polite" className={phoneNote ? 'text-xs text-red-700 mt-1' : 'sr-only'}>{phoneNote ? t.phoneStart : ''}</p>
+            {/* No hint for reports: CIVIX has no SMS service yet, so it promises no texts. */}
+            {isFeedback && <p className="text-xs text-gray-500 mt-1">{t.phoneHintFeedback}</p>}
           </div>
 
           {/* EMAIL (REQUIRED) */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email Address *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t.emailLabel}</label>
             <input type="email" value={form.email} required maxLength={191}
               onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
-              placeholder="e.g. juandelacruz@gmail.com"
+              placeholder={t.emailPlaceholder}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
             <p className="text-xs text-gray-500 mt-1">
               {isFeedback
-                ? "We'll email you a thank-you note for your feedback."
-                : "We'll email you automatically whenever your report's status changes — no need to keep checking Track My Report."}
+                ? t.emailHintFeedback
+                : t.emailHint}
             </p>
           </div>
 
@@ -616,18 +724,23 @@ export default function Submit() {
           {/* DESCRIPTION + AI */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {form.type === 'FEEDBACK' ? 'Tell us more *' : 'Description *'}
+              {form.type === 'FEEDBACK' ? t.tellUsMore : t.descLabel}
             </label>
             {form.type !== 'FEEDBACK' && (
               <div className="mb-2 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 leading-relaxed">
-                <strong>Please include:</strong> (1) <strong>What happened</strong> — describe the issue clearly, (2) <strong>Where it occurred</strong>, (3) <strong>When it started</strong>, (4) Any other details that will help the concerned office act on your concern.
+                <strong>{t.includeTitle}</strong>{' '}
+                {t.include.map((part, i) => (
+                  <React.Fragment key={i}>
+                    ({i + 1}) {part.b && <strong>{part.b}</strong>}{part.t}{i < t.include.length - 1 ? ', ' : ''}
+                  </React.Fragment>
+                ))}
               </div>
             )}
             <div className="relative">
               <textarea value={form.description} onChange={handleDescriptionChange} rows={5} maxLength={2000}
                 placeholder={form.type === 'FEEDBACK'
-                  ? 'Share what went well or what could be improved...'
-                  : 'Example: There is a broken streetlight in front of Brgy. Hall, Parang, Cantilan. It has been broken for 2 weeks and is dangerous at night...'}
+                  ? t.feedbackPlaceholder
+                  : t.descPlaceholder}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
               {aiLoading && (
                 <div className="absolute bottom-3 right-3 flex items-center gap-1.5 text-xs text-gray-500">
@@ -635,7 +748,7 @@ export default function Submit() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                   </svg>
-                  AI analyzing...
+                  {t.aiThinking}
                 </div>
               )}
             </div>
@@ -649,7 +762,7 @@ export default function Submit() {
               </div>
               <p className="text-xs text-gray-500 flex-shrink-0">
                 {form.description.length < 20
-                  ? `${form.description.length} / 20 min`
+                  ? t.countShort(form.description.length)
                   : `${form.description.length.toLocaleString('en-US')} / 2,000`}
               </p>
             </div>
@@ -662,22 +775,22 @@ export default function Submit() {
                     <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
                     </svg>
-                    <span className="text-xs font-bold uppercase tracking-wide">AI Department Suggestion</span>
+                    <span className="text-xs font-bold uppercase tracking-wide">{t.aiTitle}</span>
                   </div>
                   <button type="button" onClick={() => setAiDismissed(true)}
-                    className="text-blue-200 hover:text-white text-lg leading-none">×</button>
+                    className="text-white hover:text-blue-100 text-lg leading-none">×</button>
                 </div>
                 <div className="bg-blue-50 px-4 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
                     <div>
-                      <p className="text-xs text-blue-600 font-medium mb-0.5">Suggested Department</p>
-                      <p className="text-sm font-bold text-gray-800">{aiResult.department}</p>
+                      <p className="text-xs text-blue-600 font-medium mb-0.5">{t.aiSuggested}</p>
+                      <p className="text-sm font-bold text-gray-800">{officeLabel(aiResult.department)}</p>
                     </div>
-                    <ConfidenceBadge confidence={aiResult.confidence} />
+                    <ConfidenceBadge confidence={aiResult.confidence} text={t.confidence} />
                   </div>
                   {aiResult.matchedKeywords?.length > 0 && (
                     <div className="mb-3">
-                      <p className="text-xs text-gray-500 mb-1.5">Detected keywords:</p>
+                      <p className="text-xs text-gray-600 mb-1.5">{t.aiKeywords}</p>
                       <div className="flex flex-wrap gap-1.5">
                         {aiResult.matchedKeywords.map(kw => (
                           <span key={kw} className="px-2 py-0.5 bg-white border border-blue-200 text-blue-700 text-xs rounded-full font-medium">
@@ -690,11 +803,11 @@ export default function Submit() {
                   <div className="flex gap-2">
                     <button type="button" onClick={applyAISuggestion}
                       className="flex-1 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors">
-                      Apply Suggestion
+                      {t.aiApply}
                     </button>
                     <button type="button" onClick={() => setAiDismissed(true)}
                       className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
-                      Choose Manually
+                      {t.aiManual}
                     </button>
                   </div>
                 </div>
@@ -702,9 +815,14 @@ export default function Submit() {
             )}
           </div>
 
+          {/* HOW URGENT (complaints) */}
+          {form.type === 'COMPLAINT' && (
+            <UrgencyField t={t} value={priority} onChange={setPriority} deadlines={deadlines} hotline={hotline} />
+          )}
+
           {/* FILE ATTACHMENT (not for feedback) */}
           {!isFeedback && <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">File Attachment (Optional)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t.photosLabel}</label>
             <div
               onDragOver={e => { e.preventDefault(); setDragActive(true); }}
               onDragLeave={() => setDragActive(false)}
@@ -720,9 +838,9 @@ export default function Submit() {
                   <Icon name="camera" className="w-10 h-10" />
                 </div>
                 <p className="text-sm text-gray-500">
-                  <span className="text-primary font-semibold">Click to upload</span> or drag and drop
+                  <span className="text-primary font-semibold">{t.photosClick}</span>{t.photosDrag}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">JPG or PNG files only, up to 5 photos</p>
+                <p className="text-xs text-gray-500 mt-1">{t.photosHint}</p>
               </label>
               {photos.length > 0 && (
                 <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 gap-2">
@@ -731,7 +849,7 @@ export default function Submit() {
                       <img src={photoPreviews[i]} alt={p.name} className="w-full h-full object-cover" />
                       <button type="button" onClick={() => removePhoto(i)}
                         className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Remove">
+                        title={t.removePhoto} aria-label={t.removePhoto}>
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -764,7 +882,7 @@ export default function Submit() {
                   {notice.trackingId && (
                     <button type="button" onClick={() => navigate('/track', { state: { prefill: notice.trackingId } })}
                       className="mt-1 font-semibold text-blue-700 underline underline-offset-2">
-                      Track report {notice.trackingId}
+                      {t.trackReport(notice.trackingId)}
                     </button>
                   )}
                 </div>
@@ -778,7 +896,7 @@ export default function Submit() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
               </svg>
-              {loading ? 'Submitting...' : 'Submit Report'}
+              {loading ? t.sending : t.send}
             </button>
           </div>
         </form>
@@ -792,9 +910,9 @@ export default function Submit() {
                 <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-bold text-gray-800 mb-1">Your report matters!</h3>
-            <p className="text-sm text-gray-500">
-              We appreciate your effort in helping make Cantilan a better and safer place for everyone.
+            <h3 className="text-lg font-bold text-gray-800 mb-1">{t.mattersTitle}</h3>
+            <p className="text-sm text-gray-600">
+              {t.mattersText}
             </p>
           </div>
 
@@ -803,13 +921,13 @@ export default function Submit() {
               <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
               </svg>
-              Track Your Report
+              {t.trackTitle}
             </h3>
             <p className="text-xs text-gray-500 mb-3">
-              Already submitted a report? Check the status using your tracking code.
+              {t.trackText}
             </p>
             <input type="text" value={trackInput} onChange={e => setTrackInput(e.target.value)}
-              placeholder="Enter your tracking code (e.g. ENG-20240527-0001)"
+              placeholder={t.trackPlaceholder}
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-primary" />
             <button type="button"
               onClick={() => navigate('/track', { state: { prefill: trackInput } })}
@@ -817,7 +935,7 @@ export default function Submit() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
               </svg>
-              Check Status
+              {t.checkStatus}
             </button>
           </div>
 
@@ -828,8 +946,8 @@ export default function Submit() {
               </svg>
             </div>
             <div>
-              <p className="text-sm font-bold text-gray-800">Your report is anonymous.</p>
-              <p className="text-xs text-gray-500">We do not require any registration or personal account.</p>
+              <p className="text-sm font-bold text-gray-800">{t.noNameTitle}</p>
+              <p className="text-xs text-gray-600">{t.noNameText}</p>
             </div>
           </div>
         </div>

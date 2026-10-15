@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+const UPLOAD_ROOT = require('../utils/uploadRoot');
 const { generateTrackingId } = require('../utils/trackingId');
 const { analyzeSentiment } = require('../utils/sentiment');
 const { classifyText, OFFICES } = require('../utils/classifier');
@@ -8,6 +11,7 @@ const { networkKey } = require('../utils/clientIp');
 const { discardUploads, photoBytes, photoBudget } = require('../utils/uploadSafety');
 const { issueTicket, turnstileEnabled } = require('../utils/formGuard');
 const { addWorkingDays, deadlineDays } = require('../utils/deadline');
+const { PRIORITIES } = require('../utils/urgency');
 const { ensureSettings, getDepartmentList } = require('./settings');
 const { configured: cloudinaryConfigured } = require('../utils/cloudinary');
 const { isInCantilan } = require('../utils/cantilanArea');
@@ -109,6 +113,15 @@ async function createSubmission(req, res) {
     if (email.length > 191 || !EMAIL_PATTERN.test(email)) {
       return refuse(req, res, 400, 'Please enter a valid email address, e.g. juan@gmail.com');
     }
+    // How urgent a complaint is (Urgent / Normal / Can wait) sets its resolve-by date.
+    // Suggestions and feedback are Normal, and so is a complaint from a page that
+    // doesn't ask. (The form no longer asks why it is urgent, so no reason is saved.)
+    let priority = 'STANDARD';
+    if (type === 'COMPLAINT') {
+      const asked = String(body.priority || 'STANDARD').trim().toUpperCase();
+      if (!PRIORITIES.includes(asked)) return refuse(req, res, 400, 'Please choose how urgent this is.', { code: 'URGENCY' });
+      priority = asked;
+    }
     // Feedback rates the municipality's service as a whole: it goes to no office
     // (administrators read it), carries no photos and has no deadline.
     const isFeedback = type === 'FEEDBACK';
@@ -197,9 +210,9 @@ async function createSubmission(req, res) {
     const citizenOverrode = !isFeedback && office !== 'UNASSIGNED' && office !== aiResult.department;
 
     const pin = readPin(body);
-    // Resolve-by date: working days for this report type, fixed at submission
-    // (none for feedback).
-    const days = deadlineDays(await ensureSettings(), type);
+    // Resolve-by date: working days for this report type and urgency, fixed at
+    // submission (none for feedback).
+    const days = deadlineDays(await ensureSettings(), type, priority);
     const dueAt = days ? addWorkingDays(new Date(), days) : null;
 
     let submission;
@@ -220,6 +233,7 @@ async function createSubmission(req, res) {
             reaction: parsedReaction,
             feedbackTags: parsedTags,
             department: finalDepartment,
+            priority,
             dueAt,
             location: pin ? { create: pin } : undefined,
             media: req.files?.length
@@ -283,11 +297,15 @@ async function getSubmissions(req, res) {
     const { type, status, page = 1, limit = 20 } = req.query;
     const where = { ...scope };
     if (type) where.type = type;
-    if (status) {
+    if (status === 'SPAM') {
+      where.status = 'SPAM'; // the Spam view: every type, ready to delete
+    } else if (status) {
       where.status = status;
       // Feedback has no status steps (no office acts on it), so a status filter
       // lists complaints and suggestions only.
       if (!type) where.type = { not: 'FEEDBACK' };
+    } else {
+      where.status = { not: 'SPAM' };
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -323,13 +341,19 @@ async function getSubmission(req, res) {
         location: true,
         media: true,
         aiClassification: true,
+        // Every update from the office, with its proof photos (for the admin's view).
+        statusLogs: { orderBy: { createdAt: 'desc' }, take: 50, include: { photos: { orderBy: { createdAt: 'asc' } } } },
       },
     });
     // A citizen asking for someone else's report gets the same answer as a missing one.
     if (!submission || (scope.userId && submission.userId !== scope.userId)) {
       return res.status(404).json({ error: 'Submission not found' });
     }
-    res.json(submission);
+    // Every change the office made to how urgent it is, newest first.
+    const urgencyChanges = await prisma.priorityChangeLog.findMany({
+      where: { submissionId: submission.id }, orderBy: { createdAt: 'desc' }, take: 50,
+    });
+    res.json({ ...submission, urgencyChanges });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch submission' });
@@ -366,6 +390,18 @@ async function trackSubmission(req, res) {
     // Public endpoint and codes are sequential (DEPT-YYYYMMDD-0001, -0002…), so never
     // return the citizen's contact details to whoever enters a code.
     const { userId, contactNumber, email, ...safe } = submission;
+    // Why staff marked a report as spam (and the note when they put it back) is for
+    // the municipality only; the citizen sees "Closed as invalid" without the reason.
+    // Logs are newest first, so logs[i + 1] is the entry just before this one.
+    safe.statusLogs = submission.statusLogs.map((log, i, logs) =>
+      (log.status === 'SPAM' || logs[i + 1]?.status === 'SPAM' ? { ...log, note: null } : log));
+    // When the office changed how urgent it is, the citizen sees the change, the new
+    // resolve-by date and the office's reason (not who made the change).
+    safe.urgencyChanges = await prisma.priorityChangeLog.findMany({
+      where: { submissionId: submission.id },
+      orderBy: { createdAt: 'desc' },
+      select: { fromPriority: true, toPriority: true, toDueAt: true, reason: true, createdAt: true },
+    });
     res.json(safe);
   } catch (err) {
     console.error(err);
@@ -387,4 +423,107 @@ async function getSubmissionsByUser(req, res) {
   }
 }
 
-module.exports = { createSubmission, getFormTicket, getSubmissions, getSubmission, trackSubmission, getSubmissionsByUser };
+// ── Spam / Invalid and deleting (administrators) ────────────────────────────
+// Staff mark their office's reports as spam or invalid (staff portal). Feedback
+// goes to no office, so the administrator marks feedback. An administrator may then
+// delete a report for good, but only one marked as spam; every deletion is kept in
+// DeletedReport (who marked it and why, who deleted it, when), without the
+// citizen's details.
+
+const byWhom = user => ({ updatedById: user.id, updatedByName: user.fullName || user.email, updatedByRole: user.role });
+
+// PATCH /api/submissions/:id/spam { spam: true|false, reason } — feedback only.
+async function setFeedbackSpam(req, res) {
+  try {
+    const submission = await prisma.submission.findUnique({ where: { id: req.params.id } });
+    if (!submission) return res.status(404).json({ error: 'Submission not found' });
+    if (submission.type !== 'FEEDBACK') {
+      return res.status(400).json({ error: "Complaints and suggestions are marked as spam by their office's staff." });
+    }
+    const spam = req.body?.spam === true;
+    const reason = String(req.body?.reason || '').trim().slice(0, 500);
+    if (spam && !reason) return res.status(400).json({ error: 'Please say why this feedback is spam or invalid.' });
+    const status = spam ? 'SPAM' : 'PENDING';
+    if (status === submission.status) return res.json(submission);
+    const [, updated] = await prisma.$transaction([
+      prisma.statusUpdateLog.create({
+        data: { submissionId: submission.id, trackingId: submission.trackingId, status, note: spam ? reason : 'Not spam', ...byWhom(req.user) },
+      }),
+      prisma.submission.update({ where: { id: submission.id }, data: { status } }),
+    ]);
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update the feedback' });
+  }
+}
+
+// DELETE /api/submissions/:id — only reports marked as spam or invalid.
+async function deleteSpamReport(req, res) {
+  try {
+    const submission = await prisma.submission.findUnique({
+      where: { id: req.params.id },
+      include: { media: true, statusLogs: { where: { status: 'SPAM' }, orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+    if (!submission) return res.status(404).json({ error: 'Submission not found' });
+    if (submission.status !== 'SPAM') {
+      return res.status(400).json({ error: 'Only reports marked as spam or invalid can be deleted.' });
+    }
+    const marked = submission.statusLogs[0];
+    const id = submission.id;
+    // The office's proof photos go with their updates (rows by the database's cascade).
+    const proofPhotos = await prisma.statusPhoto.findMany({ where: { statusLog: { submissionId: id } }, select: { filePath: true } });
+    // Office moves (DepartmentChangeLog) stay in the Audit Log.
+    await prisma.$transaction([
+      prisma.deletedReport.create({
+        data: {
+          trackingId: submission.trackingId, type: submission.type, department: submission.department,
+          reportCreatedAt: submission.createdAt, markedByName: marked?.updatedByName || null, markedReason: marked?.note || null,
+          deletedById: req.user.id, deletedByName: req.user.fullName || req.user.email,
+        },
+      }),
+      prisma.media.deleteMany({ where: { submissionId: id } }),
+      prisma.location.deleteMany({ where: { submissionId: id } }),
+      prisma.aIClassification.deleteMany({ where: { submissionId: id } }),
+      prisma.statusUpdateLog.deleteMany({ where: { submissionId: id } }),
+      prisma.submission.delete({ where: { id } }),
+    ]);
+    // Its photos on this server go too (copies on Cloudinary are left).
+    for (const m of submission.media) {
+      if (m.filePath?.startsWith('/uploads/')) fs.unlink(path.join(UPLOAD_ROOT, path.basename(m.filePath)), () => {});
+    }
+    for (const p of proofPhotos) {
+      if (p.filePath?.startsWith('/uploads/proof/')) fs.unlink(path.join(UPLOAD_ROOT, 'proof', path.basename(p.filePath)), () => {});
+    }
+    res.json({ deleted: true, trackingId: submission.trackingId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete the report' });
+  }
+}
+
+// GET /api/submissions/deleted — the deletion log, newest first.
+async function getDeletedReports(req, res) {
+  try {
+    res.json(await prisma.deletedReport.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load deleted reports' });
+  }
+}
+
+// GET /api/submissions/urgency-changes — every change the offices made to how urgent
+// a report is, newest first (Audit Log).
+async function getUrgencyChanges(req, res) {
+  try {
+    res.json(await prisma.priorityChangeLog.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load the urgency changes' });
+  }
+}
+
+module.exports = {
+  createSubmission, getFormTicket, getSubmissions, getSubmission, trackSubmission, getSubmissionsByUser,
+  setFeedbackSpam, deleteSpamReport, getDeletedReports, getUrgencyChanges,
+};

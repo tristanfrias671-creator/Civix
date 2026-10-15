@@ -3,12 +3,16 @@ const ExcelJS = require('exceljs');
 const crypto = require('crypto');
 const { ensureSettings } = require('./settings');
 const { loadSealImage } = require('../utils/branding');
+const { parsePeriod, PeriodError, phDate, phIsoDate, phMonthKey, MONTHS } = require('../utils/reportPeriod');
+const { PRIORITY_LABELS } = require('../utils/urgency');
 const prisma = require('../utils/prisma');
 
+// Reports staff marked as spam or invalid (status SPAM) are left out of every figure.
 // Status figures (pending, resolved, response rate, resolution time) count cases
 // only: feedback rates the municipality's service as a whole and has no workflow.
-// Same rule as the admin dashboard (controllers/analytics.js).
-const CASES = { type: { not: 'FEEDBACK' } };
+// Same rules as the admin dashboard (controllers/analytics.js).
+const NOT_SPAM = { status: { not: 'SPAM' } };
+const CASES = { type: { not: 'FEEDBACK' }, ...NOT_SPAM };
 
 // ── Color constants (PDFKit accepts hex strings only — NO rgba()) ─────────────
 const BRAND      = '#1D4ED8';
@@ -33,13 +37,26 @@ const STATUS_COLORS = {
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
+// Dates are shown on the Philippine calendar (the server clock may be UTC).
 function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-PH', {
-    year: 'numeric', month: 'long', day: 'numeric',
+    timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric',
   });
 }
+const fmtShortDate = d => new Date(d).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric' });
 
-function pageFooter(doc, pageNum, reportId, verifyCode) {
+// The office a report sits with, as shown in the logs.
+const officeName = s => (s.type === 'FEEDBACK' ? '—' : !s.department || s.department === 'UNASSIGNED' ? 'Unassigned' : s.department);
+
+// Shortens text with "…" until it fits `width` at the current font and size.
+function fitText(doc, text, width) {
+  if (doc.widthOfString(text) <= width) return text;
+  let t = text;
+  while (t.length > 1 && doc.widthOfString(`${t}…`) > width) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
+}
+
+function pageFooter(doc, pageNum, pageCount, reportId, verifyCode) {
   const W = doc.page.width;
   const H = doc.page.height;
   // Footer text is drawn inside the bottom margin band (below H - margins.bottom).
@@ -59,7 +76,7 @@ function pageFooter(doc, pageNum, reportId, verifyCode) {
   doc.fontSize(6.5).font('Helvetica').fillColor(TEXT_LIGHT)
     .text(`Report ID: ${reportId}`, 50, H - 30, { width: 220, lineBreak: false });
   doc.fontSize(7).fillColor(TEXT_LIGHT)
-    .text(`Page ${pageNum}`, 50, H - 30, { width: W - 100, align: 'center', lineBreak: false });
+    .text(`Page ${pageNum} of ${pageCount}`, 50, H - 30, { width: W - 100, align: 'center', lineBreak: false });
   doc.fontSize(6.5).fillColor(TEXT_LIGHT)
     .text(`Verify: ${verifyCode}`, W - 270, H - 30, { width: 220, align: 'right', lineBreak: false });
   doc.page.margins.bottom = savedBottom;
@@ -98,6 +115,12 @@ function horizBar(doc, label, count, total, color, lightColor, y) {
     .text(`${count}  (${(pct * 100).toFixed(1)}%)`, BAR_X + BAR_W + 8, y + 3);
 }
 
+// Even axis steps for counts: 0, 3, 6, 9, 12 rather than 0, 2, 5, 7, 9.
+function niceAxis(max) {
+  const step = Math.max(1, Math.ceil(max / 4));
+  return { step, top: step * 4 };
+}
+
 // ── Vertical grouped bar chart ────────────────────────────────────────────────
 function drawBarChart(doc, deptData, startY) {
   const W      = doc.page.width;
@@ -120,10 +143,8 @@ function drawBarChart(doc, deptData, startY) {
   const BAR_W   = Math.min((GROUP_W - 10) / TYPES.length, 24);
   const G_PAD   = (GROUP_W - BAR_W * TYPES.length) / 2;
 
-  const maxCount = Math.max(
-    1,
-    ...TOP.map(d => Math.max(...TYPES.map(t => d.counts[t] || 0)))
-  );
+  const axis = niceAxis(Math.max(...TOP.map(d => Math.max(...TYPES.map(t => d.counts[t] || 0)))));
+  const maxCount = axis.top;
 
   // Chart background
   doc.rect(CHART_X, y, CHART_W, CHART_H).fill('#fafafa');
@@ -131,7 +152,7 @@ function drawBarChart(doc, deptData, startY) {
 
   // Y-axis grid lines + labels
   for (let i = 0; i <= 4; i++) {
-    const val = Math.round((maxCount / 4) * i);
+    const val = axis.step * i;
     const gy  = C_BOT - (val / maxCount) * CHART_H;
     doc.moveTo(CHART_X, gy).lineTo(CHART_X + CHART_W, gy)
       .lineWidth(i === 0 ? 0.7 : 0.3)
@@ -162,12 +183,12 @@ function drawBarChart(doc, deptData, startY) {
       }
     });
 
-    // Rotated x-label
+    // Slanted x-label, running down and right from under its bars (never into them)
     const short  = d.dept.replace('Municipal ', 'Mun. ').replace(' Office', '').slice(0, 16);
-    const labelX = gx + (BAR_W * TYPES.length) / 2;
+    const labelX = gx + (BAR_W * TYPES.length) / 2 - 8;
     doc.save()
       .translate(labelX, C_BOT + 6)
-      .rotate(-42)
+      .rotate(38)
       .fontSize(7).font('Helvetica').fillColor(TEXT_MID)
       .text(short, 0, 0, { width: 65, lineBreak: false })
       .restore();
@@ -226,9 +247,34 @@ function pieLegend(doc, x, y, slices, total) {
   return ly;
 }
 
+// ── A table that carries on over new pages, repeating its header row ──────────
+// cols: [{ label, x, width, align }]; drawRow(row, y, i) draws one row's cells.
+// Returns the y just below the table.
+function pdfTable(doc, y, cols, rows, drawRow, { rowH = 16, headH = 18 } = {}) {
+  const W = doc.page.width;
+  const bottom = doc.page.height - 70;
+  const header = () => {
+    doc.rect(50, y, W - 100, headH).fill(ROW_HEAD);
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff');
+    cols.forEach(c => doc.text(c.label, c.x, y + 5, { width: c.width, align: c.align || 'left', lineBreak: false }));
+    y += headH;
+  };
+  if (y + headH + rowH > bottom) { doc.addPage(); y = 50; }
+  header();
+  rows.forEach((row, i) => {
+    if (y + rowH > bottom) { doc.addPage(); y = 50; header(); }
+    if (i % 2 === 0) doc.rect(50, y, W - 100, rowH).fill(ROW_ALT);
+    doc.rect(50, y, W - 100, rowH).lineWidth(0.3).stroke(DIVIDER);
+    drawRow(row, y, i);
+    y += rowH;
+  });
+  return y;
+}
+
 // ── Monthly trend — line/area chart ────────────────────────────────────────────
 function drawLineChart(doc, data, x, y, w, h) {
-  const maxVal = Math.max(1, ...data.map(m => m.total));
+  const axis = niceAxis(Math.max(0, ...data.map(m => m.total)));
+  const maxVal = axis.top;
   const n = data.length;
   const stepX = n > 1 ? w / (n - 1) : 0;
   const pts = data.map((m, i) => ({ x: x + i * stepX, y: y + h - (m.total / maxVal) * h }));
@@ -237,7 +283,7 @@ function drawLineChart(doc, data, x, y, w, h) {
   doc.rect(x, y, w, h).lineWidth(0.4).stroke(DIVIDER);
 
   for (let i = 0; i <= 4; i++) {
-    const val = Math.round((maxVal / 4) * i);
+    const val = axis.step * i;
     const gy = y + h - (val / maxVal) * h;
     doc.moveTo(x, gy).lineTo(x + w, gy)
       .lineWidth(i === 0 ? 0.7 : 0.3).stroke(i === 0 ? TEXT_LIGHT : DIVIDER);
@@ -264,8 +310,10 @@ function drawLineChart(doc, data, x, y, w, h) {
     doc.circle(p.x, p.y, 2.6).lineWidth(1).stroke('#ffffff');
   });
 
-  // X-axis month labels
+  // X-axis labels: at most about 12, so a month of days stays readable.
+  const every = Math.ceil(n / 12);
   data.forEach((m, i) => {
+    if (i % every) return;
     doc.fontSize(6.5).font('Helvetica').fillColor(TEXT_MID)
       .text(m.label, pts[i].x - 16, y + h + 6, { width: 32, align: 'center', lineBreak: false });
   });
@@ -274,430 +322,573 @@ function drawLineChart(doc, data, x, y, w, h) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-async function generatePDF(req, res) {
-  const doc = new PDFDocument({ margin: 50, size: 'A4' });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', 'attachment; filename="civix-analytics-report.pdf"');
-  doc.pipe(res);
+// REPORT DATA — the same figures for the PDF and the Excel workbook, for one
+// period: ?period=week|month|year|all&date=YYYY-MM-DD (see utils/reportPeriod.js).
+// Every figure counts the reports filed in the period, with their status as of now.
+// ═════════════════════════════════════════════════════════════════════════════
+const LOG_LIMIT = { all: 100, period: 5000 };   // rows in the Excel log
+const PDF_LOG_LIMIT = { all: 10, period: 100 }; // rows in the PDF log
 
-  try {
-    // ── Fetch all data upfront ──────────────────────────────────────────────
-    const [
-      total, pending, reviewing, inProgress, resolved,
-      positive, neutral, negative,
-      complaints, suggestions, feedbacks,
-    ] = await Promise.all([
-      prisma.submission.count(),
-      prisma.submission.count({ where: { ...CASES, status: 'PENDING' } }),
-      prisma.submission.count({ where: { ...CASES, status: 'REVIEWING' } }),
-      prisma.submission.count({ where: { ...CASES, status: 'IN_PROGRESS' } }),
-      prisma.submission.count({ where: { ...CASES, status: 'RESOLVED' } }),
-      prisma.submission.count({ where: { sentiment: 'POSITIVE' } }),
-      prisma.submission.count({ where: { sentiment: 'NEUTRAL' } }),
-      prisma.submission.count({ where: { sentiment: 'NEGATIVE' } }),
-      prisma.submission.count({ where: { type: 'COMPLAINT' } }),
-      prisma.submission.count({ where: { type: 'SUGGESTION' } }),
-      prisma.submission.count({ where: { type: 'FEEDBACK' } }),
-    ]);
+async function gatherReport(period) {
+  const filed = period.from ? { createdAt: { gte: period.from, lt: period.to } } : {};
+  const ALL = { ...NOT_SPAM, ...filed };
+  const CASE = { ...CASES, ...filed };
+  const [
+    total, pending, reviewing, inProgress, resolved,
+    positive, neutral, negative,
+    complaints, suggestions, feedbacks,
+    citizens, previousTotal,
+  ] = await Promise.all([
+    prisma.submission.count({ where: ALL }),
+    prisma.submission.count({ where: { ...CASE, status: 'PENDING' } }),
+    prisma.submission.count({ where: { ...CASE, status: 'REVIEWING' } }),
+    prisma.submission.count({ where: { ...CASE, status: 'IN_PROGRESS' } }),
+    prisma.submission.count({ where: { ...CASE, status: 'RESOLVED' } }),
+    prisma.submission.count({ where: { ...ALL, sentiment: 'POSITIVE' } }),
+    prisma.submission.count({ where: { ...ALL, sentiment: 'NEUTRAL' } }),
+    prisma.submission.count({ where: { ...ALL, sentiment: 'NEGATIVE' } }),
+    prisma.submission.count({ where: { ...ALL, type: 'COMPLAINT' } }),
+    prisma.submission.count({ where: { ...ALL, type: 'SUGGESTION' } }),
+    prisma.submission.count({ where: { ...ALL, type: 'FEEDBACK' } }),
+    prisma.user.count({ where: { role: 'CITIZEN' } }),
+    period.prevFrom
+      ? prisma.submission.count({ where: { ...NOT_SPAM, createdAt: { gte: period.prevFrom, lt: period.prevTo } } })
+      : null,
+  ]);
 
-    const resolvedSubs = await prisma.submission.findMany({
-      where: { ...CASES, status: 'RESOLVED' },
-      select: { createdAt: true, updatedAt: true },
-    });
-    let avgDays = '0.0';
-    if (resolvedSubs.length) {
-      const ms = resolvedSubs.reduce((s, r) => s + (r.updatedAt - r.createdAt), 0);
-      avgDays = (ms / resolvedSubs.length / 86400000).toFixed(1);
-    }
-    const caseTotal = complaints + suggestions;
-    const responseRate = caseTotal > 0 ? ((caseTotal - pending) / caseTotal * 100).toFixed(1) : '0.0';
+  const resolvedSubs = await prisma.submission.findMany({
+    where: { ...CASE, status: 'RESOLVED' },
+    select: { createdAt: true, updatedAt: true, priority: true, dueAt: true },
+  });
+  // How urgent the complaints and suggestions were, and how many urgent ones were
+  // resolved by their resolve-by date (the same rule as the deadline badges).
+  const [urgent, normal, canWait] = await Promise.all(['URGENT', 'STANDARD', 'LOW'].map(priority =>
+    prisma.submission.count({ where: { ...CASE, priority } })));
+  const urgentDone = resolvedSubs.filter(s => s.priority === 'URGENT');
+  const urgentOnTime = urgentDone.filter(s => !s.dueAt || s.updatedAt <= s.dueAt).length;
+  const avgDays = resolvedSubs.length
+    ? Number((resolvedSubs.reduce((s, r) => s + (r.updatedAt - r.createdAt), 0) / resolvedSubs.length / 86400000).toFixed(1))
+    : 0;
+  const caseTotal = complaints + suggestions;
+  const responseRate = caseTotal > 0 ? Number(((caseTotal - pending) / caseTotal * 100).toFixed(1)) : 0;
 
-    const allTypeSubs = await prisma.submission.findMany({
-      select: { department: true, type: true, createdAt: true },
-    });
-    const deptMap = {};
-    const monthBuckets = {};
-    const nowRef = new Date();
+  // Trend rows: each day (a week or a month), each month (a year), or the last
+  // 12 months (all time).
+  let trend;
+  if (period.kind === 'all') {
+    const now = phDate(new Date());
+    trend = [];
     for (let i = 11; i >= 0; i--) {
-      const d = new Date(nowRef.getFullYear(), nowRef.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      monthBuckets[key] = { label: d.toLocaleString('en-US', { month: 'short', year: '2-digit' }), total: 0, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0 };
+      const t = new Date(Date.UTC(now.y, now.m - i, 1));
+      const y = t.getUTCFullYear();
+      const m = t.getUTCMonth();
+      trend.push({ key: `${y}-${String(m + 1).padStart(2, '0')}`, label: `${MONTHS[m].slice(0, 3)} ${String(y).slice(2)}`, long: `${MONTHS[m]} ${y}` });
     }
-    for (const s of allTypeSubs) {
-      if (s.department && s.department !== 'UNASSIGNED') {
-        if (!deptMap[s.department])
-          deptMap[s.department] = { COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
-        if (deptMap[s.department][s.type] !== undefined) deptMap[s.department][s.type]++;
-        deptMap[s.department].total++;
-      }
-      const mKey = `${s.createdAt.getFullYear()}-${String(s.createdAt.getMonth() + 1).padStart(2, '0')}`;
-      if (monthBuckets[mKey]) { monthBuckets[mKey].total++; if (monthBuckets[mKey][s.type] !== undefined) monthBuckets[mKey][s.type]++; }
+  } else {
+    trend = period.buckets.map(b => ({ ...b }));
+    // A period still running stops at today: the days (or months) to come aren't zeros.
+    if (period.inProgress) {
+      const todayKey = period.bucketOf(new Date());
+      trend = trend.filter(t => t.key <= todayKey);
     }
-    const deptData = Object.entries(deptMap)
+  }
+  trend.forEach(t => Object.assign(t, { total: 0, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0 }));
+  const trendRow = Object.fromEntries(trend.map(t => [t.key, t]));
+  const trendKey = period.kind === 'all' ? phMonthKey : period.bucketOf;
+
+  // Quarters: every quarter on record (all time), or those of the year (up to
+  // the current one while the year is still running).
+  const quarters = {};
+  if (period.kind === 'year') {
+    const { y } = phDate(period.from);
+    const lastQ = period.inProgress ? Math.floor(phDate(new Date()).m / 3) + 1 : 4;
+    ['Jan – Mar', 'Apr – Jun', 'Jul – Sep', 'Oct – Dec'].slice(0, lastQ).forEach((months, i) => {
+      quarters[`${y} Q${i + 1}`] = { label: `${y} Q${i + 1} (${months})`, year: y, q: i + 1, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
+    });
+  }
+  const deptMap = {};
+  const citizenDeptMap = {};
+
+  const subs = await prisma.submission.findMany({
+    where: ALL,
+    select: { createdAt: true, type: true, department: true, citizenDepartment: true },
+  });
+  for (const s of subs) {
+    const row = trendRow[trendKey(s.createdAt)];
+    if (row) { row.total++; row[s.type]++; }
+    if (period.kind === 'all' || period.kind === 'year') {
+      const { y, m } = phDate(s.createdAt);
+      const q = Math.floor(m / 3) + 1;
+      const key = `${y} Q${q}`;
+      if (!quarters[key]) quarters[key] = { label: key, year: y, q, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
+      quarters[key][s.type]++; quarters[key].total++;
+    }
+    if (s.department && s.department !== 'UNASSIGNED') {
+      if (!deptMap[s.department]) deptMap[s.department] = { COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
+      deptMap[s.department][s.type]++; deptMap[s.department].total++;
+    }
+    if (s.citizenDepartment) citizenDeptMap[s.citizenDepartment] = (citizenDeptMap[s.citizenDepartment] || 0) + 1;
+  }
+
+  const log = await prisma.submission.findMany({
+    where: ALL,
+    orderBy: { createdAt: 'desc' },
+    take: period.kind === 'all' ? LOG_LIMIT.all : LOG_LIMIT.period,
+    select: { trackingId: true, type: true, department: true, status: true, priority: true, sentiment: true, createdAt: true },
+  });
+
+  return {
+    total, pending, reviewing, inProgress, resolved, positive, neutral, negative,
+    complaints, suggestions, feedbacks, citizens, previousTotal, avgDays, responseRate,
+    urgent, normal, canWait, urgentResolved: urgentDone.length, urgentOnTime,
+    trend,
+    quarters: Object.values(quarters).sort((a, b) => a.year - b.year || a.q - b.q),
+    departments: Object.entries(deptMap)
       .sort((a, b) => b[1].total - a[1].total)
-      .slice(0, 15)
-      .map(([dept, d]) => ({ dept, counts: d, total: d.total }));
-    const monthlyData = Object.values(monthBuckets);
+      .map(([dept, c]) => ({ dept, ...c, counts: c })),
+    citedDepartments: Object.entries(citizenDeptMap)
+      .sort((a, b) => b[1] - a[1]).slice(0, 15)
+      .map(([name, value]) => ({ name, value })),
+    log,
+  };
+}
 
-    const recentSubs = await prisma.submission.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-      include: { user: { select: { fullName: true } } },
+// The period asked for, or null after answering 400 with what's wrong.
+function periodFrom(req, res) {
+  try {
+    return parsePeriod(req.query);
+  } catch (err) {
+    if (!(err instanceof PeriodError)) throw err;
+    res.status(400).json({ error: err.message });
+    return null;
+  }
+}
+
+// civix-report-monthly-2026-10.pdf, civix-report-all-time-2026-10-13.xlsx
+const reportFileName = (period, ext) =>
+  `civix-report-${period.fileTag}${period.kind === 'all' ? `-${phIsoDate(new Date())}` : ''}.${ext}`;
+
+// GET /api/reports/periods — the first day with a report on record and today
+// (Philippine calendar), so the Analytics page lists only periods with data.
+async function getReportPeriods(req, res) {
+  try {
+    const first = await prisma.submission.findFirst({
+      where: NOT_SPAM, orderBy: { createdAt: 'asc' }, select: { createdAt: true },
     });
+    res.json({ first: first ? phIsoDate(first.createdAt) : null, today: phIsoDate(new Date()) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load the report periods' });
+  }
+}
 
-    const W = doc.page.width;
-    const H = doc.page.height;
+// ═════════════════════════════════════════════════════════════════════════════
+// PDF EXPORT
+// ═════════════════════════════════════════════════════════════════════════════
+async function generatePDF(req, res) {
+  const period = periodFrom(req, res);
+  if (!period) return;
+  let data;
+  let seal;
+  try {
+    [data, seal] = await Promise.all([
+      gatherReport(period),
+      ensureSettings().then(s => loadSealImage(s.sealUrl)).catch(() => null),
+    ]);
+  } catch (err) {
+    console.error('PDF report data error:', err);
+    return res.status(500).json({ error: 'Failed to generate report' });
+  }
 
-    // Report ID + verification code — printed on the cover and every page footer
-    // so a physical printout can be traced back to the exact data snapshot it was
-    // generated from (a stray page found later can still be matched to its report).
-    const genTime = new Date();
-    const reportId = `CIVIX-${genTime.toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const verifyPayload = `${reportId}|${total}|${resolved}|${pending}|${genTime.toISOString()}`;
-    const verifyHash = crypto.createHash('sha256').update(verifyPayload).digest('hex').toUpperCase();
-    const verifyCode = `${verifyHash.slice(0, 4)}-${verifyHash.slice(4, 8)}-${verifyHash.slice(8, 12)}`;
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGE 1 — COVER
-    // ══════════════════════════════════════════════════════════════════════
-    doc.rect(0, 0, W, 190).fill(BRAND_DARK);
-    doc.rect(0, 188, W, 6).fill(BRAND);
-    doc.rect(0, 194, W, 3).fill('#93c5fd');
-
-    // Header text (solid white — no rgba)
-    doc.fillColor('#c7d2fe').fontSize(9).font('Helvetica')
-      .text('REPUBLIC OF THE PHILIPPINES', 0, 40, { align: 'center', width: W, lineBreak: false });
-    doc.fillColor('#e0e7ff').fontSize(11).font('Helvetica-Bold')
-      .text('MUNICIPALITY OF CANTILAN, SURIGAO DEL SUR', 0, 56, { align: 'center', width: W, lineBreak: false });
-
-    // Title, paired with the municipal seal as one centered group (widths computed
-    // precisely via widthOfString so the seal can never collide with the text).
-    const titleText = 'CIVIX Analytics Report';
-    doc.font('Helvetica-Bold').fontSize(25);
-    const titleWidth = doc.widthOfString(titleText);
-    const SEAL_SIZE = 46;
-    const SEAL_GAP = 14;
-    const seal = await loadSealImage((await ensureSettings()).sealUrl);
-    const groupWidth = (seal ? SEAL_SIZE + SEAL_GAP : 0) + titleWidth;
-    const groupX = (W - groupWidth) / 2;
-    const titleY = 100;
-    if (seal) {
-      doc.image(seal.buffer, groupX, titleY + (25 - SEAL_SIZE) / 2 + 4, { fit: [SEAL_SIZE, SEAL_SIZE], align: 'center', valign: 'center' });
-    }
-    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(25)
-      .text(titleText, groupX + (seal ? SEAL_SIZE + SEAL_GAP : 0), titleY, { lineBreak: false });
-
-    doc.fillColor('#bfdbfe').fontSize(11).font('Helvetica')
-      .text('Integrated Citizen Engagement Platform', 0, 140, { align: 'center', width: W, lineBreak: false });
-    doc.fillColor('#93c5fd').fontSize(8.5).font('Helvetica')
-      .text(`Generated: ${fmtDate(new Date())}`, 0, 162, { align: 'center', width: W });
-
-    // Meta info box
-    const bx = 100; const by = 218; const bw = W - 200; const bh = 152;
-    doc.rect(bx, by, bw, bh).fill('#f0f9ff');
-    doc.rect(bx, by, bw, bh).lineWidth(0.6).stroke('#bfdbfe');
-    doc.rect(bx, by, 4, bh).fill(BRAND);
-    const meta = [
-      ['Report Date',       fmtDate(new Date())],
-      ['Reporting Period',  'All Recorded Submissions'],
-      ['Prepared By',       'CIVIX System — Auto-Generated'],
-      ['Classification',    'For Internal Use Only'],
-      ['Report ID',         reportId],
-      ['Verification Code', verifyCode],
-    ];
-    let my = by + 12;
-    for (const [lbl, val] of meta) {
-      doc.fontSize(8.5).font('Helvetica-Bold').fillColor(TEXT_MID).text(lbl + ':', bx + 14, my);
-      doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_DARK).text(val, bx + 140, my);
-      my += 22;
-    }
-
-    // Executive Summary
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Executive Summary', 50, 394);
-    doc.moveTo(50, 410).lineTo(W - 50, 410).lineWidth(0.5).stroke(DIVIDER);
-    doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID)
-      .text(
-        `This report presents a comprehensive statistical analysis of citizen engagement submissions ` +
-        `recorded through the CIVIX platform for the Municipality of Cantilan, Surigao del Sur. ` +
-        `A total of ${total.toLocaleString()} submission(s) have been recorded, comprising complaints, ` +
-        `suggestions, and service feedback from registered citizens. The current response rate for complaints ` +
-        `and suggestions stands at ${responseRate}%, with an average resolution time of ${avgDays} day(s). ` +
-        `Feedback rates the municipality's service as a whole and is not routed to an office. This document is intended ` +
-        `for review by municipal officials and designated department heads.`,
-        50, 422, { width: W - 100, lineGap: 4, align: 'justify' }
-      );
-
-    // Table of Contents
-    doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Table of Contents', 50, 532);
-    doc.moveTo(50, 548).lineTo(W - 50, 548).lineWidth(0.5).stroke(DIVIDER);
-    const toc = [
-      ['1.', 'Key Performance Indicators',          '2'],
-      ['2.', 'Submission Type Distribution',        '2'],
-      ['3.', 'Sentiment Analysis',                  '2'],
-      ['4.', 'Monthly Trend Analysis',               '3'],
-      ['5.', 'Submission Breakdown by Department',  '4'],
-      ['6.', 'Recent Submissions Log',              '5'],
-    ];
-    let ty = 559;
-    for (const [num, title, pg] of toc) {
-      doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID)
-        .text(`${num}  ${title}`, 60, ty, { width: W - 160 });
-      doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK)
-        .text(pg, W - 90, ty, { width: 30, align: 'right' });
-      doc.moveTo(60, ty + 12).lineTo(W - 100, ty + 12)
-        .lineWidth(0.3).dash(1, { space: 3 }).stroke(DIVIDER);
-      doc.undash();
-      ty += 22;
-    }
-
-    // Cover footer (drawn inside the bottom margin band — see pageFooter() for why
-    // the margin must be zeroed here too, or PDFKit silently inserts a phantom page)
-    doc.rect(0, H - 46, W, 46).fill(BRAND_DARK);
-    {
-      const savedBottom = doc.page.margins.bottom;
-      doc.page.margins.bottom = 0;
-      doc.fontSize(7.5).font('Helvetica').fillColor('#93c5fd')
-        .text('CIVIX – Integrated Citizen Engagement Platform  |  Municipality of Cantilan, Surigao del Sur',
-          0, H - 26, { align: 'center', width: W, lineBreak: false });
-      doc.page.margins.bottom = savedBottom;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGE 2 — KPIs + Type Distribution + Sentiment
-    // ══════════════════════════════════════════════════════════════════════
-    doc.addPage();
-    let y = 50;
-
-    // Section 1 — KPIs
-    y = sectionHead(doc, 1, 'Key Performance Indicators', y);
-
-    const CARD_W = (W - 100 - 21) / 4;
-    const CARD_H = 60;
-    [
-      ['Total Submissions', total,      BRAND,     ],
-      ['Resolved',          resolved,   '#15803d'  ],
-      ['In Progress',       inProgress, '#b45309'  ],
-      ['Pending',           pending,    '#6B7280'  ],
-    ].forEach(([lbl, val, acc], i) => {
-      kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
-    });
-    y += CARD_H + 8;
-
-    [
-      ['Reviewing',        reviewing,            '#1d4ed8'],
-      ['Response Rate',    `${responseRate}%`,   '#7c3aed'],
-      ['Avg. Resolution',  `${avgDays} days`,    '#0369a1'],
-      ['Feedbacks',        feedbacks,            '#059669'],
-    ].forEach(([lbl, val, acc], i) => {
-      kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
-    });
-    y += CARD_H + 22;
-
-    // Section 2 — Type Distribution (pie)
-    y = sectionHead(doc, 2, 'Submission Type Distribution', y);
-    {
-      const pieCx = 50 + 68; const pieCy = y + 52; const pieR = 48;
-      const typeSlices = [
-        { label: 'Complaints',  value: complaints,  color: TYPE_COLORS.COMPLAINT.bar },
-        { label: 'Suggestions', value: suggestions, color: TYPE_COLORS.SUGGESTION.bar },
-        { label: 'Feedback',    value: feedbacks,   color: TYPE_COLORS.FEEDBACK.bar },
-      ];
-      drawPieChart(doc, pieCx, pieCy, pieR, typeSlices);
-      pieLegend(doc, 50 + 155, y + 8, typeSlices, total);
-    }
-    y += 122;
-
-    // Section 3 — Sentiment (pie)
-    y = sectionHead(doc, 3, 'Sentiment Analysis', y);
-    {
-      const pieCx = 50 + 68; const pieCy = y + 52; const pieR = 48;
-      const sentSlices = [
-        { label: 'Positive', value: positive, color: '#16A34A' },
-        { label: 'Neutral',  value: neutral,  color: '#6B7280' },
-        { label: 'Negative', value: negative, color: '#DC2626' },
-      ];
-      drawPieChart(doc, pieCx, pieCy, pieR, sentSlices);
-      pieLegend(doc, 50 + 155, y + 8, sentSlices, total);
-    }
-    y += 122;
-
-    pageFooter(doc, 2, reportId, verifyCode);
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGE 3 — Monthly Trend Analysis
-    // ══════════════════════════════════════════════════════════════════════
-    doc.addPage();
-    y = 50;
-    y = sectionHead(doc, 4, 'Monthly Trend Analysis', y);
-    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
-      .text('Submission volume over the last twelve (12) months, broken down by type.', 50, y, { width: W - 100 });
-    y += 20;
-
-    const LC_X = 50 + 34;
-    const LC_W = W - LC_X - 50;
-    const LC_H = 190;
-    drawLineChart(doc, monthlyData, LC_X, y, LC_W, LC_H);
-    y += LC_H + 26;
-
-    // Monthly data table
-    doc.rect(50, y, W - 100, 18).fill(ROW_HEAD);
-    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff')
-      .text('MONTH',       55,  y + 5, { width: 110 })
-      .text('COMPLAINTS',  270, y + 5, { width: 75, align: 'center' })
-      .text('SUGGESTIONS', 345, y + 5, { width: 80, align: 'center' })
-      .text('FEEDBACK',    425, y + 5, { width: 65, align: 'center' })
-      .text('TOTAL',       490, y + 5, { width: 50, align: 'center' });
-    y += 18;
-    monthlyData.forEach((m, i) => {
-      if (y + 14 > H - 70) return;
-      if (i % 2 === 0) doc.rect(50, y, W - 100, 14).fill(ROW_ALT);
-      doc.rect(50, y, W - 100, 14).lineWidth(0.3).stroke(DIVIDER);
-      doc.fontSize(7).font('Helvetica').fillColor(TEXT_DARK)
-        .text(m.label,                   55,  y + 3.5, { width: 110 })
-        .text(String(m.COMPLAINT),       270, y + 3.5, { width: 75, align: 'center' })
-        .text(String(m.SUGGESTION),      345, y + 3.5, { width: 80, align: 'center' })
-        .text(String(m.FEEDBACK),        425, y + 3.5, { width: 65, align: 'center' })
-        .text(String(m.total),           490, y + 3.5, { width: 50, align: 'center' });
-      y += 14;
-    });
-
-    pageFooter(doc, 3, reportId, verifyCode);
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGE 4 — Department Breakdown
-    // ══════════════════════════════════════════════════════════════════════
-    doc.addPage();
-    y = 50;
-    y = sectionHead(doc, 5, 'Submission Breakdown by Department', y);
-
-    // Legend
-    let lx = 62;
-    for (const [type, c] of Object.entries(TYPE_COLORS)) {
-      doc.rect(lx, y, 11, 11).fill(c.bar);
-      doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
-        .text(type.charAt(0) + type.slice(1).toLowerCase(), lx + 15, y + 1);
-      lx += 90;
-    }
-    y += 20;
-
-    y = drawBarChart(doc, deptData, y);
-    y += 10;
-
-    // Dept summary table
-    if (deptData.length > 0 && y + 40 < H - 80) {
-      doc.rect(50, y, W - 100, 18).fill(ROW_HEAD);
-      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff')
-        .text('DEPARTMENT',  55,  y + 5, { width: 210 })
-        .text('COMPLAINTS',  270, y + 5, { width: 70, align: 'center' })
-        .text('SUGGESTIONS', 340, y + 5, { width: 75, align: 'center' })
-        .text('FEEDBACK',    415, y + 5, { width: 65, align: 'center' })
-        .text('TOTAL',       485, y + 5, { width: 55, align: 'center' });
-      y += 18;
-
-      for (const [i, d] of deptData.entries()) {
-        if (y + 16 > H - 70) break;
-        if (i % 2 === 0) doc.rect(50, y, W - 100, 16).fill(ROW_ALT);
-        doc.rect(50, y, W - 100, 16).lineWidth(0.3).stroke(DIVIDER);
-        const label = d.dept.length > 34 ? d.dept.slice(0, 32) + '…' : d.dept;
-        doc.fontSize(7).font('Helvetica').fillColor(TEXT_DARK)
-          .text(label,                         55,  y + 4, { width: 210 })
-          .text(String(d.counts.COMPLAINT  || 0), 270, y + 4, { width: 70,  align: 'center' })
-          .text(String(d.counts.SUGGESTION || 0), 340, y + 4, { width: 75,  align: 'center' })
-          .text(String(d.counts.FEEDBACK   || 0), 415, y + 4, { width: 65,  align: 'center' })
-          .text(String(d.total),                485, y + 4, { width: 55,  align: 'center' });
-        y += 16;
-      }
-    }
-
-    pageFooter(doc, 4, reportId, verifyCode);
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGE 5 — Recent Submissions Log
-    // ══════════════════════════════════════════════════════════════════════
-    doc.addPage();
-    y = 50;
-    y = sectionHead(doc, 6, 'Recent Submissions Log', y);
-
-    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
-      .text(
-        'The table below presents the ten (10) most recently recorded submissions on the CIVIX platform.',
-        50, y, { width: W - 100 }
-      );
-    y += 22;
-
-    // Table header
-    doc.rect(50, y, W - 100, 18).fill(ROW_HEAD);
-    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff')
-      .text('TRACKING ID',  55,  y + 5, { width: 120 })
-      .text('CITIZEN',      180, y + 5, { width: 120 })
-      .text('TYPE',         305, y + 5, { width: 70, align: 'center' })
-      .text('STATUS',       380, y + 5, { width: 85, align: 'center' })
-      .text('DATE FILED',   470, y + 5, { width: 85 });
-    y += 18;
-
-    for (const [i, s] of recentSubs.entries()) {
-      if (y + 20 > H - 80) break;
-      if (i % 2 === 0) doc.rect(50, y, W - 100, 20).fill(ROW_ALT);
-      doc.rect(50, y, W - 100, 20).lineWidth(0.3).stroke(DIVIDER);
-
-      const tC = TYPE_COLORS[s.type]   || { bar: '#6B7280', light: '#f3f4f6', text: '#374151' };
-      const sC = STATUS_COLORS[s.status] || { bar: '#6B7280', light: '#f3f4f6', text: '#374151' };
-
-      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-        .text(s.trackingId, 55, y + 6, { width: 120 });
-      doc.fontSize(7.5).font('Helvetica-Bold').fillColor(TEXT_DARK)
-        .text(s.user?.fullName || 'Anonymous', 180, y + 6, { width: 120 });
-
-      // Type badge
-      doc.rect(307, y + 4, 64, 12).fill(tC.light);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor(tC.text)
-        .text(s.type, 307, y + 7, { width: 64, align: 'center' });
-
-      // Status badge
-      doc.rect(382, y + 4, 80, 12).fill(sC.light);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor(sC.text)
-        .text(s.status.replace(/_/g, ' '), 382, y + 7, { width: 80, align: 'center' });
-
-      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-        .text(new Date(s.createdAt).toLocaleDateString('en-PH'), 470, y + 6, { width: 85 });
-
-      y += 20;
-    }
-
-    // Certification block
-    y += 24;
-    if (y + 110 > H - 80) { y = H - 190; }
-    doc.moveTo(50, y).lineTo(W - 50, y).lineWidth(0.5).stroke(DIVIDER);
-    y += 12;
-    doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK).text('CERTIFICATION', 50, y);
-    y += 14;
-    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
-      .text(
-        'This report was automatically generated by the CIVIX Integrated Citizen Engagement Platform. ' +
-        'The data presented herein is accurate as of the date of generation. ' +
-        'This document is certified for official use by the Municipality of Cantilan.',
-        50, y, { width: W - 100, lineGap: 3, align: 'justify' }
-      );
-    y += 46;
-
-    // Signature lines
-    const sigW = 150;
-    doc.moveTo(50, y).lineTo(50 + sigW, y).lineWidth(0.5).stroke(TEXT_DARK);
-    doc.moveTo(W - 50 - sigW, y).lineTo(W - 50, y).lineWidth(0.5).stroke(TEXT_DARK);
-    doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-      .text('System Administrator', 50, y + 5, { width: sigW, align: 'center', lineBreak: false });
-    doc.text('Authorized Municipal Official', W - 50 - sigW, y + 5, { width: sigW, align: 'center', lineBreak: false });
-
-    pageFooter(doc, 5, reportId, verifyCode);
-
-    doc.end();
+  // Pages are kept until the end, so the footers can say "Page 2 of 6" and the
+  // table of contents can give the page each section landed on.
+  const doc = new PDFDocument({ margin: 50, size: 'A4', bufferPages: true });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${reportFileName(period, 'pdf')}"`);
+  doc.pipe(res);
+  try {
+    drawPdfReport(doc, period, data, seal);
   } catch (err) {
     console.error('PDF generation error:', err);
-    // If headers not sent yet, attempt to abort cleanly
-    try { doc.end(); } catch (_) {}
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to generate report' });
-    }
+  }
+  doc.end();
+}
+
+function drawPdfReport(doc, period, d, seal) {
+  const W = doc.page.width;
+  const H = doc.page.height;
+  const isAll = period.kind === 'all';
+  const word = period.word; // week, month or year (not set for all time)
+  const genTime = new Date();
+  const genDate = fmtDate(genTime);
+  const pageNo = () => doc.bufferedPageRange().count;
+  const sectionPage = {};
+  const trendTitle = isAll || period.kind === 'year' ? 'Monthly Trend Analysis' : 'Daily Trend Analysis';
+  const logTitle = isAll ? 'Recent Submissions Log' : 'Submissions Log';
+
+  // Report ID + verification code — printed on the cover and every page footer
+  // so a physical printout can be traced back to the exact data snapshot it was
+  // generated from (a stray page found later can still be matched to its report).
+  const reportId = `CIVIX-${genTime.toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  const verifyPayload = `${reportId}|${period.fileTag}|${d.total}|${d.resolved}|${d.pending}|${genTime.toISOString()}`;
+  const verifyHash = crypto.createHash('sha256').update(verifyPayload).digest('hex').toUpperCase();
+  const verifyCode = `${verifyHash.slice(0, 4)}-${verifyHash.slice(4, 8)}-${verifyHash.slice(8, 12)}`;
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PAGE 1 — COVER
+  // ══════════════════════════════════════════════════════════════════════
+  doc.rect(0, 0, W, 190).fill(BRAND_DARK);
+  doc.rect(0, 188, W, 6).fill(BRAND);
+  doc.rect(0, 194, W, 3).fill('#93c5fd');
+
+  // Header text (solid white — no rgba)
+  doc.fillColor('#c7d2fe').fontSize(9).font('Helvetica')
+    .text('REPUBLIC OF THE PHILIPPINES', 0, 40, { align: 'center', width: W, lineBreak: false });
+  doc.fillColor('#e0e7ff').fontSize(11).font('Helvetica-Bold')
+    .text('MUNICIPALITY OF CANTILAN, SURIGAO DEL SUR', 0, 56, { align: 'center', width: W, lineBreak: false });
+
+  // Title, paired with the municipal seal as one centered group (widths computed
+  // precisely via widthOfString so the seal can never collide with the text).
+  const titleText = `CIVIX ${period.title}`;
+  doc.font('Helvetica-Bold').fontSize(25);
+  const titleWidth = doc.widthOfString(titleText);
+  const SEAL_SIZE = 46;
+  const SEAL_GAP = 14;
+  const groupWidth = (seal ? SEAL_SIZE + SEAL_GAP : 0) + titleWidth;
+  const groupX = (W - groupWidth) / 2;
+  const titleY = 100;
+  if (seal) {
+    doc.image(seal.buffer, groupX, titleY + (25 - SEAL_SIZE) / 2 + 4, { fit: [SEAL_SIZE, SEAL_SIZE], align: 'center', valign: 'center' });
+  }
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(25)
+    .text(titleText, groupX + (seal ? SEAL_SIZE + SEAL_GAP : 0), titleY, { lineBreak: false });
+
+  doc.fillColor('#bfdbfe').fontSize(11).font('Helvetica')
+    .text('Integrated Citizen Engagement Platform', 0, 140, { align: 'center', width: W, lineBreak: false });
+  doc.fillColor('#93c5fd').fontSize(8.5).font('Helvetica')
+    .text(isAll ? `Generated: ${genDate}` : `Reporting period: ${period.range}   |   Generated: ${genDate}`, 0, 162, { align: 'center', width: W });
+
+  // Meta info box
+  const bx = 100; const by = 218; const bw = W - 200; const bh = 152;
+  doc.rect(bx, by, bw, bh).fill('#f0f9ff');
+  doc.rect(bx, by, bw, bh).lineWidth(0.6).stroke('#bfdbfe');
+  doc.rect(bx, by, 4, bh).fill(BRAND);
+  const meta = [
+    ['Report Date',       genDate],
+    ['Reporting Period',  period.rangeFull],
+    ['Prepared By',       'CIVIX System — Auto-Generated'],
+    ['Classification',    'For Internal Use Only'],
+    ['Report ID',         reportId],
+    ['Verification Code', verifyCode],
+  ];
+  let my = by + 12;
+  for (const [lbl, val] of meta) {
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor(TEXT_MID).text(lbl + ':', bx + 14, my);
+    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_DARK).text(val, bx + 140, my);
+    my += 22;
+  }
+
+  // Executive Summary
+  const summaryText = isAll
+    ? `This report presents a comprehensive statistical analysis of citizen engagement submissions ` +
+      `recorded through the CIVIX platform for the Municipality of Cantilan, Surigao del Sur. ` +
+      `A total of ${d.total.toLocaleString()} submission(s) have been recorded, comprising complaints, ` +
+      `suggestions, and service feedback from registered citizens. The current response rate for complaints ` +
+      `and suggestions stands at ${d.responseRate}%, with an average resolution time of ${d.avgDays} day(s). ` +
+      `Feedback rates the municipality's service as a whole and is not routed to an office. This document is intended ` +
+      `for review by municipal officials and designated department heads.`
+    : `This ${period.title.toLowerCase()} covers the citizen submissions filed through the CIVIX platform for the ` +
+      `Municipality of Cantilan, Surigao del Sur, for the period ${period.rangeFull.replace(/ \(.*\)$/, '')}. ` +
+      `${d.total.toLocaleString()} submission(s) were filed in this ${word}, compared with ` +
+      `${d.previousTotal.toLocaleString()} in the previous ${word}. ` +
+      (period.inProgress ? `The ${word} is still in progress, so the figures run up to the report date. ` : '') +
+      `For the complaints and suggestions filed in this ${word}, the response rate is ${d.responseRate}% and the average ` +
+      `resolution time is ${d.avgDays} day(s); statuses are as of ${genDate}. Feedback rates the municipality's service ` +
+      `as a whole and is not routed to an office. This document is intended for review by municipal officials and designated department heads.`;
+  doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Executive Summary', 50, 394);
+  doc.moveTo(50, 410).lineTo(W - 50, 410).lineWidth(0.5).stroke(DIVIDER);
+  doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID);
+  const summaryH = doc.heightOfString(summaryText, { width: W - 100, lineGap: 4 });
+  doc.text(summaryText, 50, 422, { width: W - 100, lineGap: 4, align: 'justify' });
+
+  // Table of Contents (page numbers are filled in at the end)
+  const tocTop = Math.max(532, 422 + summaryH + 16);
+  doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Table of Contents', 50, tocTop);
+  doc.moveTo(50, tocTop + 16).lineTo(W - 50, tocTop + 16).lineWidth(0.5).stroke(DIVIDER);
+  const toc = [
+    [1, 'Key Performance Indicators'],
+    [2, 'Submission Type Distribution'],
+    [3, 'Sentiment Analysis'],
+    [4, trendTitle],
+    [5, 'Submission Breakdown by Department'],
+    [6, logTitle],
+  ];
+  const tocRowY = {};
+  let ty = tocTop + 27;
+  for (const [num, title] of toc) {
+    doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID)
+      .text(`${num}.  ${title}`, 60, ty, { width: W - 160 });
+    doc.moveTo(60, ty + 12).lineTo(W - 100, ty + 12)
+      .lineWidth(0.3).dash(1, { space: 3 }).stroke(DIVIDER);
+    doc.undash();
+    tocRowY[num] = ty;
+    ty += 22;
+  }
+
+  // Cover footer (drawn inside the bottom margin band — see pageFooter() for why
+  // the margin must be zeroed here too, or PDFKit silently inserts a phantom page)
+  doc.rect(0, H - 46, W, 46).fill(BRAND_DARK);
+  {
+    const savedBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    doc.fontSize(7.5).font('Helvetica').fillColor('#93c5fd')
+      .text('CIVIX – Integrated Citizen Engagement Platform  |  Municipality of Cantilan, Surigao del Sur',
+        0, H - 26, { align: 'center', width: W, lineBreak: false });
+    doc.page.margins.bottom = savedBottom;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PAGE 2 — KPIs + Type Distribution + Sentiment
+  // ══════════════════════════════════════════════════════════════════════
+  doc.addPage();
+  let y = 50;
+  sectionPage[1] = sectionPage[2] = sectionPage[3] = pageNo();
+
+  // Section 1 — KPIs
+  y = sectionHead(doc, 1, 'Key Performance Indicators', y);
+  if (!isAll) {
+    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
+      .text(`Reports filed ${period.rangeFull}. Statuses as of ${genDate}.`, 50, y, { width: W - 100 });
+    y += 18;
+  }
+
+  const CARD_W = (W - 100 - 21) / 4;
+  const CARD_H = 60;
+  [
+    ['Total Submissions', d.total,      BRAND,     ],
+    ['Resolved',          d.resolved,   '#15803d'  ],
+    ['In Progress',       d.inProgress, '#b45309'  ],
+    ['Pending',           d.pending,    '#6B7280'  ],
+  ].forEach(([lbl, val, acc], i) => {
+    kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
+  });
+  y += CARD_H + 8;
+
+  [
+    ['Reviewing',        d.reviewing,            '#1d4ed8'],
+    ['Response Rate',    `${d.responseRate}%`,   '#7c3aed'],
+    ['Avg. Resolution',  `${d.avgDays} days`,    '#0369a1'],
+    ['Feedbacks',        d.feedbacks,            '#059669'],
+  ].forEach(([lbl, val, acc], i) => {
+    kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
+  });
+  y += CARD_H + 8;
+
+  // How urgent the complaints and suggestions were (chosen by the citizen, or changed
+  // by the office), and whether the urgent ones were resolved on time.
+  [
+    ['Urgent',           d.urgent,               '#b91c1c'],
+    ['Normal',           d.normal,               '#1d4ed8'],
+    ['Can Wait',         d.canWait,              '#475569'],
+    ['Urgent On Time',   d.urgentResolved ? `${d.urgentOnTime} of ${d.urgentResolved}` : '—', '#15803d'],
+  ].forEach(([lbl, val, acc], i) => {
+    kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
+  });
+  y += CARD_H + 6;
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+    .text('Urgency covers complaints and suggestions. "Urgent On Time": urgent reports resolved by their resolve-by date, out of all urgent reports resolved.',
+      50, y, { width: W - 100 });
+  y += 26;
+
+  // Section 2 — Type Distribution (pie)
+  y = sectionHead(doc, 2, 'Submission Type Distribution', y);
+  {
+    const pieCx = 50 + 68; const pieCy = y + 52; const pieR = 48;
+    const typeSlices = [
+      { label: 'Complaints',  value: d.complaints,  color: TYPE_COLORS.COMPLAINT.bar },
+      { label: 'Suggestions', value: d.suggestions, color: TYPE_COLORS.SUGGESTION.bar },
+      { label: 'Feedback',    value: d.feedbacks,   color: TYPE_COLORS.FEEDBACK.bar },
+    ];
+    drawPieChart(doc, pieCx, pieCy, pieR, typeSlices);
+    pieLegend(doc, 50 + 155, y + 8, typeSlices, d.total);
+  }
+  y += 122;
+
+  // Section 3 — Sentiment (pie)
+  y = sectionHead(doc, 3, 'Sentiment Analysis', y);
+  {
+    const pieCx = 50 + 68; const pieCy = y + 52; const pieR = 48;
+    const sentSlices = [
+      { label: 'Positive', value: d.positive, color: '#16A34A' },
+      { label: 'Neutral',  value: d.neutral,  color: '#6B7280' },
+      { label: 'Negative', value: d.negative, color: '#DC2626' },
+    ];
+    drawPieChart(doc, pieCx, pieCy, pieR, sentSlices);
+    pieLegend(doc, 50 + 155, y + 8, sentSlices, d.total);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PAGE 3 — Trend: each day of the week or month, each month of the year,
+  // or the last 12 months (all time)
+  // ══════════════════════════════════════════════════════════════════════
+  doc.addPage();
+  y = 50;
+  sectionPage[4] = pageNo();
+  y = sectionHead(doc, 4, trendTitle, y);
+  const trendCaption = {
+    all: 'Submission volume over the last twelve (12) months, broken down by type.',
+    week: 'Submissions filed on each day of the week, broken down by type.',
+    month: 'Submissions filed on each day of the month, broken down by type.',
+    year: 'Submissions filed in each month of the year, broken down by type.',
+  }[period.kind] + (period.inProgress ? ` ${period.kind === 'year' ? 'Months' : 'Days'} still to come are not shown.` : '');
+  doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID).text(trendCaption, 50, y, { width: W - 100 });
+  y += 20;
+
+  const LC_X = 50 + 34;
+  const LC_W = W - LC_X - 50;
+  const LC_H = 190;
+  drawLineChart(doc, d.trend, LC_X, y, LC_W, LC_H);
+  y += LC_H + 26;
+
+  const sum = key => d.trend.reduce((n, t) => n + t[key], 0);
+  const trendRows = [...d.trend, { long: 'Total', COMPLAINT: sum('COMPLAINT'), SUGGESTION: sum('SUGGESTION'), FEEDBACK: sum('FEEDBACK'), total: sum('total'), isTotal: true }];
+  const trendRowH = trendRows.length > 20 ? 13 : 14;
+  y = pdfTable(doc, y, [
+    { label: period.kind === 'week' || period.kind === 'month' ? 'DAY' : 'MONTH', x: 55, width: 200 },
+    { label: 'COMPLAINTS',  x: 270, width: 75, align: 'center' },
+    { label: 'SUGGESTIONS', x: 345, width: 80, align: 'center' },
+    { label: 'FEEDBACK',    x: 425, width: 65, align: 'center' },
+    { label: 'TOTAL',       x: 490, width: 50, align: 'center' },
+  ], trendRows, (m, ry) => {
+    const ty2 = ry + (trendRowH - 7) / 2;
+    doc.fontSize(7).font(m.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK)
+      .text(m.long,               55,  ty2, { width: 200, lineBreak: false })
+      .text(String(m.COMPLAINT),  270, ty2, { width: 75, align: 'center', lineBreak: false })
+      .text(String(m.SUGGESTION), 345, ty2, { width: 80, align: 'center', lineBreak: false })
+      .text(String(m.FEEDBACK),   425, ty2, { width: 65, align: 'center', lineBreak: false })
+      .text(String(m.total),      490, ty2, { width: 50, align: 'center', lineBreak: false });
+  }, { rowH: trendRowH });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PAGE 4 — Department Breakdown
+  // ══════════════════════════════════════════════════════════════════════
+  doc.addPage();
+  y = 50;
+  sectionPage[5] = pageNo();
+  y = sectionHead(doc, 5, 'Submission Breakdown by Department', y);
+  if (!isAll) {
+    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
+      .text(`Reports filed ${period.rangeFull}, by the office each one is assigned to.`, 50, y, { width: W - 100 });
+    y += 18;
+  }
+
+  // Legend
+  let lx = 62;
+  for (const [type, c] of Object.entries(TYPE_COLORS)) {
+    doc.rect(lx, y, 11, 11).fill(c.bar);
+    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
+      .text(type.charAt(0) + type.slice(1).toLowerCase(), lx + 15, y + 1);
+    lx += 90;
+  }
+  y += 20;
+
+  y = drawBarChart(doc, d.departments, y);
+  y += 10;
+
+  if (d.departments.length) {
+    y = pdfTable(doc, y, [
+      { label: 'DEPARTMENT',  x: 55,  width: 210 },
+      { label: 'COMPLAINTS',  x: 270, width: 70, align: 'center' },
+      { label: 'SUGGESTIONS', x: 340, width: 75, align: 'center' },
+      { label: 'FEEDBACK',    x: 415, width: 65, align: 'center' },
+      { label: 'TOTAL',       x: 485, width: 55, align: 'center' },
+    ], d.departments, (row, ry) => {
+      doc.fontSize(7).font('Helvetica').fillColor(TEXT_DARK);
+      doc.text(fitText(doc, row.dept, 205),      55,  ry + 4, { width: 210, lineBreak: false })
+        .text(String(row.COMPLAINT),  270, ry + 4, { width: 70, align: 'center', lineBreak: false })
+        .text(String(row.SUGGESTION), 340, ry + 4, { width: 75, align: 'center', lineBreak: false })
+        .text(String(row.FEEDBACK),   415, ry + 4, { width: 65, align: 'center', lineBreak: false })
+        .text(String(row.total),      485, ry + 4, { width: 55, align: 'center', lineBreak: false });
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PAGE 5 — Submissions Log (continues over more pages when needed)
+  // ══════════════════════════════════════════════════════════════════════
+  doc.addPage();
+  y = 50;
+  sectionPage[6] = pageNo();
+  y = sectionHead(doc, 6, logTitle, y);
+
+  const shown = d.log.slice(0, isAll ? PDF_LOG_LIMIT.all : PDF_LOG_LIMIT.period);
+  const intro = isAll
+    ? 'The table below presents the ten (10) most recently recorded submissions on the CIVIX platform.'
+    : d.total === 0 ? `No submissions were filed in this ${word}.`
+      : d.total > shown.length ? `The ${shown.length} most recent of the ${d.total.toLocaleString()} submissions filed in this ${word}, newest first. The Excel report lists all of them.`
+        : `All ${d.total} submission(s) filed in this ${word}, newest first.`;
+  doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID).text(intro, 50, y, { width: W - 100 });
+  y += 22;
+
+  if (shown.length) {
+    y = pdfTable(doc, y, [
+      { label: 'TRACKING ID', x: 55,  width: 110 },
+      { label: 'TYPE',        x: 168, width: 64, align: 'center' },
+      { label: 'OFFICE',      x: 238, width: 160 },
+      { label: 'STATUS',      x: 402, width: 80, align: 'center' },
+      { label: 'DATE FILED',  x: 488, width: 55 },
+    ], shown, (s, ry) => {
+      const tC = TYPE_COLORS[s.type]     || { light: '#f3f4f6', text: '#374151' };
+      const sC = STATUS_COLORS[s.status] || { light: '#f3f4f6', text: '#374151' };
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+        .text(s.trackingId, 55, ry + 6, { width: 110, lineBreak: false });
+      // Type badge
+      doc.rect(168, ry + 4, 64, 12).fill(tC.light);
+      doc.fontSize(7).font('Helvetica-Bold').fillColor(tC.text)
+        .text(s.type, 168, ry + 7, { width: 64, align: 'center', lineBreak: false });
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_DARK);
+      doc.text(fitText(doc, officeName(s), 156), 238, ry + 6, { width: 160, lineBreak: false });
+      // Status badge
+      doc.rect(402, ry + 4, 80, 12).fill(sC.light);
+      doc.fontSize(7).font('Helvetica-Bold').fillColor(sC.text)
+        .text(s.status.replace(/_/g, ' '), 402, ry + 7, { width: 80, align: 'center', lineBreak: false });
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+        .text(fmtShortDate(s.createdAt), 488, ry + 6, { width: 57, lineBreak: false });
+    }, { rowH: 20 });
+  }
+
+  // Certification block (on a new page when the log filled this one)
+  if (y + 24 + 130 > H - 70) { doc.addPage(); y = 50; } else { y += 24; }
+  doc.moveTo(50, y).lineTo(W - 50, y).lineWidth(0.5).stroke(DIVIDER);
+  y += 12;
+  doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK).text('CERTIFICATION', 50, y);
+  y += 14;
+  doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
+    .text(
+      'This report was automatically generated by the CIVIX Integrated Citizen Engagement Platform. ' +
+      'The data presented herein is accurate as of the date of generation. ' +
+      'This document is certified for official use by the Municipality of Cantilan.',
+      50, y, { width: W - 100, lineGap: 3, align: 'justify' }
+    );
+  y += 46;
+
+  // Signature lines
+  const sigW = 150;
+  doc.moveTo(50, y).lineTo(50 + sigW, y).lineWidth(0.5).stroke(TEXT_DARK);
+  doc.moveTo(W - 50 - sigW, y).lineTo(W - 50, y).lineWidth(0.5).stroke(TEXT_DARK);
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+    .text('System Administrator', 50, y + 5, { width: sigW, align: 'center', lineBreak: false });
+  doc.text('Authorized Municipal Official', W - 50 - sigW, y + 5, { width: sigW, align: 'center', lineBreak: false });
+
+  // Footers on every page after the cover, then the contents' page numbers.
+  const pageCount = pageNo();
+  for (let i = 1; i < pageCount; i++) {
+    doc.switchToPage(i);
+    pageFooter(doc, i + 1, pageCount, reportId, verifyCode);
+  }
+  doc.switchToPage(0);
+  for (const [num, rowY] of Object.entries(tocRowY)) {
+    doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK)
+      .text(String(sectionPage[num]), W - 90, rowY, { width: 30, align: 'right', lineBreak: false });
   }
 }
 
@@ -811,106 +1002,35 @@ function xlPrintSetup(sheet, titleRowsRange) {
   sheet.headerFooter.oddFooter = '&L&8CIVIX – Municipality of Cantilan, Surigao del Sur — Confidential&C&8&P of &N&R&8Generated &D';
 }
 
+const titleCase = s => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase().replace(/_/g, ' ') : '');
+
 async function generateExcel(req, res) {
+  const period = periodFrom(req, res);
+  if (!period) return;
   try {
+    const [d, settings] = await Promise.all([gatherReport(period), ensureSettings()]);
+    const isAll = period.kind === 'all';
+    const word = period.word;
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'CIVIX System';
     workbook.created = new Date();
-    workbook.title = 'CIVIX Analytics Report';
-
-    // ── Fetch all data (mirrors /api/analytics/* so numbers match the dashboard) ──
-    const [
-      total, pending, reviewing, inProgress, resolved,
-      positive, neutral, negative,
-      complaints, suggestions, feedbacks,
-      citizens,
-    ] = await Promise.all([
-      prisma.submission.count(),
-      prisma.submission.count({ where: { ...CASES, status: 'PENDING' } }),
-      prisma.submission.count({ where: { ...CASES, status: 'REVIEWING' } }),
-      prisma.submission.count({ where: { ...CASES, status: 'IN_PROGRESS' } }),
-      prisma.submission.count({ where: { ...CASES, status: 'RESOLVED' } }),
-      prisma.submission.count({ where: { sentiment: 'POSITIVE' } }),
-      prisma.submission.count({ where: { sentiment: 'NEUTRAL' } }),
-      prisma.submission.count({ where: { sentiment: 'NEGATIVE' } }),
-      prisma.submission.count({ where: { type: 'COMPLAINT' } }),
-      prisma.submission.count({ where: { type: 'SUGGESTION' } }),
-      prisma.submission.count({ where: { type: 'FEEDBACK' } }),
-      prisma.user.count({ where: { role: 'CITIZEN' } }),
-    ]);
-
-    const resolvedSubs = await prisma.submission.findMany({
-      where: { ...CASES, status: 'RESOLVED' },
-      select: { createdAt: true, updatedAt: true },
-    });
-    let avgDays = 0;
-    if (resolvedSubs.length) {
-      const ms = resolvedSubs.reduce((s, r) => s + (r.updatedAt - r.createdAt), 0);
-      avgDays = parseFloat((ms / resolvedSubs.length / 86400000).toFixed(1));
-    }
-    const caseTotal = complaints + suggestions;
-    const responseRate = caseTotal > 0 ? parseFloat(((caseTotal - pending) / caseTotal * 100).toFixed(1)) : 0;
-
-    const allSubs = await prisma.submission.findMany({
-      select: { createdAt: true, type: true, department: true, citizenDepartment: true },
-    });
-
-    // Monthly (last 12 months)
-    const months = {};
-    const now = new Date();
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      months[key] = { label: d.toLocaleString('en-US', { month: 'long', year: 'numeric' }), total: 0, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0 };
-    }
-    // Quarterly (all time)
-    const quarters = {};
-    // Department (assigned)
-    const deptMap = {};
-    // Department (citizen-selected at submission time)
-    const citizenDeptMap = {};
-
-    for (const s of allSubs) {
-      const mKey = `${s.createdAt.getFullYear()}-${String(s.createdAt.getMonth() + 1).padStart(2, '0')}`;
-      if (months[mKey]) { months[mKey].total++; months[mKey][s.type]++; }
-
-      const q = Math.ceil((s.createdAt.getMonth() + 1) / 3);
-      const qKey = `${s.createdAt.getFullYear()} Q${q}`;
-      if (!quarters[qKey]) quarters[qKey] = { label: qKey, year: s.createdAt.getFullYear(), q, COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
-      quarters[qKey][s.type]++; quarters[qKey].total++;
-
-      if (s.department && s.department !== 'UNASSIGNED') {
-        if (!deptMap[s.department]) deptMap[s.department] = { COMPLAINT: 0, SUGGESTION: 0, FEEDBACK: 0, total: 0 };
-        deptMap[s.department][s.type]++; deptMap[s.department].total++;
-      }
-      if (s.citizenDepartment) {
-        citizenDeptMap[s.citizenDepartment] = (citizenDeptMap[s.citizenDepartment] || 0) + 1;
-      }
-    }
-    const monthlyData = Object.values(months);
-    const quarterlyData = Object.values(quarters).sort((a, b) => a.year - b.year || a.q - b.q);
-    const deptData = Object.entries(deptMap).sort((a, b) => b[1].total - a[1].total).map(([dept, d]) => ({ dept, ...d }));
-    const citizenDeptData = Object.entries(citizenDeptMap).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([name, value]) => ({ name, value }));
-
-    const recentSubs = await prisma.submission.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-      include: { user: { select: { fullName: true } } },
-    });
-
+    workbook.title = `CIVIX ${period.title}`;
     const genDate = fmtDate(new Date());
+    const zebra = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } };
 
     // ══════════════════════════════════════════════════════════════════════
     // SHEET 1 — Summary
     // ══════════════════════════════════════════════════════════════════════
     const sSummary = workbook.addWorksheet('Summary', { views: [{ showGridLines: false }] });
     xlPrintSetup(sSummary, '1:2');
-    sSummary.columns = [{ width: 30 }, { width: 16 }, { width: 16 }, { width: 16 }];
-    let r = xlBanner(sSummary, 4, 'CIVIX — Analytics Report', `Municipality of Cantilan, Surigao del Sur   |   Generated ${genDate}`, { center: true });
+    sSummary.columns = [{ width: 32 }, { width: 16 }, { width: 16 }, { width: 16 }];
+    // (The municipality is named in every page footer; the period needs the room here.)
+    let r = xlBanner(sSummary, 4, `CIVIX — ${period.title}`,
+      `${isAll ? 'Municipality of Cantilan, Surigao del Sur' : period.rangeFull}   |   Generated ${genDate}`, { center: true });
 
     // Embed the official municipal seal in the top-left corner of the banner.
     try {
-      const seal = await loadSealImage((await ensureSettings()).sealUrl);
+      const seal = await loadSealImage(settings.sealUrl);
       if (seal) {
         const sealImageId = workbook.addImage({ buffer: seal.buffer, extension: seal.extension });
         sSummary.addImage(sealImageId, { tl: { col: 0.12, row: 0.08 }, ext: { width: 30, height: 30 } });
@@ -921,146 +1041,154 @@ async function generateExcel(req, res) {
 
     r = xlSectionLabel(sSummary, r, 4, 'Key Performance Indicators');
     r = xlHeaderRow(sSummary, r, ['Metric', 'Value', '', '']);
-    const kpiRows = [
-      ['Total Submissions', total],
-      ['Response Rate (%)', responseRate],
-      ['Avg. Resolution Time (days)', avgDays],
-      ['Registered Citizens', citizens],
+    // How urgent the complaints and suggestions were, and the urgent ones resolved on time.
+    const urgencyRows = [
+      ['Urgent Reports', d.urgent],
+      ['Normal Reports', d.normal],
+      ['Can-Wait Reports', d.canWait],
+      ['Urgent Reports Resolved On Time', d.urgentResolved ? `${d.urgentOnTime} of ${d.urgentResolved}` : 'None resolved yet'],
     ];
-    const kpiStart = r;
+    const kpiRows = isAll ? [
+      ['Total Submissions', d.total],
+      ['Response Rate (%)', d.responseRate],
+      ['Avg. Resolution Time (days)', d.avgDays],
+      ['Registered Citizens', d.citizens],
+      ...urgencyRows,
+    ] : [
+      ['Reporting Period', period.rangeFull],
+      ['Total Submissions', d.total],
+      [`Submissions in the Previous ${titleCase(word)}`, d.previousTotal],
+      ['Response Rate (%)', d.responseRate],
+      ['Avg. Resolution Time (days)', d.avgDays],
+      ['Registered Citizens (all time)', d.citizens],
+      ...urgencyRows,
+    ];
     kpiRows.forEach(([label, value]) => {
+      const text = typeof value === 'string';
+      if (text) sSummary.mergeCells(r, 2, r, 4); // the period's dates need the room
       sSummary.getCell(r, 1).value = label;
       sSummary.getCell(r, 1).border = xlBorderThin();
       sSummary.getCell(r, 2).value = value;
       sSummary.getCell(r, 2).font = { bold: true, color: { argb: XL_TEXT_DARK } };
-      sSummary.getCell(r, 2).alignment = { horizontal: 'center' };
+      sSummary.getCell(r, 2).alignment = { horizontal: text ? 'left' : 'center', indent: text ? 1 : 0 };
       sSummary.getCell(r, 2).border = xlBorderThin();
-      if (r % 2 === 0) { sSummary.getCell(r, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } }; sSummary.getCell(r, 2).fill = sSummary.getCell(r, 1).fill; }
+      if (r % 2 === 0) { sSummary.getCell(r, 1).fill = zebra; sSummary.getCell(r, 2).fill = zebra; }
       r++;
     });
     r += 1;
+
+    // Count, and its share of `whole`, for each row of a small table.
+    const shareRows = (rows, whole, metaOf) => {
+      const start = r;
+      rows.forEach(([key, val]) => {
+        const meta = metaOf(key);
+        const cell = sSummary.getCell(r, 1);
+        cell.value = meta.label || key;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.light } };
+        cell.font = { bold: true, color: { argb: meta.text } };
+        cell.border = xlBorderThin();
+        sSummary.getCell(r, 2).value = val;
+        sSummary.getCell(r, 2).alignment = { horizontal: 'center' };
+        sSummary.getCell(r, 2).border = xlBorderThin();
+        sSummary.getCell(r, 3).value = whole > 0 ? parseFloat(((val / whole) * 100).toFixed(1)) : 0;
+        sSummary.getCell(r, 3).numFmt = '0.0"%"';
+        sSummary.getCell(r, 3).alignment = { horizontal: 'center' };
+        sSummary.getCell(r, 3).border = xlBorderThin();
+        r++;
+      });
+      xlDataBar(sSummary, `B${start}:B${r - 1}`, XL_BRAND);
+      r += 1;
+    };
 
     r = xlSectionLabel(sSummary, r, 4, 'Submission Type Distribution');
     r = xlHeaderRow(sSummary, r, ['Type', 'Count', '% of Total', '']);
-    const typeBarStart = r;
-    [['COMPLAINT', complaints], ['SUGGESTION', suggestions], ['FEEDBACK', feedbacks]].forEach(([key, val]) => {
-      const meta = XL_TYPE[key];
-      const cell = sSummary.getCell(r, 1);
-      cell.value = meta.label;
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.light } };
-      cell.font = { bold: true, color: { argb: meta.text } };
-      cell.border = xlBorderThin();
-      sSummary.getCell(r, 2).value = val;
-      sSummary.getCell(r, 2).alignment = { horizontal: 'center' };
-      sSummary.getCell(r, 2).border = xlBorderThin();
-      sSummary.getCell(r, 3).value = total > 0 ? parseFloat(((val / total) * 100).toFixed(1)) : 0;
-      sSummary.getCell(r, 3).numFmt = '0.0"%"';
-      sSummary.getCell(r, 3).alignment = { horizontal: 'center' };
-      sSummary.getCell(r, 3).border = xlBorderThin();
-      r++;
-    });
-    xlDataBar(sSummary, `B${typeBarStart}:B${r - 1}`, XL_BRAND);
-    r += 1;
+    shareRows([['COMPLAINT', d.complaints], ['SUGGESTION', d.suggestions], ['FEEDBACK', d.feedbacks]], d.total, k => XL_TYPE[k]);
 
     r = xlSectionLabel(sSummary, r, 4, 'Sentiment Distribution');
     r = xlHeaderRow(sSummary, r, ['Sentiment', 'Count', '% of Total', '']);
-    const sentBarStart = r;
-    [['Positive', positive], ['Neutral', neutral], ['Negative', negative]].forEach(([name, val]) => {
-      const meta = XL_SENTIMENT[name];
-      const cell = sSummary.getCell(r, 1);
-      cell.value = name;
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.light } };
-      cell.font = { bold: true, color: { argb: meta.text } };
-      cell.border = xlBorderThin();
-      sSummary.getCell(r, 2).value = val;
-      sSummary.getCell(r, 2).alignment = { horizontal: 'center' };
-      sSummary.getCell(r, 2).border = xlBorderThin();
-      sSummary.getCell(r, 3).value = total > 0 ? parseFloat(((val / total) * 100).toFixed(1)) : 0;
-      sSummary.getCell(r, 3).numFmt = '0.0"%"';
-      sSummary.getCell(r, 3).alignment = { horizontal: 'center' };
-      sSummary.getCell(r, 3).border = xlBorderThin();
-      r++;
-    });
-    xlDataBar(sSummary, `B${sentBarStart}:B${r - 1}`, XL_BRAND);
-    r += 1;
+    shareRows([['Positive', d.positive], ['Neutral', d.neutral], ['Negative', d.negative]], d.total, k => XL_SENTIMENT[k]);
 
-    r = xlSectionLabel(sSummary, r, 4, 'Status Breakdown');
-    r = xlHeaderRow(sSummary, r, ['Status', 'Count', '% of Total', '']);
-    const statBarStart = r;
-    [['PENDING', pending], ['REVIEWING', reviewing], ['IN_PROGRESS', inProgress], ['RESOLVED', resolved]].forEach(([key, val]) => {
-      const meta = XL_STATUS[key];
-      const cell = sSummary.getCell(r, 1);
-      cell.value = meta.label;
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.light } };
-      cell.font = { bold: true, color: { argb: meta.text } };
-      cell.border = xlBorderThin();
-      sSummary.getCell(r, 2).value = val;
-      sSummary.getCell(r, 2).alignment = { horizontal: 'center' };
-      sSummary.getCell(r, 2).border = xlBorderThin();
-      sSummary.getCell(r, 3).value = total > 0 ? parseFloat(((val / total) * 100).toFixed(1)) : 0;
-      sSummary.getCell(r, 3).numFmt = '0.0"%"';
-      sSummary.getCell(r, 3).alignment = { horizontal: 'center' };
-      sSummary.getCell(r, 3).border = xlBorderThin();
-      r++;
-    });
-    xlDataBar(sSummary, `B${statBarStart}:B${r - 1}`, XL_BRAND);
+    // Statuses apply to complaints and suggestions only (feedback has no workflow).
+    r = xlSectionLabel(sSummary, r, 4, 'Status Breakdown (complaints and suggestions)');
+    r = xlHeaderRow(sSummary, r, ['Status', 'Count', '% of Cases', '']);
+    shareRows([['PENDING', d.pending], ['REVIEWING', d.reviewing], ['IN_PROGRESS', d.inProgress], ['RESOLVED', d.resolved]],
+      d.complaints + d.suggestions, k => XL_STATUS[k]);
 
     // ══════════════════════════════════════════════════════════════════════
-    // SHEET 2 — Monthly Trend
+    // SHEET 2 — Trend: each day of the week or month, each month of the year,
+    // or the last 12 months (all time)
     // ══════════════════════════════════════════════════════════════════════
-    const sMonthly = workbook.addWorksheet('Monthly Trend', { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
-    xlPrintSetup(sMonthly, '1:4');
-    sMonthly.columns = [{ width: 22 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }];
-    let rm = xlBanner(sMonthly, 5, 'CIVIX — Monthly Trend', `Submissions over the last 12 months   |   Generated ${genDate}`);
-    rm = xlHeaderRow(sMonthly, rm, ['Month', 'Total', 'Complaints', 'Suggestions', 'Feedback']);
-    const monthlyStart = rm;
-    monthlyData.forEach((m, i) => {
-      sMonthly.getCell(rm, 1).value = m.label;
-      sMonthly.getCell(rm, 2).value = m.total;
-      sMonthly.getCell(rm, 3).value = m.COMPLAINT;
-      sMonthly.getCell(rm, 4).value = m.SUGGESTION;
-      sMonthly.getCell(rm, 5).value = m.FEEDBACK;
+    const byDay = period.kind === 'week' || period.kind === 'month';
+    const trendName = isAll ? 'Monthly Trend' : byDay ? 'Daily Breakdown' : 'Monthly Breakdown';
+    const sTrend = workbook.addWorksheet(trendName, { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
+    xlPrintSetup(sTrend, '1:4');
+    sTrend.columns = [{ width: byDay ? 30 : 22 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }];
+    let rm = xlBanner(sTrend, 5, `CIVIX — ${trendName}`,
+      isAll ? `Submissions over the last 12 months   |   Generated ${genDate}` : `${period.rangeFull}   |   Generated ${genDate}`);
+    rm = xlHeaderRow(sTrend, rm, [byDay ? 'Day' : 'Month', 'Total', 'Complaints', 'Suggestions', 'Feedback']);
+    const trendStart = rm;
+    d.trend.forEach((m, i) => {
+      sTrend.getCell(rm, 1).value = m.long;
+      sTrend.getCell(rm, 2).value = m.total;
+      sTrend.getCell(rm, 3).value = m.COMPLAINT;
+      sTrend.getCell(rm, 4).value = m.SUGGESTION;
+      sTrend.getCell(rm, 5).value = m.FEEDBACK;
       for (let c = 1; c <= 5; c++) {
-        const cell = sMonthly.getCell(rm, c);
+        const cell = sTrend.getCell(rm, c);
         cell.border = xlBorderThin();
         if (c > 1) cell.alignment = { horizontal: 'center' };
-        if (i % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } };
+        if (i % 2 === 0) cell.fill = zebra;
       }
       rm++;
     });
-    xlDataBar(sMonthly, `B${monthlyStart}:B${rm - 1}`, XL_BRAND);
-    xlDataBar(sMonthly, `C${monthlyStart}:C${rm - 1}`, XL_TYPE.COMPLAINT.bar);
-    xlDataBar(sMonthly, `D${monthlyStart}:D${rm - 1}`, XL_TYPE.SUGGESTION.bar);
-    xlDataBar(sMonthly, `E${monthlyStart}:E${rm - 1}`, XL_TYPE.FEEDBACK.bar);
+    // Totals as formulas, so they follow any edits.
+    sTrend.getCell(rm, 1).value = 'Total';
+    ['B', 'C', 'D', 'E'].forEach((col, i) => {
+      const key = ['total', 'COMPLAINT', 'SUGGESTION', 'FEEDBACK'][i];
+      sTrend.getCell(`${col}${rm}`).value = { formula: `SUM(${col}${trendStart}:${col}${rm - 1})`, result: d.trend.reduce((n, t) => n + t[key], 0) };
+    });
+    for (let c = 1; c <= 5; c++) {
+      const cell = sTrend.getCell(rm, c);
+      cell.font = { bold: true, color: { argb: XL_TEXT_DARK } };
+      cell.border = { ...xlBorderThin(), top: { style: 'medium', color: { argb: XL_BRAND } } };
+      if (c > 1) cell.alignment = { horizontal: 'center' };
+    }
+    xlDataBar(sTrend, `B${trendStart}:B${rm - 1}`, XL_BRAND);
+    xlDataBar(sTrend, `C${trendStart}:C${rm - 1}`, XL_TYPE.COMPLAINT.bar);
+    xlDataBar(sTrend, `D${trendStart}:D${rm - 1}`, XL_TYPE.SUGGESTION.bar);
+    xlDataBar(sTrend, `E${trendStart}:E${rm - 1}`, XL_TYPE.FEEDBACK.bar);
 
     // ══════════════════════════════════════════════════════════════════════
-    // SHEET 3 — Quarterly
+    // SHEET 3 — Quarterly (all time, or the four quarters of the year)
     // ══════════════════════════════════════════════════════════════════════
-    const sQuarter = workbook.addWorksheet('Quarterly', { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
-    xlPrintSetup(sQuarter, '1:4');
-    sQuarter.columns = [{ width: 16 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }];
-    let rq = xlBanner(sQuarter, 5, 'CIVIX — Submissions by Quarter', `All recorded quarters   |   Generated ${genDate}`);
-    rq = xlHeaderRow(sQuarter, rq, ['Quarter', 'Total', 'Complaints', 'Suggestions', 'Feedback']);
-    const quarterStart = rq;
-    quarterlyData.forEach((q, i) => {
-      sQuarter.getCell(rq, 1).value = q.label;
-      sQuarter.getCell(rq, 2).value = q.total;
-      sQuarter.getCell(rq, 3).value = q.COMPLAINT;
-      sQuarter.getCell(rq, 4).value = q.SUGGESTION;
-      sQuarter.getCell(rq, 5).value = q.FEEDBACK;
-      for (let c = 1; c <= 5; c++) {
-        const cell = sQuarter.getCell(rq, c);
-        cell.border = xlBorderThin();
-        if (c > 1) cell.alignment = { horizontal: 'center' };
-        if (i % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } };
+    if (isAll || period.kind === 'year') {
+      const sQuarter = workbook.addWorksheet('Quarterly', { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
+      xlPrintSetup(sQuarter, '1:4');
+      sQuarter.columns = [{ width: isAll ? 16 : 24 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }];
+      let rq = xlBanner(sQuarter, 5, 'CIVIX — Submissions by Quarter',
+        `${isAll ? 'All recorded quarters' : `The four quarters of ${period.range}`}   |   Generated ${genDate}`);
+      rq = xlHeaderRow(sQuarter, rq, ['Quarter', 'Total', 'Complaints', 'Suggestions', 'Feedback']);
+      const quarterStart = rq;
+      d.quarters.forEach((q, i) => {
+        sQuarter.getCell(rq, 1).value = q.label;
+        sQuarter.getCell(rq, 2).value = q.total;
+        sQuarter.getCell(rq, 3).value = q.COMPLAINT;
+        sQuarter.getCell(rq, 4).value = q.SUGGESTION;
+        sQuarter.getCell(rq, 5).value = q.FEEDBACK;
+        for (let c = 1; c <= 5; c++) {
+          const cell = sQuarter.getCell(rq, c);
+          cell.border = xlBorderThin();
+          if (c > 1) cell.alignment = { horizontal: 'center' };
+          if (i % 2 === 0) cell.fill = zebra;
+        }
+        rq++;
+      });
+      if (d.quarters.length) {
+        xlDataBar(sQuarter, `B${quarterStart}:B${rq - 1}`, XL_BRAND);
+        xlDataBar(sQuarter, `C${quarterStart}:C${rq - 1}`, XL_TYPE.COMPLAINT.bar);
+        xlDataBar(sQuarter, `D${quarterStart}:D${rq - 1}`, XL_TYPE.SUGGESTION.bar);
+        xlDataBar(sQuarter, `E${quarterStart}:E${rq - 1}`, XL_TYPE.FEEDBACK.bar);
       }
-      rq++;
-    });
-    if (quarterlyData.length) {
-      xlDataBar(sQuarter, `B${quarterStart}:B${rq - 1}`, XL_BRAND);
-      xlDataBar(sQuarter, `C${quarterStart}:C${rq - 1}`, XL_TYPE.COMPLAINT.bar);
-      xlDataBar(sQuarter, `D${quarterStart}:D${rq - 1}`, XL_TYPE.SUGGESTION.bar);
-      xlDataBar(sQuarter, `E${quarterStart}:E${rq - 1}`, XL_TYPE.FEEDBACK.bar);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1069,62 +1197,70 @@ async function generateExcel(req, res) {
     const sDept = workbook.addWorksheet('By Department', { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
     xlPrintSetup(sDept, '1:4');
     sDept.columns = [{ width: 38 }, { width: 13 }, { width: 13 }, { width: 12 }, { width: 10 }];
-    let rd = xlBanner(sDept, 5, 'CIVIX — By Department', `Workload distribution across departments   |   Generated ${genDate}`);
+    let rd = xlBanner(sDept, 5, 'CIVIX — By Department',
+      `${isAll ? 'Workload distribution across departments' : `${period.rangeFull}, by assigned office`}   |   Generated ${genDate}`);
     rd = xlHeaderRow(sDept, rd, ['Department', 'Complaints', 'Suggestions', 'Feedback', 'Total']);
     const deptStart = rd;
-    deptData.forEach((d, i) => {
-      sDept.getCell(rd, 1).value = d.dept;
-      sDept.getCell(rd, 2).value = d.COMPLAINT;
-      sDept.getCell(rd, 3).value = d.SUGGESTION;
-      sDept.getCell(rd, 4).value = d.FEEDBACK;
-      sDept.getCell(rd, 5).value = d.total;
+    d.departments.forEach((row, i) => {
+      sDept.getCell(rd, 1).value = row.dept;
+      sDept.getCell(rd, 2).value = row.COMPLAINT;
+      sDept.getCell(rd, 3).value = row.SUGGESTION;
+      sDept.getCell(rd, 4).value = row.FEEDBACK;
+      sDept.getCell(rd, 5).value = row.total;
       for (let c = 1; c <= 5; c++) {
         const cell = sDept.getCell(rd, c);
         cell.border = xlBorderThin();
         if (c > 1) cell.alignment = { horizontal: 'center' };
-        if (i % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } };
+        if (i % 2 === 0) cell.fill = zebra;
       }
       sDept.getCell(rd, 5).font = { bold: true };
       rd++;
     });
-    if (deptData.length) xlDataBar(sDept, `E${deptStart}:E${rd - 1}`, XL_BRAND);
+    if (d.departments.length) xlDataBar(sDept, `E${deptStart}:E${rd - 1}`, XL_BRAND);
 
     rd += 2;
     rd = xlSectionLabel(sDept, rd, 5, 'Top Departments Cited by Citizens at Submission Time');
     rd = xlHeaderRow(sDept, rd, ['Department (as selected by citizen)', 'Times Selected', '', '', '']);
     const citedStart = rd;
-    citizenDeptData.forEach((c, i) => {
+    d.citedDepartments.forEach((c, i) => {
       sDept.getCell(rd, 1).value = c.name;
       sDept.getCell(rd, 2).value = c.value;
       sDept.getCell(rd, 1).border = xlBorderThin();
       sDept.getCell(rd, 2).border = xlBorderThin();
       sDept.getCell(rd, 2).alignment = { horizontal: 'center' };
-      if (i % 2 === 0) { sDept.getCell(rd, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } }; sDept.getCell(rd, 2).fill = sDept.getCell(rd, 1).fill; }
+      if (i % 2 === 0) { sDept.getCell(rd, 1).fill = zebra; sDept.getCell(rd, 2).fill = zebra; }
       rd++;
     });
-    if (citizenDeptData.length) xlDataBar(sDept, `B${citedStart}:B${rd - 1}`, 'FF7C3AED');
+    if (d.citedDepartments.length) xlDataBar(sDept, `B${citedStart}:B${rd - 1}`, 'FF7C3AED');
 
     // ══════════════════════════════════════════════════════════════════════
-    // SHEET 5 — Recent Submissions
+    // SHEET 5 — Submissions: every one filed in the period (all time: the most
+    // recent 100). Filters on the header row.
     // ══════════════════════════════════════════════════════════════════════
-    const sLog = workbook.addWorksheet('Recent Submissions', { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
+    const logName = isAll ? 'Recent Submissions' : 'Submissions';
+    const sLog = workbook.addWorksheet(logName, { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
     xlPrintSetup(sLog, '1:4');
     sLog.columns = [
-      { width: 20 }, { width: 24 }, { width: 14 }, { width: 14 }, { width: 10 }, { width: 12 }, { width: 16 },
+      { width: 20 }, { width: 13 }, { width: 40 }, { width: 14 }, { width: 11 }, { width: 12 }, { width: 22 },
     ];
-    let rl = xlBanner(sLog, 7, 'CIVIX — Recent Submissions Log', `Most recent ${recentSubs.length} submission(s)   |   Generated ${genDate}`);
-    rl = xlHeaderRow(sLog, rl, ['Tracking ID', 'Citizen', 'Type', 'Status', 'Priority', 'Sentiment', 'Date Filed']);
-    recentSubs.forEach((s, i) => {
+    const logNote = isAll ? `Most recent ${d.log.length} submission(s)`
+      : d.log.length < d.total ? `The ${d.log.length} most recent of ${d.total} submissions filed ${period.rangeFull}`
+        : `All ${d.total} submission(s) filed ${period.rangeFull}`;
+    let rl = xlBanner(sLog, 7, `CIVIX — ${isAll ? 'Recent Submissions Log' : 'Submissions Log'}`, `${logNote}   |   Generated ${genDate}`);
+    const logHeader = rl;
+    rl = xlHeaderRow(sLog, rl, ['Tracking ID', 'Type', 'Office', 'Status', 'Urgency', 'Sentiment', 'Date Filed']);
+    if (d.log.length) sLog.autoFilter = { from: { row: logHeader, column: 1 }, to: { row: logHeader, column: 7 } };
+    d.log.forEach((s, i) => {
       sLog.getCell(rl, 1).value = s.trackingId;
-      sLog.getCell(rl, 2).value = s.user?.fullName || 'Anonymous';
-      sLog.getCell(rl, 2).font = s.user?.fullName ? {} : { italic: true, color: { argb: 'FF94A3B8' } };
 
       const tMeta = XL_TYPE[s.type] || { light: 'FFF3F4F6', text: 'FF374151', label: s.type };
-      const tCell = sLog.getCell(rl, 3);
+      const tCell = sLog.getCell(rl, 2);
       tCell.value = tMeta.label || s.type;
       tCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tMeta.light } };
       tCell.font = { color: { argb: tMeta.text }, bold: true };
       tCell.alignment = { horizontal: 'center' };
+
+      sLog.getCell(rl, 3).value = officeName(s);
 
       const stMeta = XL_STATUS[s.status] || { light: 'FFF3F4F6', text: 'FF374151', label: s.status };
       const stCell = sLog.getCell(rl, 4);
@@ -1133,24 +1269,32 @@ async function generateExcel(req, res) {
       stCell.font = { color: { argb: stMeta.text }, bold: true };
       stCell.alignment = { horizontal: 'center' };
 
-      sLog.getCell(rl, 5).value = s.priority;
+      // Feedback has no urgency (no office acts on it).
+      sLog.getCell(rl, 5).value = s.type === 'FEEDBACK' ? '—' : (PRIORITY_LABELS[s.priority] || titleCase(s.priority));
       sLog.getCell(rl, 5).alignment = { horizontal: 'center' };
-      sLog.getCell(rl, 6).value = s.sentiment;
+      sLog.getCell(rl, 6).value = titleCase(s.sentiment);
       sLog.getCell(rl, 6).alignment = { horizontal: 'center' };
-      sLog.getCell(rl, 7).value = new Date(s.createdAt).toLocaleDateString('en-PH');
+      // A real date (sortable, filterable), at Philippine time. Excel dates carry
+      // no time zone, so the cell holds the Manila clock reading.
+      const filed = sLog.getCell(rl, 7);
+      filed.value = new Date(new Date(s.createdAt).getTime() + 8 * 60 * 60 * 1000);
+      filed.numFmt = 'mmm d, yyyy h:mm AM/PM';
+      filed.alignment = { horizontal: 'left' };
 
       for (let c = 1; c <= 7; c++) sLog.getCell(rl, c).border = xlBorderThin();
-      if (i % 2 === 0) {
-        for (const c of [1, 2, 5, 6, 7]) {
-          if (!sLog.getCell(rl, c).fill) sLog.getCell(rl, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_ROW_ALT } };
-        }
-      }
+      if (i % 2 === 0) for (const c of [1, 3, 5, 6, 7]) sLog.getCell(rl, c).fill = zebra;
       rl++;
     });
+    if (!d.log.length) {
+      sLog.mergeCells(rl, 1, rl, 7);
+      sLog.getCell(rl, 1).value = `No submissions were filed in this ${word}.`;
+      sLog.getCell(rl, 1).font = { italic: true, color: { argb: XL_TEXT_MID } };
+      sLog.getCell(rl, 1).alignment = { horizontal: 'center' };
+    }
 
     // ── Stream the workbook ──────────────────────────────────────────────────
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="civix-analytics-report.xlsx"');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportFileName(period, 'xlsx')}"`);
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -1161,4 +1305,4 @@ async function generateExcel(req, res) {
   }
 }
 
-module.exports = { generatePDF, generateExcel };
+module.exports = { generatePDF, generateExcel, getReportPeriods };

@@ -1,7 +1,10 @@
 import React from 'react';
-import { getReactionMeta } from '../citizen/FeedbackRatingPanel';
+import { getReactionMeta, PANEL_TEXT } from '../citizen/FeedbackRatingPanel';
+import { useText } from '../../i18n/LanguageContext';
 
-export default function FeedbackRatingDisplay({ rating, reaction, feedbackTags, compact = false }) {
+// `citizen`: the Track page, in the citizen's language. Staff and admin pages stay in English.
+export default function FeedbackRatingDisplay({ rating, reaction, feedbackTags, compact = false, citizen = false }) {
+  const words = useText(PANEL_TEXT);
   if (!rating && !reaction) return null;
 
   const meta = getReactionMeta(reaction);
@@ -27,12 +30,12 @@ export default function FeedbackRatingDisplay({ rating, reaction, feedbackTags, 
 
   return (
     <div className="rounded-xl border border-green-100 dark:border-green-900/60 bg-gradient-to-r from-green-50/80 to-white dark:from-green-950/50 dark:to-slate-800 p-4">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Citizen feedback rating</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">{citizen ? words.yourRating : 'Citizen feedback rating'}</p>
       <div className="flex flex-wrap items-center gap-4">
         {meta && (
           <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${meta.bg}`}>
             <span className="text-2xl">{meta.emoji}</span>
-            <span className={`text-sm font-semibold ${meta.text}`}>{meta.label}</span>
+            <span className={`text-sm font-semibold ${meta.text}`}>{citizen ? words.reactions[meta.id] : meta.label}</span>
           </div>
         )}
         {rating && (
@@ -50,7 +53,7 @@ export default function FeedbackRatingDisplay({ rating, reaction, feedbackTags, 
         <div className="flex flex-wrap gap-1.5 mt-3">
           {tags.map(tag => (
             <span key={tag} className="text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-full">
-              {tag}
+              {citizen ? words.tags[tag] || tag : tag}
             </span>
           ))}
         </div>

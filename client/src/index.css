@@ -141,6 +141,11 @@ body {
   }
 }
 
+/* The language list that drops down under the header's language button */
+@keyframes lang-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.lang-menu { animation: lang-menu-in .14s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .lang-menu { animation: none; } }
+
 /* ═══════════════════════════════════════════════
    DARK MODE OVERRIDES
 ═══════════════════════════════════════════════ */
@@ -183,12 +188,15 @@ body {
 .dark .text-slate-600     { color: #cbd5e1 !important; }
 .dark .text-blue-600      { color: #60a5fa !important; }
 .dark .text-blue-700      { color: #93c5fd !important; }
+.dark .text-blue-800      { color: #bfdbfe !important; }
+.dark .text-primary       { color: #60a5fa !important; }
 .dark .text-indigo-700    { color: #a5b4fc !important; }
 .dark .text-amber-600     { color: #fbbf24 !important; }
 .dark .text-green-600     { color: #4ade80 !important; }
 .dark .text-green-700     { color: #4ade80 !important; }
 .dark .text-red-600       { color: #f87171 !important; }
 .dark .text-red-700       { color: #fca5a5 !important; }
+.dark .text-red-800       { color: #fecaca !important; }
 
 /* ── Borders ── */
 .dark .border-gray-100    { border-color: #1e293b !important; }

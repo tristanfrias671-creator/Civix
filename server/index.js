@@ -110,3 +110,6 @@ app.listen(PORT, () => console.log(`CIVIX server running on port ${PORT}`));
 require('./src/utils/deadline').backfillDeadlines()
   .then(n => { if (n) console.log(`[deadlines] Added deadlines to ${n} existing report(s).`); })
   .catch(err => console.error('[deadlines] Backfill failed:', err.message));
+
+// Sign-in history is kept for a year.
+require('./src/utils/signInLog').pruneSignInHistory();

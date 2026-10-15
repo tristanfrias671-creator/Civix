@@ -4,6 +4,8 @@ import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../compone
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
+import { OutcomeBadge, NewDeviceTag, METHOD, PAGE, whenText } from '../../components/common/SignInHistory';
+import { PriorityBadge } from '../../components/common/StatusBadge';
 
 function RoleBadge({ role }) {
   const styles = {
@@ -23,6 +25,200 @@ function timeAgo(dateStr) {
   if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+const TYPE_LABEL = { COMPLAINT: 'Complaint', SUGGESTION: 'Suggestion', FEEDBACK: 'Feedback' };
+
+// Reports an administrator deleted (only ones marked as spam or invalid can be).
+// The citizen's details are not kept, only who marked it, why, and who deleted it.
+function DeletedReports() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    api.get('/submissions/deleted').then(r => setRows(r.data)).catch(() => setRows([]));
+  }, []);
+  const when = d => new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+  return (
+    <section className="mt-6 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700" aria-labelledby="deleted-reports-title">
+      <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
+        <h2 id="deleted-reports-title" className="text-base font-bold text-gray-800 dark:text-slate-100">Deleted reports</h2>
+        <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
+          Reports an administrator deleted for good. Only reports marked as spam or invalid can be deleted.
+        </p>
+      </div>
+      {rows === null ? (
+        <p className="px-5 py-6 text-sm text-gray-500 dark:text-slate-400">Loading...</p>
+      ) : rows.length === 0 ? (
+        <p className="px-5 py-6 text-sm text-gray-500 dark:text-slate-400">No reports have been deleted.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-slate-900/40 text-left">
+                {['Deleted', 'Reference', 'Type', 'Office', 'Marked as spam by', 'Reason', 'Deleted by'].map(h => (
+                  <th key={h} className="px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td className="px-4 py-3 text-xs text-gray-600 dark:text-slate-300 whitespace-nowrap">{when(r.createdAt)}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{r.trackingId}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200">{TYPE_LABEL[r.type] || r.type}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200">{r.department === 'General' ? 'None (general feedback)' : r.department}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200">{r.markedByName || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600 dark:text-slate-300 italic max-w-xs">{r.markedReason ? `“${r.markedReason}”` : '—'}</td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{r.deletedByName}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// Every change the offices' staff made to how urgent a report is (the citizen chose it
+// for a complaint), with the reason the citizen was given and the finish-by dates.
+function UrgencyChanges() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    api.get('/submissions/urgency-changes').then(r => setRows(r.data)).catch(() => setRows([]));
+  }, []);
+  const day = d => new Date(d).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric' });
+
+  return (
+    <section className="mt-6 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700" aria-labelledby="urgency-changes-title">
+      <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700">
+        <h2 id="urgency-changes-title" className="text-base font-bold text-gray-800 dark:text-slate-100">Urgency changes</h2>
+        <p className="text-sm text-gray-600 dark:text-slate-300 mt-0.5">
+          When an office's staff changed how urgent a report is. The citizen sees the new urgency, the new finish-by date and the reason.
+        </p>
+      </div>
+      {rows === null ? (
+        <p className="px-5 py-6 text-sm text-gray-600 dark:text-slate-300">Loading...</p>
+      ) : rows.length === 0 ? (
+        <p className="px-5 py-6 text-sm text-gray-600 dark:text-slate-300">No urgency changes yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-slate-900/40 text-left">
+                {['When', 'Reference', 'Changed by', 'From', 'To', 'Finish by', 'Reason'].map(h => (
+                  <th key={h} className="px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-slate-300 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{whenText(r.createdAt)}</td>
+                  <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
+                    <Link to={`/admin/submissions/${r.submissionId}`} className="text-blue-700 dark:text-blue-300 hover:underline">{r.trackingId}</Link>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{r.changedByName}</td>
+                  <td className="px-4 py-3 whitespace-nowrap"><PriorityBadge priority={r.fromPriority} /></td>
+                  <td className="px-4 py-3 whitespace-nowrap"><PriorityBadge priority={r.toPriority} /></td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">
+                    {r.toDueAt ? day(r.toDueAt) : '—'}
+                    {r.fromDueAt && r.toDueAt && day(r.fromDueAt) !== day(r.toDueAt) && (
+                      <span className="block text-gray-600 dark:text-slate-300">was {day(r.fromDueAt)}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 italic min-w-[14rem]">“{r.reason}”</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// Every sign-in and failed attempt on the staff and admin pages, and every password
+// change (server/src/utils/signInLog.js). Kept for a year; the newest 300 are shown.
+function SignInHistory() {
+  const [view, setView] = useState('all'); // all | problems
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let outdated = false;
+    setRows(null);
+    api.get(`/auth/sign-ins${view === 'problems' ? '?view=problems' : ''}`)
+      .then(r => { if (!outdated) setRows(r.data); })
+      .catch(() => { if (!outdated) setRows([]); });
+    return () => { outdated = true; };
+  }, [view]);
+
+  return (
+    <section className="mt-6 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700" aria-labelledby="sign-in-history-title">
+      <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-700 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="sign-in-history-title" className="text-base font-bold text-gray-800 dark:text-slate-100">Sign-in history</h2>
+          <p className="text-sm text-gray-600 dark:text-slate-300 mt-0.5">
+            Every sign-in and failed attempt on the staff and admin pages, and every password change. Kept for one year.
+          </p>
+        </div>
+        <div className="flex gap-1.5 flex-shrink-0" role="group" aria-label="Show">
+          {[['all', 'All'], ['problems', 'Failed attempts only']].map(([key, label]) => (
+            <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === key ? 'text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              style={view === key ? { background: '#2563eb' } : undefined}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {rows === null ? (
+        <p className="px-5 py-6 text-sm text-gray-600 dark:text-slate-300">Loading...</p>
+      ) : rows.length === 0 ? (
+        <p className="px-5 py-6 text-sm text-gray-600 dark:text-slate-300">
+          {view === 'problems' ? 'No failed sign-in attempts.' : 'No sign-ins recorded yet.'}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-slate-900/40 text-left">
+                {['When', 'Account', 'Result', 'How', 'Device', 'Network (IP)'].map(h => (
+                  <th key={h} className="px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-slate-300 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{whenText(r.createdAt)}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <p className="flex items-center gap-1.5 font-semibold text-gray-800 dark:text-slate-100 whitespace-nowrap">
+                      {r.name || 'No account'}
+                      {r.role && <RoleBadge role={r.role} />}
+                    </p>
+                    <p className="text-gray-600 dark:text-slate-300 break-all">{r.email}</p>
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <OutcomeBadge outcome={r.outcome} />
+                      {r.newDevice && <NewDeviceTag />}
+                    </span>
+                    {r.detail && <p className="text-gray-600 dark:text-slate-300 mt-1">{r.detail}</p>}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">
+                    {METHOD[r.method] || r.method}
+                    {r.portal && <span className="block text-gray-600 dark:text-slate-300">{PAGE[r.portal]}</span>}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{r.device || '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 dark:text-slate-200 whitespace-nowrap">{r.network || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export default function AuditLog() {
@@ -67,9 +263,9 @@ export default function AuditLog() {
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-100">Department Change Audit Log</h1>
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-100">Audit Log</h1>
         <p className="text-gray-500 dark:text-slate-400 text-sm mt-0.5">
-          Full history of all manual department reassignments by admins and staff.
+          Every office move made by staff and administrators, every urgency change, every sign-in, and every report that was deleted.
         </p>
       </div>
 
@@ -203,6 +399,10 @@ export default function AuditLog() {
           </div>
         )}
       </div>
+
+      <UrgencyChanges />
+      <SignInHistory />
+      <DeletedReports />
     </div>
   );
 }

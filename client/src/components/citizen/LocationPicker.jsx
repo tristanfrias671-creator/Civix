@@ -3,15 +3,98 @@ import {
   CANTILAN_CENTER, MAP_STYLE_LABELS, YOU_ARE_HERE_HTML, addCantilanFocus, barangayAt, cantilanBounds,
   createBaseLayers, isInCantilan, loadCantilanBarangays, loadCantilanBoundary, lockToCantilan, pinIconHtml,
 } from '../../data/cantilanMap';
+import { useText } from '../../i18n/LanguageContext';
 
 const round = n => Math.round(n * 1e6) / 1e6;
 
-const LIVE_TEXT = {
-  searching: 'Finding where you are...',
-  outside: "You're outside Cantilan right now, so your location isn't shown on this map.",
-  denied: "Location is turned off for this site, so we can't show where you are. You can still tap the map.",
-  unavailable: "We can't find your location right now. You can still tap the map.",
-  unsupported: "This device can't share its location. You can still tap the map.",
+// Wording in English, Filipino and Bisaya. `live` follows the blue dot's status;
+// `messages` are the notes under the buttons (kept as keys in state, so map
+// handlers set up once always show the current language).
+const PICKER_TEXT = {
+  en: {
+    label: 'Pin the location', optional: '(optional)',
+    hint: "Helps the office find the exact spot. Use your phone's location if you're there now, or tap the map.",
+    locating: 'Finding your location...', useMine: 'Use my current location',
+    hideMap: 'Hide map', pinOnMap: 'Pin on the map',
+    mapAria: 'Map of Cantilan. Tap to place the pin.', mapView: 'Map view',
+    styles: { street: 'Street', satellite: 'Satellite' },
+    whereAmI: 'Show where I am',
+    blueDot: n => `The blue dot shows where you are (about ±${n} m).`,
+    tapHint: ' Tap the map where the problem is; you can drag the red pin to adjust it.',
+    pinned: b => `Location pinned${b ? ` · Barangay ${b}` : ''}`,
+    removePin: 'Remove pin',
+    live: {
+      searching: 'Finding where you are...',
+      outside: "You're outside Cantilan right now, so your location isn't shown on this map.",
+      denied: "Location is turned off for this site, so we can't show where you are. You can still tap the map.",
+      unavailable: "We can't find your location right now. You can still tap the map.",
+      unsupported: "This device can't share its location. You can still tap the map.",
+    },
+    messages: {
+      outsideSpot: 'That spot is outside Cantilan. Please pin a place within the municipality.',
+      turnOn: 'Turn on location for this site in your browser settings to see where you are.',
+      noShare: "This device can't share its location. Tap the map to place the pin instead.",
+      outsideNow: 'You seem to be outside Cantilan right now. Tap the map where the problem is instead.',
+      notAllowed: 'Location access was not allowed. Tap the map to place the pin instead.',
+      noFix: "We couldn't get your location. Tap the map to place the pin instead.",
+    },
+  },
+  fil: {
+    label: 'I-pin ang lokasyon', optional: '(opsyonal)',
+    hint: 'Nakatutulong ito sa opisina na mahanap ang eksaktong lugar. Gamitin ang lokasyon ng iyong telepono kung nandoon ka ngayon, o pumindot sa mapa.',
+    locating: 'Hinahanap ang iyong lokasyon...', useMine: 'Gamitin ang aking kasalukuyang lokasyon',
+    hideMap: 'Itago ang mapa', pinOnMap: 'I-pin sa mapa',
+    mapAria: 'Mapa ng Cantilan. Pumindot para ilagay ang pin.', mapView: 'Uri ng mapa',
+    styles: { street: 'Kalye', satellite: 'Satellite' },
+    whereAmI: 'Ipakita kung nasaan ako',
+    blueDot: n => `Ang asul na tuldok ang kinaroroonan mo (mga ±${n} m).`,
+    tapHint: ' Pumindot sa mapa kung saan ang problema; maaari mong i-drag ang pulang pin para iayos.',
+    pinned: b => `Naka-pin ang lokasyon${b ? ` · Barangay ${b}` : ''}`,
+    removePin: 'Alisin ang pin',
+    live: {
+      searching: 'Hinahanap kung nasaan ka...',
+      outside: 'Nasa labas ka ng Cantilan ngayon, kaya hindi ipinapakita ang iyong lokasyon sa mapang ito.',
+      denied: 'Naka-off ang lokasyon para sa site na ito, kaya hindi namin maipakita kung nasaan ka. Maaari ka pa ring pumindot sa mapa.',
+      unavailable: 'Hindi namin mahanap ang iyong lokasyon ngayon. Maaari ka pa ring pumindot sa mapa.',
+      unsupported: 'Hindi maibahagi ng device na ito ang lokasyon nito. Maaari ka pa ring pumindot sa mapa.',
+    },
+    messages: {
+      outsideSpot: 'Nasa labas ng Cantilan ang lugar na iyon. Mag-pin ng lugar sa loob ng munisipyo.',
+      turnOn: 'I-on ang lokasyon para sa site na ito sa settings ng iyong browser para makita kung nasaan ka.',
+      noShare: 'Hindi maibahagi ng device na ito ang lokasyon nito. Pumindot na lang sa mapa para ilagay ang pin.',
+      outsideNow: 'Mukhang nasa labas ka ng Cantilan ngayon. Pumindot na lang sa mapa kung saan ang problema.',
+      notAllowed: 'Hindi pinayagan ang access sa lokasyon. Pumindot na lang sa mapa para ilagay ang pin.',
+      noFix: 'Hindi namin makuha ang iyong lokasyon. Pumindot na lang sa mapa para ilagay ang pin.',
+    },
+  },
+  ceb: {
+    label: 'I-pin ang lokasyon', optional: '(opsyonal)',
+    hint: 'Makatabang kini sa opisina nga makit-an ang eksaktong lugar. Gamita ang lokasyon sa imong telepono kon naa ka didto karon, o pindota ang mapa.',
+    locating: 'Gipangita ang imong lokasyon...', useMine: 'Gamita ang akong lokasyon karon',
+    hideMap: 'Tagoa ang mapa', pinOnMap: 'I-pin sa mapa',
+    mapAria: 'Mapa sa Cantilan. Pindota aron ibutang ang pin.', mapView: 'Klase sa mapa',
+    styles: { street: 'Dalan', satellite: 'Satellite' },
+    whereAmI: 'Ipakita kon asa ko',
+    blueDot: n => `Ang asul nga tulbok mao ang imong nahimutangan (mga ±${n} m).`,
+    tapHint: ' Pindota ang mapa kon asa ang problema; mahimo nimong i-drag ang pula nga pin aron i-adjust.',
+    pinned: b => `Na-pin ang lokasyon${b ? ` · Barangay ${b}` : ''}`,
+    removePin: 'Kuhaa ang pin',
+    live: {
+      searching: 'Gipangita kon asa ka...',
+      outside: 'Naa ka sa gawas sa Cantilan karon, mao nga dili makita ang imong lokasyon niini nga mapa.',
+      denied: 'Gipalong ang lokasyon para niini nga site, mao nga dili namo maipakita kon asa ka. Mahimo ka gihapong mopindot sa mapa.',
+      unavailable: 'Dili namo makit-an ang imong lokasyon karon. Mahimo ka gihapong mopindot sa mapa.',
+      unsupported: 'Kini nga device dili makapaambit sa iyang lokasyon. Mahimo ka gihapong mopindot sa mapa.',
+    },
+    messages: {
+      outsideSpot: 'Kana nga lugar naa sa gawas sa Cantilan. Palihug pag-pin og lugar sulod sa munisipyo.',
+      turnOn: 'I-on ang lokasyon para niini nga site sa settings sa imong browser aron makita kon asa ka.',
+      noShare: 'Kini nga device dili makapaambit sa iyang lokasyon. Pindota na lang ang mapa aron ibutang ang pin.',
+      outsideNow: 'Murag naa ka sa gawas sa Cantilan karon. Pindota na lang ang mapa kon asa ang problema.',
+      notAllowed: 'Wala gitugotan ang access sa lokasyon. Pindota na lang ang mapa aron ibutang ang pin.',
+      noFix: 'Dili namo makuha ang imong lokasyon. Pindota na lang ang mapa aron ibutang ang pin.',
+    },
+  },
 };
 
 // Optional map pin for a report. The map shows only Cantilan, has street and
@@ -20,6 +103,7 @@ const LIVE_TEXT = {
 // `value` is { lat, lng, barangay } or null; `onChange` gets the new value (the
 // barangay the pin is in comes from the PSA barangay boundaries).
 export default function LocationPicker({ value, onChange }) {
+  const t = useText(PICKER_TEXT);
   const [open, setOpen] = useState(false);
   const [locating, setLocating] = useState(false);
   const [message, setMessage] = useState('');
@@ -56,7 +140,7 @@ export default function LocationPicker({ value, onChange }) {
 
   function place(lat, lng, pan = true) {
     if (!isInCantilan(leaflet.current.boundary, lat, lng)) {
-      setMessage('That spot is outside Cantilan. Please pin a place within the municipality.');
+      setMessage('outsideSpot');
       const last = current.current;
       if (last) leaflet.current.marker?.setLatLng([last.lat, last.lng]);
       return;
@@ -171,8 +255,8 @@ export default function LocationPicker({ value, onChange }) {
   function showWhereIAm() {
     const { map, me } = leaflet.current;
     if (map && me.pos) map.setView([me.pos.lat, me.pos.lng], Math.max(17, map.getZoom()));
-    else if (live.status === 'outside') setMessage(LIVE_TEXT.outside);
-    else if (live.status === 'denied') setMessage('Turn on location for this site in your browser settings to see where you are.');
+    else if (live.status === 'outside') setMessage('liveOutside');
+    else if (live.status === 'denied') setMessage('turnOn');
   }
 
   async function locateMe() {
@@ -185,7 +269,7 @@ export default function LocationPicker({ value, onChange }) {
     }
     if (!navigator.geolocation) {
       setOpen(true);
-      setMessage("This device can't share its location. Tap the map to place the pin instead.");
+      setMessage('noShare');
       return;
     }
     setLocating(true);
@@ -196,7 +280,7 @@ export default function LocationPicker({ value, onChange }) {
         const { latitude, longitude } = pos.coords;
         if (!isInCantilan(boundary, latitude, longitude)) {
           setOpen(true);
-          setMessage('You seem to be outside Cantilan right now. Tap the map where the problem is instead.');
+          setMessage('outsideNow');
           return;
         }
         if (leaflet.current.map) place(latitude, longitude);
@@ -208,9 +292,7 @@ export default function LocationPicker({ value, onChange }) {
       err => {
         setLocating(false);
         setOpen(true);
-        setMessage(err.code === 1
-          ? 'Location access was not allowed. Tap the map to place the pin instead.'
-          : "We couldn't get your location. Tap the map to place the pin instead.");
+        setMessage(err.code === 1 ? 'notAllowed' : 'noFix');
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }, // always a fresh fix, not an old one
     );
@@ -224,26 +306,26 @@ export default function LocationPicker({ value, onChange }) {
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">Pin the location <span className="font-normal text-gray-500">(optional)</span></label>
-      <p className="text-xs text-gray-500 mb-2">Helps the office find the exact spot. Use your phone's location if you're there now, or tap the map.</p>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{t.label} <span className="font-normal text-gray-500">{t.optional}</span></label>
+      <p className="text-xs text-gray-500 mb-2">{t.hint}</p>
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={locateMe} disabled={locating}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white bg-primary hover:bg-blue-700 transition-colors disabled:opacity-60">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /><circle cx="12" cy="12" r="7" />
           </svg>
-          {locating ? 'Finding your location...' : 'Use my current location'}
+          {locating ? t.locating : t.useMine}
         </button>
         <button type="button" onClick={() => setOpen(o => !o)}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 20l-6-3V4l6 3 6-3 6 3v13l-6-3-6 3z" /><path d="M9 7v13M15 4v13" />
           </svg>
-          {open ? 'Hide map' : 'Pin on the map'}
+          {open ? t.hideMap : t.pinOnMap}
         </button>
       </div>
 
-      {message && <p className="mt-2 text-xs font-medium text-amber-700" role="status">{message}</p>}
+      {message && <p className="mt-2 text-xs font-medium text-amber-700" role="status">{message === 'liveOutside' ? t.live.outside : t.messages[message]}</p>}
 
       {open && (
         <>
@@ -251,21 +333,21 @@ export default function LocationPicker({ value, onChange }) {
             {/* Height set inline: index.css gives every .leaflet-container height:100%
                 (for the full-page admin map), which would flatten this box on phones. */}
             <div ref={boxRef} className="relative z-0 w-full rounded-xl border border-gray-200 overflow-hidden"
-              style={{ height: '18rem' }} aria-label="Map of Cantilan. Tap to place the pin." />
+              style={{ height: '18rem' }} aria-label={t.mapAria} />
 
             {/* Street / satellite, and "where am I" (above the map) */}
             <div className="absolute top-2 right-2 z-10 flex flex-col items-end gap-2">
-              <div className="flex rounded-lg overflow-hidden shadow-md border border-gray-200 bg-white" role="group" aria-label="Map view">
+              <div className="flex rounded-lg overflow-hidden shadow-md border border-gray-200 bg-white" role="group" aria-label={t.mapView}>
                 {Object.entries(MAP_STYLE_LABELS).map(([key, label]) => (
                   <button key={key} type="button" onClick={() => setStyle(key)} aria-pressed={style === key}
                     className={`px-2.5 py-1.5 text-xs font-semibold transition-colors ${style === key ? 'text-white' : 'text-gray-700 hover:bg-gray-50'}`}
                     style={style === key ? { background: '#2563eb' } : undefined}>
-                    {label}
+                    {t.styles[key] || label}
                   </button>
                 ))}
               </div>
               <button type="button" onClick={showWhereIAm} disabled={live.status !== 'on'}
-                aria-label="Show where I am" title="Show where I am"
+                aria-label={t.whereAmI} title={t.whereAmI}
                 className="w-9 h-9 rounded-lg bg-white border border-gray-200 shadow-md flex items-center justify-center text-blue-600 hover:bg-blue-50 disabled:text-gray-300 disabled:hover:bg-white transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" fill="currentColor" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /><circle cx="12" cy="12" r="7" />
@@ -276,9 +358,9 @@ export default function LocationPicker({ value, onChange }) {
 
           <p className="mt-1.5 text-xs text-gray-500" aria-live="polite">
             {live.status === 'on'
-              ? <><span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-600 align-middle mr-1.5" aria-hidden="true" />The blue dot shows where you are (about ±{live.accuracy} m).</>
-              : LIVE_TEXT[live.status] || ''}
-            {!value && <> Tap the map where the problem is; you can drag the red pin to adjust it.</>}
+              ? <><span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-600 align-middle mr-1.5" aria-hidden="true" />{t.blueDot(live.accuracy)}</>
+              : t.live[live.status] || ''}
+            {!value && t.tapHint}
           </p>
         </>
       )}
@@ -287,10 +369,10 @@ export default function LocationPicker({ value, onChange }) {
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <span className="inline-flex items-center gap-1 font-semibold text-green-700">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-            Location pinned{value.barangay ? ` · Barangay ${value.barangay}` : ''}
+            {t.pinned(value.barangay)}
           </span>
           <span className="text-gray-500 tabular-nums">{value.lat.toFixed(5)}, {value.lng.toFixed(5)}</span>
-          <button type="button" onClick={removePin} className="font-semibold text-red-600 hover:underline">Remove pin</button>
+          <button type="button" onClick={removePin} className="font-semibold text-red-600 hover:underline">{t.removePin}</button>
         </div>
       )}
     </div>
