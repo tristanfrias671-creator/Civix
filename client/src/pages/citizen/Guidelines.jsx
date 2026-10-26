@@ -78,7 +78,9 @@ const formFields = st => [
   { key: 'phone',       required: true,  label: noStar(st.phoneLabel),  sample: st.phonePlaceholder },
   { key: 'email',       required: true,  label: noStar(st.emailLabel),  sample: st.emailPlaceholder },
   { key: 'description', required: true,  label: noStar(st.descLabel),   sample: null }, // GUIDELINES_TEXT.descSample
-  { key: 'urgency',     required: true,  label: noStar(st.urgencyLabel), sample: st.urgencyLevels.STANDARD.name },
+  // Set automatically from the description: nothing to fill in.
+  { key: 'urgency',     auto: true,      label: st.urgencyName,
+    sample: ['URGENT', 'STANDARD', 'LOW'].map(level => st.urgencyLevels[level].name).join(' · ') },
   { key: 'photos',      required: false, label: st.photosLabel.replace(/\s*\(.*\)$/, ''), sample: st.photosClick + st.photosDrag },
 ];
 
@@ -172,8 +174,9 @@ function Section({ id, icon, title, subtitle, children }) {
   );
 }
 
-function RequiredPill({ required }) {
+function RequiredPill({ required, auto }) {
   const g = useText(GUIDELINES_TEXT);
+  if (auto) return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700">{g.automatic}</span>;
   return required
     ? <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-50 text-red-700">{g.required}</span>
     : <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600">{g.optional}</span>;
@@ -343,7 +346,7 @@ export default function Guidelines() {
                 <div key={f.key} className="py-3.5 first:pt-0 last:pb-0 grid grid-cols-1 sm:grid-cols-[190px_1fr] gap-2 sm:gap-5">
                   <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-1.5">
                     <p className="text-sm font-semibold text-gray-800">{f.label}{f.required && <span className="text-red-600"> *</span>}</p>
-                    <RequiredPill required={f.required} />
+                    <RequiredPill required={f.required} auto={f.auto} />
                   </div>
                   <div>
                     <div className="px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-500 truncate">{f.sample || g.descSample}</div>

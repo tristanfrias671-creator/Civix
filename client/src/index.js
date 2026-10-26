@@ -7,7 +7,9 @@ import App from './App';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <GoogleOAuthProvider clientId={process.env.REACT_APP_GOOGLE_CLIENT_ID}>
+    {/* English, like the rest of the staff and admin pages (Google would otherwise
+        pick a language from the visitor's location). */}
+    <GoogleOAuthProvider clientId={process.env.REACT_APP_GOOGLE_CLIENT_ID} locale="en">
       <App />
     </GoogleOAuthProvider>
   </React.StrictMode>

@@ -141,7 +141,7 @@ function strong(text) {
 function trackingBox(trackingId, caption) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
     <td align="center" bgcolor="#eff6ff" style="background:#eff6ff; border:1px dashed #93c5fd; border-radius:12px; padding:16px;">
-      <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:#1d4ed8;">Tracking ID</div>
+      <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:#1d4ed8;">Transaction Code</div>
       <div style="margin-top:4px; font-family:${MONO}; font-size:20px; font-weight:700; letter-spacing:1px; white-space:nowrap; color:${INK};">${escapeHtml(trackingId)}</div>
       ${caption ? `<div style="margin-top:4px; font-size:12px; color:#475569;">${caption}</div>` : ''}
     </td></tr></table>`;
@@ -395,10 +395,10 @@ async function buildSubmissionReceivedEmail(submission) {
   const office = officeOf(submission);
   const html = layout({
     seal: await sealImageUrl(),
-    preheader: `Your tracking ID is ${submission.trackingId}. Keep it to follow your report.`,
+    preheader: `Your transaction code is ${submission.trackingId}. Keep it to follow your report.`,
     icon: '&#10003;', tone: 'green', title: copy.title, intro: copy.intro,
     body: `
-      ${trackingBox(submission.trackingId, 'Keep this ID. You will need it to check on your report.')}
+      ${trackingBox(submission.trackingId, 'Keep this code. You will need it to check on your report.')}
       ${detailRows([
         ['Type', escapeHtml(TYPE_LABELS[submission.type] || submission.type)],
         office && ['Office', escapeHtml(office)],
@@ -428,7 +428,7 @@ async function buildStatusUpdateEmail(submission, newStatus, note) {
     body: `
       ${progressTracker(newStatus)}
       ${detailRows([
-        ['Tracking ID', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
+        ['Transaction Code', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
         ['Status', pill(meta.label, meta.tone)],
         office && ['Office', escapeHtml(office)],
         !resolved && submission.dueAt && ['Target resolution', formatPhDate(submission.dueAt)],
@@ -455,7 +455,7 @@ async function buildUrgencyChangeEmail(submission, change) {
     intro: `${escapeHtml(office || 'The concerned office')} looked at your report and changed how urgent it is.`,
     body: `
       ${detailRows([
-        ['Tracking ID', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
+        ['Transaction Code', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
         ['Was', urgencyPill(change.fromPriority)],
         ['Now', urgencyPill(change.toPriority)],
         change.toDueAt && ['Target resolution', `${formatPhDate(change.toDueAt)}${moved

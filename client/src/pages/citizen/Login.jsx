@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../../context/AuthContext';
 import { BrandImg } from '../../context/BrandingContext';
 import api from '../../utils/api';
 import { deviceId } from '../../utils/deviceId';
+import { getSession } from '../../utils/session';
 import { signInCss } from '../../components/common/signInButtonCss';
 import ForgotPassword from '../../components/common/ForgotPassword';
 import SignInCodeStep from '../../components/common/SignInCodeStep';
@@ -131,13 +132,29 @@ const ROLE_CONTENT = {
   },
 };
 
+const dashboardFor = role => (role === 'ADMIN' ? '/admin/dashboard' : '/staff/dashboard');
+
 // adminPath: the private address the admin sign-in page was opened at; the
 // server only accepts admin sign-ins that come with it.
 export default function Login({ role, adminPath }) {
-  const { login, users } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const selectedRole = role || location.state?.role || null;
+
+  // Already signed in to this portal (in this tab or another)? If the server still
+  // accepts that sign-in, go straight to the dashboard; if not (it expired, or the
+  // password was changed since), forget it and show the form.
+  const [checkingSession, setCheckingSession] = useState(() => !!getSession(selectedRole));
+  useEffect(() => {
+    const saved = getSession(selectedRole);
+    if (!saved) { setCheckingSession(false); return undefined; }
+    let active = true;
+    api.get('/auth/me', { headers: { Authorization: `Bearer ${saved.token}` } })
+      .then(() => { if (active) navigate(dashboardFor(selectedRole), { replace: true }); })
+      .catch(() => { if (active) { logout(selectedRole); setCheckingSession(false); } });
+    return () => { active = false; };
+  }, [selectedRole, navigate, logout]);
   const content = ROLE_CONTENT[selectedRole] || ROLE_CONTENT.DEFAULT;
   const CardIcon = content.cardIcon;
 
@@ -203,15 +220,18 @@ export default function Login({ role, adminPath }) {
     signIn(api.post('/auth/google', { credential: credentialResponse.credential, portal: selectedRole, device: deviceId() }), 'Google sign-in failed');
   }
 
-  // Already signed in to this portal (in this tab or another): straight to its dashboard.
-  if (users?.[selectedRole]) return <Navigate to={destFor(selectedRole)} replace />;
+  // A moment while a saved sign-in to this portal is checked (see above).
+  if (checkingSession) return <div className="min-h-screen" aria-busy="true" />;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
 
-      {/* ── Full-bleed background photo (spans the whole page, no seam) ── */}
-      <BrandImg kind="hero" className="fixed inset-0 w-full h-full object-cover" />
-      <div className="fixed inset-0" style={{ background: 'linear-gradient(100deg, rgba(6,16,42,0.78) 0%, rgba(6,16,42,0.5) 30%, rgba(20,50,100,0.28) 50%, rgba(180,205,235,0.55) 68%, rgba(219,234,254,0.88) 82%, rgba(219,234,254,0.96) 100%)' }} />
+      {/* ── Full-bleed background photo (spans the whole page, no seam). Its box keeps
+          one size, so phones don't zoom the photo while scrolling (see index.css). ── */}
+      <div className="cvx-photo-backdrop" aria-hidden="true">
+        <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(100deg, rgba(6,16,42,0.78) 0%, rgba(6,16,42,0.5) 30%, rgba(20,50,100,0.28) 50%, rgba(180,205,235,0.55) 68%, rgba(219,234,254,0.88) 82%, rgba(219,234,254,0.96) 100%)' }} />
+      </div>
 
       <div className="relative z-10 min-h-screen flex flex-col lg:flex-row pb-10">
 

@@ -1,9 +1,23 @@
-// How urgent a report is: Urgent, Normal or Can wait. Citizens choose for a complaint
-// on the report form (their wording is in i18n/submitText.js and trackText.js); the
-// office's staff can change it later with a reason. Staff and admin pages use these
-// English names. The server has the same ones (server/src/utils/urgency.js).
+// How urgent a report is: Urgent, Normal or Can wait. The AI sets it for a complaint
+// from its description (server/src/utils/urgencyDetector.js; the citizen's wording is
+// in i18n/submitText.js and trackText.js); the office's staff can change it later
+// with a reason. Staff and admin pages use these English names. The server has the
+// same ones (server/src/utils/urgency.js).
 export const PRIORITY_ORDER = ['URGENT', 'STANDARD', 'LOW'];
 export const PRIORITY_LABEL = { URGENT: 'Urgent', STANDARD: 'Normal', LOW: 'Can wait' };
+
+// The words in a complaint's description that set its urgency (saved as JSON with
+// the report's AI record), e.g. ["sunog", "mga bata"]. Reports sent before Oct 16,
+// 2026 have none: the citizen chose then.
+export function urgencyWords(json) {
+  try {
+    const words = JSON.parse(json || '[]');
+    return Array.isArray(words) ? words.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+export const quoteWords = words => words.map(w => `“${w}”`).join(', ');
 
 // Why the citizen said a complaint was urgent. The form no longer asks; reports sent
 // while it did (Oct 14–15, 2026) still show their answer.

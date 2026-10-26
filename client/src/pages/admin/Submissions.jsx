@@ -73,7 +73,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
   const feedbackPage = typeFilter === 'FEEDBACK';
   const headers = feedbackPage
     ? ['Reference', 'Citizen', 'Rating', 'Date', '']
-    : ['Tracking ID', 'Citizen', 'Type', 'Status', 'Deadline', 'Department', 'Date', ''];
+    : ['Transaction Code', 'Citizen', 'Type', 'Status', 'Deadline', 'Department', 'Date', ''];
 
   const textPrimary = dark ? '#f1f5f9' : '#111827';
   const textMuted = dark ? '#94a3b8' : '#6b7280'; // 4.5:1 or better on the table

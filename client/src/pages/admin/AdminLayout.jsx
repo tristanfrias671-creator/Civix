@@ -223,7 +223,7 @@ export default function AdminLayout() {
                 <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" />
               </svg>
               <input value={topSearch} onChange={e => setTopSearch(e.target.value)}
-                placeholder="Search submissions, tracking code..."
+                placeholder="Search submissions, transaction code..."
                 className="w-full pl-10 pr-3 py-2 rounded-lg text-sm outline-none transition-all placeholder:text-gray-500 dark:placeholder:!text-slate-400 focus:ring-2 focus:ring-blue-500"
                 style={{
                   background: dark ? '#0f172a' : '#f3f4f6',

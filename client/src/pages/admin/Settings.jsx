@@ -824,7 +824,7 @@ export default function Settings() {
           <form onSubmit={saveDeadlines}>
             <SectionCard
               title="Resolution Deadlines"
-              description="How many working days (Monday–Friday) the assigned office has to resolve a report. Citizens choose how urgent a complaint is; suggestions have their own time."
+              description="How many working days (Monday–Friday) the assigned office has to resolve a report. CIVIX sets how urgent a complaint is from its description; suggestions have their own time."
               footer={
                 <button type="submit" disabled={saving === 'deadlines'}
                   className="px-6 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">

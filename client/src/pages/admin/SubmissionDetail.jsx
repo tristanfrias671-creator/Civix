@@ -9,7 +9,7 @@ import Icon from '../../components/common/Icons';
 import PhotoViewer from '../../components/common/PhotoViewer';
 import api from '../../utils/api';
 import { mediaUrl } from '../../utils/mediaUrl';
-import { PRIORITY_LABEL, URGENCY_REASON_LABEL } from '../../data/urgency';
+import { PRIORITY_LABEL, URGENCY_REASON_LABEL, urgencyWords, quoteWords } from '../../data/urgency';
 
 const STEP_ORDER = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 const STATUS_LABEL = { PENDING: 'Pending', REVIEWING: 'Reviewing', IN_PROGRESS: 'In Progress', RESOLVED: 'Resolved', SPAM: 'Spam / Invalid' };
@@ -178,6 +178,8 @@ export default function SubmissionDetail() {
   const aiKeywords = ai?.matchedKeywords ? (() => { try { return JSON.parse(ai.matchedKeywords); } catch { return []; } })() : [];
   const aiMatchesFinal = ai && ai.predictedDepartment === submission.department;
   const citizenOverrode = ai && ai.citizenSelected && ai.citizenSelected !== ai.predictedDepartment;
+  // How urgent the AI found a complaint, and the words that decided it.
+  const aiUrgencyWords = urgencyWords(ai?.urgencyKeywords);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -235,7 +237,7 @@ export default function SubmissionDetail() {
                 <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
                 </svg>
-                <h3 className="text-sm font-bold text-blue-800 dark:text-blue-300">AI Department Classification</h3>
+                <h3 className="text-sm font-bold text-blue-800 dark:text-blue-300">AI Classification</h3>
                 <span className="ml-auto text-xs font-medium px-2 py-0.5 rounded-full"
                   style={{ background: aiMatchesFinal ? '#dcfce7' : '#fee2e2', color: aiMatchesFinal ? '#15803d' : '#b91c1c' }}>
                   {aiMatchesFinal ? '✓ Correct' : ai.adminCorrected ? '✗ Admin Corrected' : '⚠ Pending Review'}
@@ -278,6 +280,30 @@ export default function SubmissionDetail() {
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* How urgent the AI found the complaint, from its description */}
+                {ai.predictedPriority && (
+                  <div className="pt-4 border-t border-gray-100 dark:border-slate-700" data-ai-urgency={ai.predictedPriority}>
+                    <p className="text-xs text-gray-500 dark:text-slate-400 font-medium mb-1.5">How urgent (set by AI)</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <PriorityBadge priority={ai.predictedPriority} />
+                      {submission.priority !== ai.predictedPriority && (
+                        <span className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                          The office changed it to {PRIORITY_LABEL[submission.priority]}
+                        </span>
+                      )}
+                    </div>
+                    {aiUrgencyWords.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {aiUrgencyWords.map(w => (
+                          <span key={w} className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-xs rounded-full">
+                            {w}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -396,8 +422,16 @@ export default function SubmissionDetail() {
                 <dt className="text-gray-500 dark:text-slate-400 text-xs pt-1">Urgency</dt>
                 <dd className="text-right">
                   <PriorityBadge priority={submission.priority} />
-                  {/* What the citizen chose (and why), when the office changed it since */}
+                  {/* How it was set: by the AI from the description (and why), or, for
+                      complaints sent before Oct 16, 2026, by the citizen */}
                   {submission.type === 'COMPLAINT' && (() => {
+                    if (ai?.predictedPriority) {
+                      return (
+                        <span className="block text-[11px] text-gray-600 dark:text-slate-300 mt-1">
+                          Set by AI: {PRIORITY_LABEL[ai.predictedPriority]}{aiUrgencyWords.length ? ` (${quoteWords(aiUrgencyWords)})` : ''}
+                        </span>
+                      );
+                    }
                     const changes = submission.urgencyChanges || [];
                     const chosen = changes.length ? changes[changes.length - 1].fromPriority : submission.priority;
                     const why = URGENCY_REASON_LABEL[submission.urgencyReason];

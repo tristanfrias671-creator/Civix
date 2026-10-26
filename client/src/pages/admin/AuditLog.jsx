@@ -80,8 +80,8 @@ function DeletedReports() {
   );
 }
 
-// Every change the offices' staff made to how urgent a report is (the citizen chose it
-// for a complaint), with the reason the citizen was given and the finish-by dates.
+// Every change the offices' staff made to how urgent a report is (the AI set it for a
+// complaint from its description), with the reason the citizen was given and the finish-by dates.
 function UrgencyChanges() {
   const [rows, setRows] = useState(null);
   useEffect(() => {
@@ -298,7 +298,7 @@ export default function AuditLog() {
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by tracking ID, staff name, department, or reason..."
+              placeholder="Search by transaction code, staff name, department, or reason..."
               className="w-full pl-9 pr-4 py-2 border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
           </div>
           <span className="text-xs text-gray-400 dark:text-slate-500 self-center">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
@@ -321,7 +321,7 @@ export default function AuditLog() {
             <table ref={tableRef} className="mobile-cards w-full text-sm">
               <thead className="bg-gray-50 dark:bg-slate-900/40 text-xs text-gray-500 dark:text-slate-400 uppercase">
                 <tr>
-                  {['Date', 'Tracking ID', 'Changed By', 'Role', 'From Department', '', 'To Department', 'Reason', 'Action'].map((h, i) => (
+                  {['Date', 'Transaction Code', 'Changed By', 'Role', 'From Department', '', 'To Department', 'Reason', 'Action'].map((h, i) => (
                     <th key={i} className="px-4 py-3 text-left font-semibold whitespace-nowrap">{h}</th>
                   ))}
                 </tr>

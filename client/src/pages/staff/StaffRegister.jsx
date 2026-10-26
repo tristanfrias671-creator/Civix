@@ -425,8 +425,11 @@ export default function StaffRegister() {
   return (
     <div className="min-h-screen relative overflow-hidden">
       <style>{signInCss}{regCss}</style>
-      <BrandImg kind="hero" className="fixed inset-0 w-full h-full object-cover" />
-      <div className="fixed inset-0" style={{ background: 'linear-gradient(160deg, rgba(6,16,42,0.82) 0%, rgba(20,50,100,0.6) 45%, rgba(219,234,254,0.85) 100%)' }} />
+      {/* Background photo; its box keeps one size, so phones don't zoom it while scrolling (see index.css). */}
+      <div className="cvx-photo-backdrop" aria-hidden="true">
+        <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, rgba(6,16,42,0.82) 0%, rgba(20,50,100,0.6) 45%, rgba(219,234,254,0.85) 100%)' }} />
+      </div>
 
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-10">
         <button type="button" onClick={() => navigate('/')} className="rg-rise flex items-center gap-3 mb-6 text-left">

@@ -9,7 +9,7 @@ A full-stack web application for real-time citizen engagement, complaint managem
 ### Citizen Portal
 - Register and log in with secure JWT authentication
 - Submit Complaints, Suggestions, and Feedback with GPS location and photo attachments
-- Receive a unique Tracking ID (e.g., `CIVIX-20250517-A3F9K2`) for every submission
+- Receive a unique Transaction Code (e.g., `ENG-20250517-0001`) for every submission
 - Track real-time status of all submissions with visual progress bars
 - Receive in-app notifications when submission status changes
 
@@ -163,11 +163,11 @@ The React app will open at `http://localhost:3000`
 
 ---
 
-## Submission Tracking ID Format
+## Submission Transaction Code Format
 
 ```
-CIVIX-YYYYMMDD-XXXXXX
-Example: CIVIX-20250517-A3F9K2
+DEPT-YYYYMMDD-NNNN   (office code, date filed, number of the day)
+Example: ENG-20250517-0001
 ```
 
 ## Status Lifecycle

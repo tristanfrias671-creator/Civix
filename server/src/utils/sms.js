@@ -67,7 +67,7 @@ function sendReportReceivedSms(submission) {
     ? ` Target resolution: ${new Date(submission.dueAt).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric' })}.`
     : '';
   return sendSms(submission.contactNumber,
-    `CIVIX: We received your report. Tracking code: ${submission.trackingId}.${target} Check its status on the CIVIX website (Track My Report).`);
+    `CIVIX: We received your report. Transaction code: ${submission.trackingId}.${target} Check its status on the CIVIX website (Track My Report).`);
 }
 
 function sendStatusUpdateSms(submission, status) {

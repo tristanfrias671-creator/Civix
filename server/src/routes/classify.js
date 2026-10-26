@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { classifyText } = require('../utils/classifier');
+const { detectUrgency } = require('../utils/urgencyDetector');
 const { createLimiter, limitRequests } = require('../utils/rateLimit');
 
 const prisma = require('../utils/prisma');
@@ -13,15 +14,18 @@ const NO_SUGGESTION = { department: 'UNASSIGNED', confidence: 0, matchedKeywords
 const NOT_SPAM_REPORT = { submission: { status: { not: 'SPAM' } } };
 
 // POST /api/classify  — public: real-time classification while citizen types
-// (the form asks after each pause in typing; the limit is far above that).
+// (the form asks after each pause in typing; the limit is far above that): the
+// office, and how urgent a complaint is ({ urgency: { priority, words } }; the
+// server decides again when the report is sent).
 router.post('/', limitRequests({ windowMs: 60 * 1000, max: 120 }), (req, res) => {
   const { text } = req.body;
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ error: 'text is required' });
   }
   if (!allSuggestions.take('all').ok) return res.json(NO_SUGGESTION);
-  const result = classifyText(text.slice(0, 2000)); // cap input length
-  res.json(result);
+  const capped = text.slice(0, 2000); // cap input length
+  const { priority, words } = detectUrgency(capped);
+  res.json({ ...classifyText(capped), urgency: { priority, words } });
 });
 
 // GET /api/classify/submission/:id  — returns saved AI classification for a submission
@@ -70,7 +74,7 @@ router.get('/stats', authenticate, requireAdmin, async (req, res) => {
     // Count where AI prediction matches the final assigned department
     const classified = await prisma.aIClassification.findMany({
       where: NOT_SPAM_REPORT,
-      select: { predictedDepartment: true, submission: { select: { department: true } } },
+      select: { predictedDepartment: true, confidence: true, submission: { select: { department: true } } },
     });
 
     const correct = classified.filter(
@@ -81,6 +85,16 @@ router.get('/stats', authenticate, requireAdmin, async (req, res) => {
       ? Math.round(classified.reduce((s, c) => s + c.confidence, 0) / classified.length)
       : 0;
 
+    // How urgent the AI found complaints, and how many the offices kept as it was
+    // (the rest they changed, with a reason).
+    const rated = await prisma.aIClassification.findMany({
+      where: { ...NOT_SPAM_REPORT, predictedPriority: { not: null } },
+      select: { predictedPriority: true, submission: { select: { priority: true } } },
+    });
+    const kept = rated.filter(r => r.predictedPriority === r.submission?.priority).length;
+    const byLevel = { URGENT: 0, STANDARD: 0, LOW: 0 };
+    rated.forEach(r => { byLevel[r.predictedPriority] += 1; });
+
     res.json({
       total,
       classified: withAI,
@@ -88,6 +102,13 @@ router.get('/stats', authenticate, requireAdmin, async (req, res) => {
       accuracy: withAI > 0 ? Math.round((correct / withAI) * 100) : 0,
       avgConfidence: avgConf,
       manualOverrides: changes,
+      urgency: {
+        rated: rated.length,
+        kept,
+        changed: rated.length - kept,
+        accuracy: rated.length > 0 ? Math.round((kept / rated.length) * 100) : 0,
+        byLevel,
+      },
     });
   } catch (err) {
     console.error(err);
@@ -107,7 +128,7 @@ router.get('/review', authenticate, requireAdmin, async (req, res) => {
           submission: {
             select: {
               id: true, trackingId: true, description: true,
-              department: true, status: true, createdAt: true,
+              department: true, status: true, priority: true, createdAt: true,
               user: { select: { fullName: true } },
             },
           },

@@ -4,6 +4,7 @@ const UPLOAD_ROOT = require('../utils/uploadRoot');
 const { generateTrackingId } = require('../utils/trackingId');
 const { analyzeSentiment } = require('../utils/sentiment');
 const { classifyText, OFFICES } = require('../utils/classifier');
+const { detectUrgency } = require('../utils/urgencyDetector');
 const { sendSubmissionReceivedEmail } = require('../utils/mailer');
 const { normalizePhMobile, sendReportReceivedSms, configured: smsConfigured } = require('../utils/sms');
 const { createLimiter } = require('../utils/rateLimit');
@@ -11,7 +12,6 @@ const { networkKey } = require('../utils/clientIp');
 const { discardUploads, photoBytes, photoBudget } = require('../utils/uploadSafety');
 const { issueTicket, turnstileEnabled } = require('../utils/formGuard');
 const { addWorkingDays, deadlineDays } = require('../utils/deadline');
-const { PRIORITIES } = require('../utils/urgency');
 const { ensureSettings, getDepartmentList } = require('./settings');
 const { configured: cloudinaryConfigured } = require('../utils/cloudinary');
 const { isInCantilan } = require('../utils/cantilanArea');
@@ -114,14 +114,11 @@ async function createSubmission(req, res) {
       return refuse(req, res, 400, 'Please enter a valid email address, e.g. juan@gmail.com');
     }
     // How urgent a complaint is (Urgent / Normal / Can wait) sets its resolve-by date.
-    // Suggestions and feedback are Normal, and so is a complaint from a page that
-    // doesn't ask. (The form no longer asks why it is urgent, so no reason is saved.)
-    let priority = 'STANDARD';
-    if (type === 'COMPLAINT') {
-      const asked = String(body.priority || 'STANDARD').trim().toUpperCase();
-      if (!PRIORITIES.includes(asked)) return refuse(req, res, 400, 'Please choose how urgent this is.', { code: 'URGENCY' });
-      priority = asked;
-    }
+    // The AI reads it from the description (utils/urgencyDetector.js); a priority sent
+    // by the page is ignored, so no one can make their own report Urgent. Suggestions
+    // and feedback are Normal.
+    const urgency = type === 'COMPLAINT' ? detectUrgency(description) : null;
+    const priority = urgency ? urgency.priority : 'STANDARD';
     // Feedback rates the municipality's service as a whole: it goes to no office
     // (administrators read it), carries no photos and has no deadline.
     const isFeedback = type === 'FEEDBACK';
@@ -176,7 +173,7 @@ async function createSubmission(req, res) {
     if (duplicate) {
       const message = isFeedback
         ? 'You already sent this feedback. Thank you!'
-        : `You already sent this report. Its tracking code is ${duplicate.trackingId}.`;
+        : `You already sent this report. Its transaction code is ${duplicate.trackingId}.`;
       return refuse(req, res, 409, message, { code: 'DUPLICATE', trackingId: duplicate.trackingId });
     }
     if (recent.filter(r => new Date(r.createdAt).getTime() >= now - HOUR_MS).length >= PER_CONTACT_HOUR) {
@@ -250,6 +247,8 @@ async function createSubmission(req, res) {
                 confidence: aiResult.confidence,
                 matchedKeywords: JSON.stringify(aiResult.matchedKeywords),
                 citizenSelected: citizenOverrode ? office : null,
+                predictedPriority: urgency ? urgency.priority : null,
+                urgencyKeywords: urgency ? JSON.stringify(urgency.words) : null,
               },
             } : undefined,
           },
@@ -369,7 +368,7 @@ async function trackSubmission(req, res) {
   try {
     const network = networkKey(req); // null when unknown: then not counted
     if (network != null && wrongCodes.isFull(network)) {
-      return res.status(429).json({ error: 'Too many tracking codes were not found from this network. Please check your code and try again later.', code: 'RATE_LIMITED' });
+      return res.status(429).json({ error: 'Too many transaction codes were not found from this network. Please check your code and try again later.', code: 'RATE_LIMITED' });
     }
     const trackingId = String(req.params.trackingId || '').trim().toUpperCase().slice(0, 40);
     const submission = await prisma.submission.findUnique({
@@ -385,7 +384,7 @@ async function trackSubmission(req, res) {
     });
     if (!submission) {
       if (network != null) wrongCodes.take(network);
-      return res.status(404).json({ error: 'Tracking code not found' });
+      return res.status(404).json({ error: 'Transaction code not found' });
     }
     // Public endpoint and codes are sequential (DEPT-YYYYMMDD-0001, -0002…), so never
     // return the citizen's contact details to whoever enters a code.

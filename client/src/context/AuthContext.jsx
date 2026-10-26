@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
-  PORTALS, portalOf, portalOfRole, getSession, saveSession, clearSession, activityKey, isSessionKey, moveOldSession,
+  PORTALS, portalOf, portalOfRole, getSession, saveSession, clearSession, activityKey, isSessionKey,
 } from '../utils/session';
 
 const AuthContext = createContext(null);
@@ -17,11 +17,11 @@ export function AuthProvider({ children }) {
   const { pathname } = useLocation();
   const [users, setUsers] = useState(readUsers);
 
-  // Signed in or out in another tab.
+  // Signed in or out in another tab. (A sign-in saved by the old version is moved
+  // only when a page opens: moving it here could catch it half written.)
   useEffect(() => {
     const onStorage = e => {
-      if (e.key !== null && !isSessionKey(e.key) && e.key !== 'civix_token') return;
-      moveOldSession();
+      if (e.key !== null && !isSessionKey(e.key)) return;
       setUsers(readUsers());
     };
     window.addEventListener('storage', onStorage);

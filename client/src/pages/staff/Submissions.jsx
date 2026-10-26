@@ -11,7 +11,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { mediaUrl } from '../../utils/mediaUrl';
 import { shrinkPhoto } from '../../utils/shrinkPhoto';
 import { formatDate, formatDateTime, plural } from '../../utils/format';
-import { PRIORITY_ORDER, PRIORITY_LABEL, URGENCY_REASON_LABEL } from '../../data/urgency';
+import { PRIORITY_ORDER, PRIORITY_LABEL, URGENCY_REASON_LABEL, urgencyWords, quoteWords } from '../../data/urgency';
 import api from '../../utils/api';
 
 const STEPS = [
@@ -355,8 +355,8 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
     setProgressOpen(false);
   }
 
-  // How urgent it is (the citizen chose it for a complaint). The server counts the
-  // finish-by date again; the citizen sees the change and the reason.
+  // How urgent it is (the AI set it for a complaint from its description). The server
+  // counts the finish-by date again; the citizen sees the change and the reason.
   async function saveUrgency() {
     if (!urgencyTo || urgencyTo === detail.priority) return;
     if (urgencyWhy.trim().length < URGENCY_REASON_MIN) {
@@ -597,9 +597,12 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 );
               })()}
 
-              {/* How urgent: what the citizen chose, the finish-by date, and changing it */}
+              {/* How urgent: what the AI set (and why), the finish-by date, and changing it */}
               {detail.type !== 'FEEDBACK' && detail.status !== 'SPAM' && (() => {
-                // The citizen's own choice: before the first change, if there was one.
+                // The AI's level and the words behind it. Complaints sent before Oct 16,
+                // 2026 show the citizen's own choice: before the first change, if any.
+                const ai = detail.aiClassification;
+                const words = urgencyWords(ai?.urgencyKeywords);
                 const changes = detail.urgencyChanges || [];
                 const chosen = changes.length ? changes[changes.length - 1].fromPriority : detail.priority;
                 const why = URGENCY_REASON_LABEL[detail.urgencyReason];
@@ -609,10 +612,12 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                       <h3 id="urgency-title" className="text-base font-bold text-gray-900">How urgent</h3>
                       <PriorityBadge priority={detail.priority} />
                     </div>
-                    <p className="text-sm text-gray-700 mt-1">
-                      {detail.type === 'COMPLAINT'
-                        ? <>The citizen chose <strong>{PRIORITY_LABEL[chosen]}</strong>{why ? <>: “{why}”</> : ''}. </>
-                        : 'Suggestions start as Normal. '}
+                    <p className="text-sm text-gray-700 mt-1" data-urgency-source={detail.type === 'COMPLAINT' && ai?.predictedPriority ? 'ai' : 'other'}>
+                      {detail.type !== 'COMPLAINT'
+                        ? 'Suggestions start as Normal. '
+                        : ai?.predictedPriority
+                          ? <>Set automatically from the description: <strong>{PRIORITY_LABEL[ai.predictedPriority]}</strong>{words.length ? <>, because of {quoteWords(words)}</> : ''}. </>
+                          : <>The citizen chose <strong>{PRIORITY_LABEL[chosen]}</strong>{why ? <>: “{why}”</> : ''}. </>}
                       {detail.dueAt && <>Finish by <strong>{formatDueDate(detail.dueAt, true)}</strong>.</>}
                     </p>
                     {detail.status === 'RESOLVED' ? (

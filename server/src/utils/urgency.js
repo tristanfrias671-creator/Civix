@@ -1,6 +1,6 @@
-// How urgent a report is. The citizen chooses for a complaint on the report form;
-// the office's staff can change it later, with a reason (controllers/staff.js).
-// The website has the same names (client/src/data/urgency.js).
+// How urgent a report is. The AI sets it for a complaint from its description
+// (utils/urgencyDetector.js); the office's staff can change it later, with a reason
+// (controllers/staff.js). The website has the same names (client/src/data/urgency.js).
 const PRIORITIES = ['URGENT', 'STANDARD', 'LOW'];
 const PRIORITY_LABELS = { URGENT: 'Urgent', STANDARD: 'Normal', LOW: 'Can wait' };
 

@@ -145,6 +145,10 @@ model AIClassification {
   matchedKeywords     String     @db.Text
   citizenSelected     String?
   adminCorrected      Boolean    @default(false)
+  // How urgent the AI found a complaint (utils/urgencyDetector.js) and the words that
+  // decided it (JSON). Empty for suggestions and for complaints sent before Oct 16, 2026.
+  predictedPriority   Priority?
+  urgencyKeywords     String?    @db.Text
   createdAt           DateTime   @default(now())
   submission          Submission @relation(fields: [submissionId], references: [id])
 }

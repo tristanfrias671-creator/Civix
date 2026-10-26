@@ -229,18 +229,21 @@ export default function RoleSelect() {
     <div ref={pageRef} className="min-h-screen relative" style={{ background: '#eef2f9' }} lang={lang}>
       <style>{popCss}</style>
 
-      {/* ── Full-page fixed photo background (shows through below the hero too) ── */}
-      <BrandImg kind="hero" className="fixed inset-0 w-full h-full object-cover" />
-      {/* Light blue wash over the photo (about half its former strength, so the building stays clear). */}
-      <div className="fixed inset-0" style={{ background: 'linear-gradient(180deg, rgba(6,16,42,0.06) 0%, rgba(70,100,150,0.13) 30%, rgba(160,185,220,0.2) 48%, rgba(160,185,220,0.25) 100%)' }} />
-      {/* Extra shade behind the hero text so white text stays readable on a bright photo:
-          from the left on wide screens, from the top on phones. */}
-      <div className="fixed inset-0 hidden md:block" style={{
-        background: 'linear-gradient(90deg, rgba(6,16,42,0.64) 0%, rgba(6,16,42,0.44) 38%, rgba(6,16,42,0) 60%)',
-        WebkitMaskImage: 'linear-gradient(180deg, #000 0%, #000 58%, transparent 80%)',
-        maskImage: 'linear-gradient(180deg, #000 0%, #000 58%, transparent 80%)',
-      }} />
-      <div className="fixed inset-0 md:hidden" style={{ background: 'linear-gradient(180deg, rgba(6,16,42,0.5) 0%, rgba(6,16,42,0.56) 55%, rgba(6,16,42,0) 78%)' }} />
+      {/* ── Full-page fixed photo background (shows through below the hero too). Its box
+          keeps one size, so phones don't zoom the photo while scrolling (see index.css). ── */}
+      <div className="cvx-photo-backdrop" aria-hidden="true">
+        <BrandImg kind="hero" className="absolute inset-0 w-full h-full object-cover" />
+        {/* Light blue wash over the photo (about half its former strength, so the building stays clear). */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(6,16,42,0.06) 0%, rgba(70,100,150,0.13) 30%, rgba(160,185,220,0.2) 48%, rgba(160,185,220,0.25) 100%)' }} />
+        {/* Extra shade behind the hero text so white text stays readable on a bright photo:
+            from the left on wide screens, from the top on phones. */}
+        <div className="absolute inset-0 hidden md:block" style={{
+          background: 'linear-gradient(90deg, rgba(6,16,42,0.64) 0%, rgba(6,16,42,0.44) 38%, rgba(6,16,42,0) 60%)',
+          WebkitMaskImage: 'linear-gradient(180deg, #000 0%, #000 58%, transparent 80%)',
+          maskImage: 'linear-gradient(180deg, #000 0%, #000 58%, transparent 80%)',
+        }} />
+        <div className="absolute inset-0 md:hidden" style={{ background: 'linear-gradient(180deg, rgba(6,16,42,0.5) 0%, rgba(6,16,42,0.56) 55%, rgba(6,16,42,0) 78%)' }} />
+      </div>
 
       {/* ── Top Navbar ── */}
       <header className="relative z-20" style={{ background: 'linear-gradient(90deg, rgba(11,47,102,0.88), rgba(18,58,122,0.8))', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>

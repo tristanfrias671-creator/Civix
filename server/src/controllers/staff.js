@@ -33,12 +33,13 @@ const NEEDS_PROOF = {
 const NEEDS_PROGRESS_PHOTO = 'Add at least one photo to post a progress update.';
 // Each status update with its proof photos, newest first.
 const LOGS_WITH_PHOTOS = { orderBy: { createdAt: 'desc' }, include: { photos: { orderBy: { createdAt: 'asc' } } } };
-// What the report window shows of a report.
+// What the report window shows of a report (with how urgent the AI found it, and why).
 const REPORT_DETAIL = {
   user: { select: { fullName: true, email: true, citizenId: true } },
   location: true,
   media: true,
   statusLogs: LOGS_WITH_PHOTOS,
+  aiClassification: { select: { predictedPriority: true, urgencyKeywords: true } },
 };
 // Changes to how urgent a report is, newest first (they are kept apart from the
 // report, like office moves).
@@ -468,8 +469,8 @@ async function updateMySubmission(req, res) {
 }
 
 // PATCH /api/staff/portal/urgency/:id { priority, reason } — the office changes how
-// urgent a report is (Urgent / Normal / Can wait; the citizen chose it for a
-// complaint). The resolve-by date is counted again (utils/deadline.js). A reason is
+// urgent a report is (Urgent / Normal / Can wait; the AI set it for a complaint from
+// its description). The resolve-by date is counted again (utils/deadline.js). A reason is
 // required: the citizen sees it on the Track page and by email, and administrators
 // see every change (report page and Audit Log).
 async function updateMyUrgency(req, res) {

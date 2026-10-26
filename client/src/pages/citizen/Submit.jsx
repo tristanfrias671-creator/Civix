@@ -15,7 +15,7 @@ import api from '../../utils/api';
 import { fetchFormTicket } from '../../utils/reportGuard';
 import { suggestLocations, withBarangay, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
 import { officeLabel } from '../../data/officeNames';
-import { PRIORITY_ORDER, DEFAULT_DEADLINES, urgencyDays, addWorkingDays } from '../../data/urgency';
+import { DEFAULT_DEADLINES, urgencyDays, addWorkingDays } from '../../data/urgency';
 
 const fadeCss = `
 @keyframes submitFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
@@ -62,61 +62,38 @@ function cleanMobile(raw) {
 // A form ticket only works a few seconds after it was issued (see utils/reportGuard).
 const TICKET_READY_MS = 3200;
 
-const CALENDAR_PATH = 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z';
+const AI_PATH = 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z';
 const PHONE_PATH = 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z';
 
-// How urgent a complaint is, in the form's own style: three choices with a round
-// radio button (grey border, blue when chosen; Normal to start), each with its
-// working days and one line on when to choose it. Urgent adds a one-line "call 911"
-// note, and the last line gives the date the office should finish by (working days
-// counted like the server).
-function UrgencyField({ t, value, onChange, deadlines, hotline }) {
-  const days = urgencyDays(deadlines, 'COMPLAINT', value);
+// How urgent a complaint is, set automatically from the description (the AI on the
+// server reads it again when the report is sent): one line with the level and the
+// date the office should finish by (working days counted like the server). Nothing
+// to choose. Urgent adds a one-line "call 911" note.
+function AutoUrgency({ t, priority, deadlines, hotline }) {
+  const days = urgencyDays(deadlines, 'COMPLAINT', priority);
   return (
-    <fieldset>
-      <legend className="block text-sm font-medium text-gray-700">{t.urgencyLabel}</legend>
-      <p className="text-sm text-gray-600 mb-2">{t.urgencyHint}</p>
-      <div className="space-y-2">
-        {PRIORITY_ORDER.map(key => {
-          const on = value === key;
-          return (
-            <label key={key} data-urgency={key}
-              className={`flex items-start gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-blue-600 ${
-                on ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-gray-300 bg-white hover:border-gray-400'
-              }`}>
-              <input type="radio" name="urgency" value={key} checked={on} onChange={() => onChange(key)} className="sr-only" />
-              <span aria-hidden="true"
-                className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${on ? 'border-blue-700' : 'border-gray-400'}`}>
-                {on && <span className="w-2.5 h-2.5 rounded-full bg-blue-700" />}
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="text-[15px] font-semibold text-gray-900">{t.urgencyLevels[key].name}</span>
-                  <span className="text-sm text-gray-600">{t.workingDays(urgencyDays(deadlines, 'COMPLAINT', key))}</span>
-                </span>
-                <span className="block text-sm text-gray-600 mt-0.5">{t.urgencyLevels[key].when}</span>
-              </span>
-            </label>
-          );
-        })}
+    <div aria-live="polite" data-urgency-auto={priority} className="mt-3 space-y-2">
+      <div data-urgency-line className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-700">
+        <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d={AI_PATH} />
+        </svg>
+        <div className="space-y-1">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span>{t.urgencyAuto}</span>
+            <PriorityBadge priority={priority} label={t.urgencyLevels[priority].name} />
+          </p>
+          <p>{t.targetLead} <strong className="font-semibold text-gray-900">{formatDueDate(addWorkingDays(new Date(), days), true)}</strong></p>
+        </div>
       </div>
-
-      {value === 'URGENT' && (
-        <p role="note" className="mt-2 flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-500/40 bg-red-50 px-4 py-2.5 text-sm text-gray-800">
+      {priority === 'URGENT' && (
+        <p role="note" className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-500/40 bg-red-50 px-4 py-2.5 text-sm text-gray-800">
           <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d={PHONE_PATH} />
           </svg>
           <span><strong className="font-bold text-red-800">{t.dangerTitle}</strong> {t.dangerText(hotline)}</span>
         </p>
       )}
-
-      <p aria-live="polite" data-urgency-target className="mt-3 flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-700">
-        <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d={CALENDAR_PATH} />
-        </svg>
-        <span>{t.targetLead} <strong className="font-semibold text-gray-900">{formatDueDate(addWorkingDays(new Date(), days), true)}</strong></span>
-      </p>
-    </fieldset>
+    </div>
   );
 }
 
@@ -162,9 +139,10 @@ export default function Submit() {
   const [loading, setLoading] = useState(false);
   const [trackingId, setTrackingId] = useState(null);
   const [dueAt, setDueAt] = useState(null);
-  // How urgent a complaint is, the working days for each choice and the emergency
-  // hotline (Settings), and what was sent (confirmation).
-  const [priority, setPriority] = useState('STANDARD');
+  // How urgent the AI finds a complaint ({ priority, words }, while typing), the
+  // working days for each level and the emergency hotline (Settings), and what the
+  // server decided when the report was sent (confirmation).
+  const [urgency, setUrgency] = useState(null);
   const [deadlines, setDeadlines] = useState(DEFAULT_DEADLINES);
   const [hotline, setHotline] = useState('');
   const [sentPriority, setSentPriority] = useState(null);
@@ -290,13 +268,19 @@ export default function Submit() {
     if (location.state?.type) setForm(p => ({ ...p, type: location.state.type }));
   }, [location.state]);
 
+  // After each pause in typing, the AI suggests an office and reads how urgent the
+  // text is. Only the newest answer counts (an older one can arrive late).
+  const aiRequestRef = useRef(0);
   const runAI = useCallback((text) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!text || text.length < 10) { setAiResult(null); setAiLoading(false); return; }
+    const request = ++aiRequestRef.current;
+    if (!text || text.length < 10) { setAiResult(null); setUrgency(null); setAiLoading(false); return; }
     setAiLoading(true);
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await api.post('/classify', { text });
+        if (request !== aiRequestRef.current) return;
+        setUrgency(res.data.urgency || null);
         if (res.data.department !== 'UNASSIGNED') {
           setAiResult(res.data);
           setAiDismissed(false);
@@ -304,17 +288,21 @@ export default function Submit() {
           setAiResult(null);
         }
       } catch {
+        if (request !== aiRequestRef.current) return;
         setAiResult(null);
+        setUrgency(null);
       } finally {
-        setAiLoading(false);
+        if (request === aiRequestRef.current) setAiLoading(false);
       }
     }, 600);
   }, []);
 
+  // Complaints are always read (for how urgent they are); a suggestion only while no
+  // office is chosen (for the office). Feedback isn't read.
   function handleDescriptionChange(e) {
     const text = e.target.value;
     setForm(p => ({ ...p, description: text }));
-    if (!form.department && !isFeedback) runAI(text);
+    if (!isFeedback && (form.type === 'COMPLAINT' || !form.department)) runAI(text);
     else { setAiResult(null); setAiLoading(false); }
   }
 
@@ -354,7 +342,6 @@ export default function Submit() {
         fd.append('latitude', String(pin.lat));
         fd.append('longitude', String(pin.lng));
       }
-      if (form.type === 'COMPLAINT') fd.append('priority', priority);
       if (form.type === 'FEEDBACK') {
         fd.append('rating', String(feedbackRating));
         fd.append('reaction', feedbackReaction);
@@ -396,7 +383,7 @@ export default function Submit() {
       }
       setTrackingId(res.data.trackingId);
       setDueAt(res.data.submission?.dueAt || null);
-      setSentPriority(form.type === 'COMPLAINT' ? res.data.submission?.priority || priority : null);
+      setSentPriority(form.type === 'COMPLAINT' ? res.data.submission?.priority || null : null);
       toast.success(t.sentToast);
     } catch (err) {
       const data = err.response?.data;
@@ -430,7 +417,7 @@ export default function Submit() {
     setFeedbackTags([]);
     setAiResult(null);
     setAiDismissed(false);
-    setPriority('STANDARD');
+    setUrgency(null);
     setSentPriority(null);
   }
 
@@ -569,6 +556,8 @@ export default function Submit() {
                   const type = e.target.value;
                   setForm(p => ({ ...p, type }));
                   if (type === 'FEEDBACK') { setAiResult(null); setAiLoading(false); setDeptOpen(false); }
+                  // A complaint's text is read again for how urgent it is.
+                  else if (type === 'COMPLAINT') runAI(form.description);
                 }}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm">
                 <option value="COMPLAINT">{t.types.COMPLAINT}</option>
@@ -767,6 +756,11 @@ export default function Submit() {
               </p>
             </div>
 
+            {/* HOW URGENT (complaints): set automatically from the description */}
+            {form.type === 'COMPLAINT' && urgency && (
+              <AutoUrgency t={t} priority={urgency.priority} deadlines={deadlines} hotline={hotline} />
+            )}
+
             {/* AI Suggestion Panel */}
             {aiResult && !aiDismissed && !form.department && (
               <div className="mt-3 rounded-xl border border-blue-200 overflow-hidden">
@@ -814,11 +808,6 @@ export default function Submit() {
               </div>
             )}
           </div>
-
-          {/* HOW URGENT (complaints) */}
-          {form.type === 'COMPLAINT' && (
-            <UrgencyField t={t} value={priority} onChange={setPriority} deadlines={deadlines} hotline={hotline} />
-          )}
 
           {/* FILE ATTACHMENT (not for feedback) */}
           {!isFeedback && <div>

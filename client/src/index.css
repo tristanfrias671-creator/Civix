@@ -141,6 +141,20 @@ body {
   }
 }
 
+/* The photo that stays behind the homepage and the sign-in pages while they scroll.
+   Its box is as tall as the screen can get (lvh) instead of following the screen's
+   bottom edge: phones make the screen taller when the address bar hides, and a box
+   that followed it was re-fitted, so the photo seemed to zoom. (vh where lvh isn't
+   known; phones size vh the same tall way.) */
+.cvx-photo-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: 100lvh;
+}
+
 /* The language list that drops down under the header's language button */
 @keyframes lang-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .lang-menu { animation: lang-menu-in .14s ease-out both; }

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import { PriorityBadge } from '../../components/common/StatusBadge';
 import { useTheme } from '../../context/ThemeContext';
+import { PRIORITY_LABEL } from '../../data/urgency';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
 
@@ -105,6 +107,13 @@ const STAT_CARDS = [
   { key: 'manualOverrides', label: 'Corrected by Staff', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z', light: { color:'#dc2626', bg:'#fee2e2', iconBg:'rgba(220,38,38,0.15)' }, dark: { color:'#f87171', bg:'rgba(220,38,38,0.1)', iconBg:'rgba(220,38,38,0.2)' } },
 ];
 
+// How urgent the AI set complaints, in its bars.
+const URGENCY_LEVELS = [
+  { key: 'URGENT',   color: '#dc2626' },
+  { key: 'STANDARD', color: '#2563eb' },
+  { key: 'LOW',      color: '#64748b' },
+];
+
 const FILTERS = [
   { key: '', label: 'All Records', icon: 'M4 6h16M4 12h16M4 18h16' },
   { key: 'correct',    label: 'Correct',    icon: 'M5 13l4 4L19 7' },
@@ -167,7 +176,7 @@ export default function AIClassification() {
           </div>
           <div>
             <h1 className="text-2xl font-bold" style={{ color: text.primary }}>AI Classification Review</h1>
-            <p className="text-sm mt-0.5" style={{ color: text.secondary }}>Monitor and validate the AI's department prediction accuracy</p>
+            <p className="text-sm mt-0.5" style={{ color: text.secondary }}>Monitor and validate the AI's office and urgency predictions</p>
           </div>
         </div>
       </div>
@@ -269,6 +278,47 @@ export default function AIClassification() {
         </div>
       )}
 
+      {/* ── Urgency detection: how urgent the AI set complaints, and how many the offices kept ── */}
+      {stats?.urgency && (
+        <div className="rounded-2xl border mb-6 overflow-hidden" style={{ background: card.bg, borderColor: card.border }} data-urgency-stats>
+          <div className="flex flex-col lg:flex-row">
+            <div className="lg:w-56 flex flex-col items-center justify-center p-6 border-b lg:border-b-0 lg:border-r" style={{ borderColor: card.border }}>
+              <p className="text-[11px] uppercase tracking-widest font-semibold mb-1" style={{ color: dark ? '#93c5fd' : '#1d4ed8' }}>Kept by offices</p>
+              <p className="text-4xl font-black" style={{ color: dark ? '#60a5fa' : '#2563eb' }}>{stats.urgency.accuracy}%</p>
+              <p className="text-xs mt-2 text-center" style={{ color: text.secondary }}>
+                {stats.urgency.kept} of {stats.urgency.rated} complaints kept the urgency the AI set
+              </p>
+            </div>
+            <div className="flex-1 p-6">
+              <h3 className="text-sm font-bold" style={{ color: text.primary }}>Urgency Detection</h3>
+              <p className="text-xs mt-0.5 mb-4" style={{ color: text.secondary }}>
+                The AI reads each complaint's description and sets Urgent, Normal or Can wait.
+                The offices changed {stats.urgency.changed} of {stats.urgency.rated}, each with a reason.
+              </p>
+              <div className="space-y-3.5">
+                {URGENCY_LEVELS.map(level => {
+                  const value = stats.urgency.byLevel?.[level.key] || 0;
+                  const pct = stats.urgency.rated > 0 ? Math.round((value / stats.urgency.rated) * 100) : 0;
+                  return (
+                    <div key={level.key}>
+                      <div className="flex justify-between text-xs mb-1.5">
+                        <span className="font-medium" style={{ color: text.secondary }}>Set as {PRIORITY_LABEL[level.key]}</span>
+                        <span className="font-bold" style={{ color: text.primary }}>
+                          {value}<span className="font-normal ml-1" style={{ color: text.secondary }}>({pct}%)</span>
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.07)' : '#f1f5f9' }}>
+                        <div className="h-2 rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: level.color }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Table Card ── */}
       <div className="rounded-2xl border overflow-hidden" style={{ background: card.bg, borderColor: card.border }}>
 
@@ -298,7 +348,7 @@ export default function AIClassification() {
         </div>
 
         {loading ? (
-          <div className="overflow-x-auto"><SkeletonTable cols={7} rows={10} /></div>
+          <div className="overflow-x-auto"><SkeletonTable cols={8} rows={10} /></div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center">
             <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
@@ -315,7 +365,7 @@ export default function AIClassification() {
             <table ref={tableRef} className="mobile-cards w-full text-sm">
               <thead>
                 <tr style={{ background: table.head }}>
-                  {['Tracking ID', 'Citizen', 'AI Prediction', 'Confidence', 'Final Department', 'Status', ''].map((h, i) => (
+                  {['Transaction Code', 'Citizen', 'AI Prediction', 'Confidence', 'Final Department', 'AI Urgency', 'Status', ''].map((h, i) => (
                     <th key={i} className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap"
                       style={{ color: table.headText }}>
                       {h}
@@ -356,6 +406,19 @@ export default function AIClassification() {
                           style={{ color: mismatch ? (dark ? '#f87171' : '#dc2626') : text.secondary }}>
                           {sub?.department}
                         </span>
+                      </td>
+                      {/* How urgent the AI set a complaint; an arrow when the office changed it */}
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        {r.predictedPriority ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <PriorityBadge priority={r.predictedPriority} />
+                            {sub?.priority && sub.priority !== r.predictedPriority && (
+                              <span className="text-xs font-medium" style={{ color: text.secondary }}>→ {PRIORITY_LABEL[sub.priority]}</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-xs" style={{ color: text.secondary }}>—</span>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 whitespace-nowrap">
                         <StatusPill predicted={r.predictedDepartment} final={sub?.department} adminCorrected={r.adminCorrected} dark={dark} />

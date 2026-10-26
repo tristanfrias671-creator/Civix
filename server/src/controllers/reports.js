@@ -684,8 +684,8 @@ function drawPdfReport(doc, period, d, seal) {
   });
   y += CARD_H + 8;
 
-  // How urgent the complaints and suggestions were (chosen by the citizen, or changed
-  // by the office), and whether the urgent ones were resolved on time.
+  // How urgent the complaints and suggestions were (set by the AI from a complaint's
+  // description, or changed by the office), and whether the urgent ones were resolved on time.
   [
     ['Urgent',           d.urgent,               '#b91c1c'],
     ['Normal',           d.normal,               '#1d4ed8'],
@@ -831,7 +831,7 @@ function drawPdfReport(doc, period, d, seal) {
 
   if (shown.length) {
     y = pdfTable(doc, y, [
-      { label: 'TRACKING ID', x: 55,  width: 110 },
+      { label: 'TRANSACTION CODE', x: 55, width: 110 },
       { label: 'TYPE',        x: 168, width: 64, align: 'center' },
       { label: 'OFFICE',      x: 238, width: 160 },
       { label: 'STATUS',      x: 402, width: 80, align: 'center' },
@@ -1248,7 +1248,7 @@ async function generateExcel(req, res) {
         : `All ${d.total} submission(s) filed ${period.rangeFull}`;
     let rl = xlBanner(sLog, 7, `CIVIX — ${isAll ? 'Recent Submissions Log' : 'Submissions Log'}`, `${logNote}   |   Generated ${genDate}`);
     const logHeader = rl;
-    rl = xlHeaderRow(sLog, rl, ['Tracking ID', 'Type', 'Office', 'Status', 'Urgency', 'Sentiment', 'Date Filed']);
+    rl = xlHeaderRow(sLog, rl, ['Transaction Code', 'Type', 'Office', 'Status', 'Urgency', 'Sentiment', 'Date Filed']);
     if (d.log.length) sLog.autoFilter = { from: { row: logHeader, column: 1 }, to: { row: logHeader, column: 7 } };
     d.log.forEach((s, i) => {
       sLog.getCell(rl, 1).value = s.trackingId;

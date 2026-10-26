@@ -913,7 +913,7 @@ export default function Analytics() {
 
       {/* Urgency: how urgent complaints and suggestions are, and urgent ones finished on time */}
       <div className="mb-6">
-        <ChartCard title="Urgency" subtitle="How urgent complaints and suggestions are: chosen by the citizen, or changed by the office with a reason">
+        <ChartCard title="Urgency" subtitle="How urgent complaints and suggestions are: set by the AI from a complaint's description, or changed by the office with a reason">
           {(() => {
             const levels = [
               { label: 'Urgent',   color: '#B91C1C' },

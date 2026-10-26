@@ -207,7 +207,7 @@ export default function AdminDashboard() {
           <table ref={tableRef} className="mobile-cards w-full text-sm">
             <thead>
               <tr style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#f9fafb', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}` }}>
-                {['Tracking ID','Citizen','Type','Department','Status','Date'].map(h => (
+                {['Transaction Code','Citizen','Type','Department','Status','Date'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{h}</th>
                 ))}
               </tr>

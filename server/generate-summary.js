@@ -145,7 +145,7 @@ bullet('Lists all submissions assigned to the staff\'s department');
 bullet('Filter by status, type, and search keyword');
 
 subHead('Track & Monitor');
-bullet('Track any submission by Tracking ID');
+bullet('Track any submission by Transaction Code');
 bullet('View all submissions across all departments');
 bullet('Filters: status, type, department, text search');
 bullet('Slide-in detail panel with progress timeline');
@@ -182,7 +182,7 @@ bullet('GET  /staff/portal/stats — Staff dashboard KPIs');
 bullet('GET  /staff/portal/submissions — Department submissions');
 bullet('GET  /staff/portal/monitor    — All submissions (read)');
 bullet('PATCH /staff/portal/assign/:id — Reassign department & status');
-bullet('GET  /staff/portal/track/:id   — Track by tracking ID');
+bullet('GET  /staff/portal/track/:id   — Track by transaction code');
 
 subHead('Settings');
 bullet('20 LGU offices stored as default categories');
