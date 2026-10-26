@@ -172,7 +172,7 @@ export default function SubmissionDetail() {
   if (loading) return <div className="p-6 max-w-5xl mx-auto"><SkeletonDetail /></div>;
   if (!submission) return <div className="p-6 text-gray-500 dark:text-slate-400">Submission not found.</div>;
 
-  // Feedback rates the municipality's service as a whole: no office, status steps or deadline.
+  // Feedback has no status steps or deadline; its office is optional ('General' = the whole municipality).
   const isFeedback = submission.type === 'FEEDBACK';
   const ai = submission.aiClassification;
   const aiKeywords = ai?.matchedKeywords ? (() => { try { return JSON.parse(ai.matchedKeywords); } catch { return []; } })() : [];
@@ -469,7 +469,9 @@ export default function SubmissionDetail() {
             <p className="mt-5 flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-900/40 text-gray-500 dark:text-slate-400">
               <Icon name="citizens" className="w-4 h-4 mt-px flex-shrink-0" />
               {isFeedback
-                ? "View only. Feedback rates the municipality's service as a whole, so no office acts on it."
+                ? submission.department === 'General'
+                  ? "View only. This feedback rates the municipality's service as a whole, so no office gets it."
+                  : `View only. This feedback was sent to ${submission.department}. That office's staff can read it, and move it if it is meant for another office.`
                 : "View only. The assigned office's staff update this report's status, urgency and office."}
             </p>
           </div>
@@ -487,8 +489,9 @@ export default function SubmissionDetail() {
 }
 
 // Spam / Invalid, for administrators: delete a report the office's staff marked as
-// spam (only those can be deleted; the Audit Log keeps a record). Feedback goes to
-// no office, so for feedback the administrator also marks it, or puts it back.
+// spam (only those can be deleted; the Audit Log keeps a record). General feedback
+// goes to no office, so for feedback the administrator also marks it, or puts it back
+// (feedback about an office can also be marked by that office's staff).
 function SpamPanel({ submission, onChanged }) {
   const navigate = useNavigate();
   const [reason, setReason] = useState('');
@@ -574,7 +577,7 @@ function SpamPanel({ submission, onChanged }) {
         <>
           <h3 id="spam-panel-title" className="text-sm font-bold text-gray-800 dark:text-slate-100">Spam or not real feedback?</h3>
           <p className="text-sm text-gray-600 dark:text-slate-300 mt-1">
-            Feedback goes to no office, so administrators mark it. Marked feedback leaves every list and count, and can then be deleted.
+            Administrators can mark any feedback; feedback about an office can also be marked by that office's staff. Marked feedback leaves every list and count, and can then be deleted.
           </p>
           <input type="text" value={reason} onChange={e => setReason(e.target.value)} maxLength={500}
             aria-label="Reason" placeholder="Reason (required), e.g. a test message"

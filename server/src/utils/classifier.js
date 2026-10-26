@@ -109,7 +109,8 @@ const KEYWORD_DB = {
   // Civil Society Development Office: organizations, cooperatives, livelihood.
   'CSDO': [
     // English
-    ['csdo', 4], ['civil society development office', 4], ['civil society', 3], ['civil society organization', 3], ['civil society organizations', 3],
+    ['csdo', 4], ['community social development office', 4], ['community social development', 3],
+    ['social development office', 3], ['civil society development office', 4], ['civil society', 3], ['civil society organization', 3], ['civil society organizations', 3],
     ['cso', 3], ['csos', 3], ['ngo', 3], ['ngos', 3], ['non-government organization', 3], ["people's organization", 3],
     ['people organization', 3], ['organization', 1], ['organizations', 1], ['association', 2], ['associations', 2],
     ['accreditation', 3], ['accredited', 3], ['accredit', 3], ['youth organization', 3], ["women's organization", 3],
@@ -440,11 +441,16 @@ for (const [dept, keywords] of Object.entries(KEYWORD_DB)) {
   }
 }
 
-// The offices the classifier can suggest (the citizen form's list).
+// Every office the classifier has keywords for. Which of them the municipality uses
+// is set in Settings → Departments; pass that list to classifyText.
 const OFFICES = Object.keys(KEYWORD_DB);
 const NO_OFFICE = () => ({ department: 'UNASSIGNED', confidence: 0, matchedKeywords: [], allScores: {} });
 
-function classifyText(rawText) {
+// `allowed`: the offices on the Settings list. Only those are suggested (leave it out
+// to consider every office, as the evaluation scripts do). Confidence is still
+// measured against every office's points, and a text that is mainly about an office
+// no longer on the list gets no suggestion rather than a weak guess.
+function classifyText(rawText, allowed) {
   if (!rawText || typeof rawText !== 'string' || rawText.trim().length < 3) return NO_OFFICE();
 
   const tokens = preprocessText(rawText.slice(0, MAX_CHARS)).split(' ').filter(t => t.length >= 2);
@@ -489,11 +495,16 @@ function classifyText(rawText) {
   }
 
   // Offices by score, highest first (a tie keeps the order of KEYWORD_DB).
-  const sorted = OFFICES.filter(o => scores.get(o) > 0).sort((a, b) => scores.get(b) - scores.get(a));
+  const scored = OFFICES.filter(o => scores.get(o) > 0);
+  const totalScore = scored.reduce((sum, o) => sum + scores.get(o), 0);
+  const topScore = Math.max(0, ...scored.map(o => scores.get(o)));
+  const onList = Array.isArray(allowed) ? new Set(allowed) : null;
+  const sorted = scored.filter(o => !onList || onList.has(o)).sort((a, b) => scores.get(b) - scores.get(a));
   if (sorted.length === 0) return NO_OFFICE();
 
   const winner = sorted[0];
-  const totalScore = sorted.reduce((sum, o) => sum + scores.get(o), 0);
+  // Mainly about an office that was taken off the list: no suggestion.
+  if (scores.get(winner) * 2 < topScore) return NO_OFFICE();
   const confidence = Math.min(Math.round((scores.get(winner) / totalScore) * 100), 99);
   const allScores = Object.fromEntries(sorted.slice(0, 5).map(o => [o, Math.round(scores.get(o) * 10) / 10]));
 

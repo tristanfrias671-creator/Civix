@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useLocation } from 'react-router-dom';
 import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
@@ -12,6 +12,7 @@ import { useText } from '../../i18n/LanguageContext';
 import TRACK_TEXT from '../../i18n/trackText';
 import { officeLabel } from '../../data/officeNames';
 import api from '../../utils/api';
+import { copyText } from '../../utils/clipboard';
 import { mediaUrl } from '../../utils/mediaUrl';
 
 const fadeCss = `
@@ -112,7 +113,7 @@ const STATUS_TONE = {
 // History dot for an urgency change, by the new urgency.
 const URGENCY_DOT = { URGENT: '#b91c1c', STANDARD: '#1d4ed8', LOW: '#475569' };
 
-// Feedback rates the municipality's service as a whole: no office, no status steps.
+// Feedback has no status steps; it may name an office ('General' = the whole municipality).
 const FEEDBACK_TONE = {
   color: '#15803d', textDark: '#4ade80', bg: '#f0fdf4', border: '#bbf7d0', darkBg: 'rgba(22,163,74,0.10)', darkBorder: 'rgba(22,163,74,0.35)',
   icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
@@ -304,10 +305,19 @@ export default function Track() {
     lookupCode();
   }
 
-  function copyTrackingId(id) {
-    navigator.clipboard.writeText(id)
-      .then(() => toast.success(t.copied))
-      .catch(() => toast.error(t.copyFailed));
+  // The Copy button shows "Copied" for a moment after a tap.
+  const [codeCopied, setCodeCopied] = useState(false);
+  const copiedTimer = useRef(null);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  async function copyTrackingId(id) {
+    if (await copyText(id)) {
+      setCodeCopied(true);
+      toast.success(t.copied, { id: 'code-copied' });
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCodeCopied(false), 2500);
+    } else {
+      toast.error(t.copyFailed, { id: 'code-copied' });
+    }
   }
 
   return (
@@ -412,6 +422,9 @@ export default function Track() {
           ].sort((a, b) => new Date(b.at) - new Date(a.at));
           history.push({ key: 'submitted', status: null, at: result.createdAt, note: null });
           const office = result.department && result.department !== 'UNASSIGNED' ? officeLabel(result.department) : t.notAssigned;
+          // Feedback about one office names it ('General' = about the whole municipality).
+          const feedbackOffice = isFeedback && result.department && !['General', 'UNASSIGNED'].includes(result.department)
+            ? officeLabel(result.department) : null;
           const sectionTitle = 'text-xs font-bold text-gray-500 uppercase tracking-wide mb-3';
           return (
             <div className="track-fade-2 bg-white rounded-2xl border border-gray-100 overflow-hidden"
@@ -424,13 +437,21 @@ export default function Track() {
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{t.resultCode}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="font-mono text-lg sm:text-xl font-bold text-gray-900 tracking-wide break-all">{result.trackingId}</span>
-                      <button type="button" onClick={() => copyTrackingId(result.trackingId)} title={t.copyTitle} aria-label={t.copyTitle}
-                        className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                          <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                        </svg>
-                        {t.copy}
+                      <span className="font-mono text-lg sm:text-xl font-bold text-gray-900 tracking-wide break-all select-all">{result.trackingId}</span>
+                      <button type="button" onClick={() => copyTrackingId(result.trackingId)} title={t.copyTitle} aria-label={t.copyTitle} data-copy-code
+                        className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors ${codeCopied
+                          ? 'text-green-700 bg-green-50'
+                          : 'text-gray-600 bg-gray-100 hover:bg-gray-200 hover:text-gray-700'}`}>
+                        {codeCopied ? (
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                            <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                          </svg>
+                        )}
+                        {codeCopied ? t.copiedShort : t.copy}
                       </button>
                     </div>
                   </div>
@@ -472,6 +493,7 @@ export default function Track() {
                 {/* Details */}
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
+                    ...(feedbackOffice ? [{ label: t.officeRow, value: feedbackOffice, icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' }] : []),
                     { label: t.location, value: result.address || t.notSpecified, icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' },
                     { label: t.filed, value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
                     ...(isFeedback ? [] : [{ label: t.lastUpdated, value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' }]),

@@ -141,6 +141,10 @@ export default function Login({ role, adminPath }) {
   const navigate = useNavigate();
   const location = useLocation();
   const selectedRole = role || location.state?.role || null;
+  // The staff page to open after signing in (?next=, e.g. a report link from an
+  // email), instead of the dashboard. Only staff portal pages are accepted.
+  const next = new URLSearchParams(location.search).get('next') || '';
+  const backTo = selectedRole === 'STAFF' && /^\/staff\/\w/.test(next) ? next : null;
 
   // Already signed in to this portal (in this tab or another)? If the server still
   // accepts that sign-in, go straight to the dashboard; if not (it expired, or the
@@ -151,10 +155,10 @@ export default function Login({ role, adminPath }) {
     if (!saved) { setCheckingSession(false); return undefined; }
     let active = true;
     api.get('/auth/me', { headers: { Authorization: `Bearer ${saved.token}` } })
-      .then(() => { if (active) navigate(dashboardFor(selectedRole), { replace: true }); })
+      .then(() => { if (active) navigate(backTo || dashboardFor(selectedRole), { replace: true }); })
       .catch(() => { if (active) { logout(selectedRole); setCheckingSession(false); } });
     return () => { active = false; };
-  }, [selectedRole, navigate, logout]);
+  }, [selectedRole, backTo, navigate, logout]);
   const content = ROLE_CONTENT[selectedRole] || ROLE_CONTENT.DEFAULT;
   const CardIcon = content.cardIcon;
 
@@ -184,7 +188,7 @@ export default function Login({ role, adminPath }) {
 
   function destFor(role) {
     return role === 'ADMIN' ? '/admin/dashboard'
-         : role === 'STAFF' ? '/staff/dashboard'
+         : role === 'STAFF' ? backTo || '/staff/dashboard'
          : '/dashboard';
   }
 

@@ -3,6 +3,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const { classifyText } = require('../utils/classifier');
 const { detectUrgency } = require('../utils/urgencyDetector');
 const { createLimiter, limitRequests } = require('../utils/rateLimit');
+const { getDepartmentList } = require('../controllers/settings');
 
 const prisma = require('../utils/prisma');
 
@@ -17,7 +18,7 @@ const NOT_SPAM_REPORT = { submission: { status: { not: 'SPAM' } } };
 // (the form asks after each pause in typing; the limit is far above that): the
 // office, and how urgent a complaint is ({ urgency: { priority, words } }; the
 // server decides again when the report is sent).
-router.post('/', limitRequests({ windowMs: 60 * 1000, max: 120 }), (req, res) => {
+router.post('/', limitRequests({ windowMs: 60 * 1000, max: 120 }), async (req, res) => {
   const { text } = req.body;
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ error: 'text is required' });
@@ -25,7 +26,13 @@ router.post('/', limitRequests({ windowMs: 60 * 1000, max: 120 }), (req, res) =>
   if (!allSuggestions.take('all').ok) return res.json(NO_SUGGESTION);
   const capped = text.slice(0, 2000); // cap input length
   const { priority, words } = detectUrgency(capped);
-  res.json({ ...classifyText(capped), urgency: { priority, words } });
+  try {
+    // Only offices on the Settings list are suggested.
+    res.json({ ...classifyText(capped, await getDepartmentList()), urgency: { priority, words } });
+  } catch (err) {
+    console.error(err);
+    res.json({ ...NO_SUGGESTION, urgency: { priority, words } });
+  }
 });
 
 // GET /api/classify/submission/:id  — returns saved AI classification for a submission

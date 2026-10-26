@@ -3,7 +3,7 @@
 const FULL_NAMES = {
   "Mayor's Office – CRMO": "Mayor's Office – Coastal Resource Management Office (CRMO)",
   HR: 'Human Resource Management Office (HR)',
-  CSDO: 'Civil Society Development Office (CSDO)',
+  CSDO: 'Community Social Development Office (CSDO)',
   OSCA: 'Office of the Senior Citizens Affairs (OSCA)',
   MDRRMO: 'Municipal Disaster Risk Reduction and Management Office (MDRRMO)',
 };

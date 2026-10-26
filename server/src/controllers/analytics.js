@@ -21,7 +21,7 @@ async function getAlerts(req, res) {
   try {
     const now = new Date();
     const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-    // Feedback has no workflow (no office acts on it), so it never needs attention here.
+    // Feedback has no workflow (no status steps or deadline), so it never needs attention here.
     const open = { status: { notIn: CLOSED }, type: { not: 'FEEDBACK' } };
     const select = {
       id: true, trackingId: true, type: true, department: true, status: true,
@@ -50,7 +50,7 @@ async function getAlerts(req, res) {
 
 async function getSummary(req, res) {
   try {
-    // Feedback rates the municipality's service as a whole and has no workflow, so
+    // Feedback has no workflow (no status steps or deadline), so
     // the case figures (pending, resolved, overdue, response rate, resolution time)
     // count complaints and suggestions only. The total counts every submission.
     const cases = { type: { not: 'FEEDBACK' }, ...NOT_SPAM };
@@ -221,7 +221,7 @@ async function getBreakdown(req, res) {
 
     for (const s of submissions) {
       department[s.department] = (department[s.department] || 0) + 1;
-      // Feedback has no urgency (no office acts on it).
+      // Feedback has no urgency.
       if (s.type !== 'FEEDBACK') priority[s.priority] = (priority[s.priority] || 0) + 1;
       type[s.type] = (type[s.type] || 0) + 1;
       citizenDeptMap[s.citizenDepartment] = (citizenDeptMap[s.citizenDepartment] || 0) + 1;

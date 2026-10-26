@@ -44,7 +44,7 @@ const GUIDELINES_TEXT = {
     typeInfo: {
       COMPLAINT: { when: 'Something is wrong and needs action.', examples: ['A broken streetlight or damaged road', 'Garbage that was not collected', 'Clogged drainage or flooding'] },
       SUGGESTION: { when: 'You have an idea to improve a service or place.', examples: ['More recycling bins in the park', 'Clearer signs at the public market', 'A better schedule for a service'] },
-      FEEDBACK: { when: "You want to rate the municipality's service as a whole.", examples: ['Rate it from 1 to 5 stars (required)', 'Pick how you felt about it (required)', 'No office to choose and no photos; we email you a thank-you note'] },
+      FEEDBACK: { when: 'You want to rate the service of the municipality, or of one office.', examples: ['Rate it from 1 to 5 stars (required)', 'Pick how you felt about it (required)', 'Choose the office if it is about one (optional); no photos; we email you a thank-you note'] },
     },
     writeTitle: 'Write a report that gets action',
     writeSubtitle: 'Switch between the two examples to see the difference.',
@@ -164,7 +164,7 @@ const GUIDELINES_TEXT = {
     typeInfo: {
       COMPLAINT: { when: 'May mali o sira na kailangang aksyunan.', examples: ['Sirang ilaw sa kalye o sirang kalsada', 'Basurang hindi nakolekta', 'Baradong kanal o pagbaha'] },
       SUGGESTION: { when: 'May ideya ka para mapabuti ang isang serbisyo o lugar.', examples: ['Dagdag na recycling bin sa parke', 'Mas malinaw na karatula sa pampublikong palengke', 'Mas maayos na iskedyul ng isang serbisyo'] },
-      FEEDBACK: { when: 'Gusto mong bigyan ng marka ang kabuuang serbisyo ng munisipyo.', examples: ['Bigyan ito ng 1 hanggang 5 bituin (kailangan)', 'Piliin kung ano ang naramdaman mo (kailangan)', 'Walang opisinang pipiliin at walang larawan; padadalhan ka namin ng pasasalamat sa email'] },
+      FEEDBACK: { when: 'Gusto mong bigyan ng marka ang serbisyo ng munisipyo, o ng isang opisina.', examples: ['Bigyan ito ng 1 hanggang 5 bituin (kailangan)', 'Piliin kung ano ang naramdaman mo (kailangan)', 'Piliin ang opisina kung tungkol ito sa isa (opsyonal); walang larawan; padadalhan ka namin ng pasasalamat sa email'] },
     },
     writeTitle: 'Sumulat ng ulat na maaaksyunan',
     writeSubtitle: 'Lumipat sa dalawang halimbawa para makita ang pagkakaiba.',
@@ -284,7 +284,7 @@ const GUIDELINES_TEXT = {
     typeInfo: {
       COMPLAINT: { when: 'Adunay sayop o guba nga kinahanglan lihokan.', examples: ['Guba nga suga sa dalan o guba nga karsada', 'Basura nga wala makolekta', 'Barado nga kanal o baha'] },
       SUGGESTION: { when: 'Aduna kay ideya aron mapaayo ang usa ka serbisyo o lugar.', examples: ['Dugang nga recycling bin sa parke', 'Mas klaro nga karatula sa publikong merkado', 'Mas maayong iskedyul sa usa ka serbisyo'] },
-      FEEDBACK: { when: 'Gusto nimong hatagan og marka ang kinatibuk-ang serbisyo sa munisipyo.', examples: ['Hatagi kini og 1 hangtod 5 ka bituon (kinahanglan)', 'Pili-a kung unsa ang imong gibati (kinahanglan)', 'Walay opisina nga pilion ug walay hulagway; padad-an ka namo og pasalamat sa email'] },
+      FEEDBACK: { when: 'Gusto nimong hatagan og marka ang serbisyo sa munisipyo, o sa usa ka opisina.', examples: ['Hatagi kini og 1 hangtod 5 ka bituon (kinahanglan)', 'Pili-a kung unsa ang imong gibati (kinahanglan)', 'Pilia ang opisina kon mahitungod kini sa usa (opsyonal); walay hulagway; padad-an ka namo og pasalamat sa email'] },
     },
     writeTitle: 'Pagsulat og report nga malihokan',
     writeSubtitle: 'Balhin sa duha ka pananglitan aron makita ang kalainan.',

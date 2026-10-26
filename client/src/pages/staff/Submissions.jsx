@@ -668,8 +668,19 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 );
               })()}
 
+              {/* Feedback: no status steps, deadline or urgency, only reading it */}
+              {detail.type === 'FEEDBACK' && detail.status !== 'SPAM' && (
+                <section className="rounded-2xl border border-green-200 dark:border-green-500/40 bg-green-50 p-4 sm:p-5">
+                  <h3 className="text-base font-bold text-gray-900">Feedback for your office</h3>
+                  <p className="text-sm text-gray-700 mt-1">
+                    A citizen rated your office's service. Feedback has no status steps or deadline: read it and use it to
+                    serve better. If it is meant for another office, move it below.
+                  </p>
+                </section>
+              )}
+
               {/* Status steps */}
-              {detail.status !== 'SPAM' && <section className="rounded-2xl border border-gray-200 p-4 sm:p-5">
+              {detail.status !== 'SPAM' && detail.type !== 'FEEDBACK' && <section className="rounded-2xl border border-gray-200 p-4 sm:p-5">
                 <h3 className="text-base font-bold text-gray-900">Update the status</h3>
                 <p className="text-sm text-gray-600 mt-0.5">Choose the step this report is at now.</p>
                 <ol className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -892,6 +903,22 @@ function citizenLine(s) {
   return s.user?.fullName || 'Anonymous';
 }
 
+// Feedback has no status steps, so its row shows the citizen's rating instead.
+function FeedbackStars({ rating }) {
+  const n = Math.max(0, Math.min(5, Number(rating) || 0));
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span aria-hidden="true">
+        <span style={{ color: '#f59e0b' }}>{'★'.repeat(n)}</span>
+        <span className="text-gray-300">{'★'.repeat(5 - n)}</span>
+      </span>
+      <span className="text-xs font-semibold text-gray-700">Rated {n}/5</span>
+    </span>
+  );
+}
+// The status badge, or the rating for feedback (a spam mark still shows as such).
+const statusCell = s => (s.type === 'FEEDBACK' && s.status !== 'SPAM' ? <FeedbackStars rating={s.rating} /> : <StatusBadge status={s.status} />);
+
 export default function StaffSubmissions() {
   const location = useLocation();
   const [submissions, setSubmissions] = useState([]);
@@ -908,8 +935,8 @@ export default function StaffSubmissions() {
   const [counts, setCounts]           = useState(null);
   const [department, setDepartment]   = useState('');
   const [departments, setDepartments] = useState([]);
-  // Opened from the dashboard, the To-do list or a notification.
-  const [detailId, setDetailId]       = useState(() => location.state?.openId || null);
+  // Opened from the dashboard, the To-do list, a notification or an email's link (?open=).
+  const [detailId, setDetailId]       = useState(() => location.state?.openId || new URLSearchParams(location.search).get('open') || null);
   const [freshIds, setFreshIds]       = useState(() => new Set());
   const known = useRef({ ids: null, at: 0 });
   const pageRef = useRef(1);
@@ -923,6 +950,13 @@ export default function StaffSubmissions() {
     const passed = window.history.state?.usr;
     if (passed?.openId || passed?.search) window.history.replaceState({ ...window.history.state, usr: null }, '');
   }, []);
+  // An email's link (?open=) stays in the address bar while its report is open (so
+  // signing in again comes back to it), and leaves once the report is closed.
+  useEffect(() => {
+    if (!detailId && new URLSearchParams(window.location.search).has('open')) {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+    }
+  }, [detailId]);
 
   useEffect(() => {
     api.get('/settings/public').then(r => setDepartments(r.data.departments || [])).catch(() => {});
@@ -1117,7 +1151,7 @@ export default function StaffSubmissions() {
                       <p className="text-xs text-gray-600">{s.user?.email || s.contactNumber || 'No contact'}</p>
                     </td>
                     <td className="px-4 py-3.5"><DeadlineBadge submission={s} showDate /></td>
-                    <td className="px-4 py-3.5 whitespace-nowrap"><StatusBadge status={s.status} /></td>
+                    <td className="px-4 py-3.5 whitespace-nowrap">{statusCell(s)}</td>
                     <td className="px-4 py-3.5 text-xs text-gray-600 whitespace-nowrap">{formatDate(s.createdAt)}</td>
                     <td className="pr-4 text-gray-400">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
@@ -1134,7 +1168,7 @@ export default function StaffSubmissions() {
                   <button type="button" onClick={() => setDetailId(s.id)} className="w-full text-left px-4 py-4 hover:bg-gray-50 transition-colors">
                     <span className="flex items-start justify-between gap-2">
                       <span className="font-mono text-xs font-semibold text-gray-700 pt-1">{s.trackingId}</span>
-                      <StatusBadge status={s.status} />
+                      {statusCell(s)}
                     </span>
                     <span className="flex items-center gap-2 flex-wrap mt-2">
                       <TypeBadge type={s.type} />

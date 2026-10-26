@@ -313,9 +313,11 @@ function formatPhDateTime(date) {
   return new Date(date).toLocaleString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-// The office's full name, as citizens see it (e.g. "Human Resource Management Office (HR)").
+// The office's full name, as citizens see it (e.g. "Human Resource Management Office (HR)"),
+// or null while no office has it yet (the email then says "the concerned office").
 function officeOf(submission) {
-  return officeLabel(submission.department && submission.department !== 'UNASSIGNED' ? submission.department : submission.citizenDepartment);
+  const name = submission.department && submission.department !== 'UNASSIGNED' ? submission.department : submission.citizenDepartment;
+  return name && name !== 'UNASSIGNED' ? officeLabel(name) : null;
 }
 
 function trackUrl(trackingId) {
@@ -363,11 +365,14 @@ function feedbackTagList(raw) {
   }
 }
 
-// Feedback rates the municipality's service as a whole, so its email is a
-// thank-you note: no tracking ID to keep and no status updates to wait for.
+// Feedback rates the municipality's service as a whole or one office's service, so
+// its email is a thank-you note: no tracking ID to keep and no status updates to wait for.
 async function buildFeedbackThanksEmail(submission) {
   const rating = Number(submission.rating) || 0;
   const tags = feedbackTagList(submission.feedbackTags);
+  // The office it is about, or null for feedback on the municipality as a whole.
+  const office = submission.department && !['General', 'UNASSIGNED'].includes(submission.department)
+    ? officeLabel(submission.department) : null;
   const html = layout({
     seal: await sealImageUrl(),
     preheader: `Thank you for rating our services${rating ? ` ${rating} out of 5` : ''}.`,
@@ -375,13 +380,14 @@ async function buildFeedbackThanksEmail(submission) {
     intro: 'Thank you for taking the time to rate the services of the Municipality of Cantilan.',
     body: `
       ${detailRows([
+        office && ['Office', escapeHtml(office)],
         rating && ['Your rating', stars(rating)],
         submission.reaction && ['How you felt', escapeHtml(REACTION_LABELS[submission.reaction] || submission.reaction)],
         tags.length && ['You mentioned', escapeHtml(tags.join(', '))],
         ['Sent', formatPhDateTime(submission.createdAt || new Date())],
       ])}
       ${submission.description ? quote('Your feedback', escapeHtml(excerpt(submission.description))) : ''}
-      ${paragraph(`${escapeHtml(feedbackReply(rating))} Your feedback goes to the municipal administrators, who use it to improve services for everyone in Cantilan.`)}
+      ${paragraph(`${escapeHtml(feedbackReply(rating))} Your feedback goes to ${office ? `the ${escapeHtml(office)} and ` : ''}the municipal administrators, who use it to improve services for everyone in Cantilan.`)}
       ${small(`You don't need to do anything else. If you have a problem that needs action, you can <a href="${SITE_URL}/submit" style="color:${BRAND}; font-weight:600;">send a complaint or suggestion</a> anytime.`)}
       ${small(`Reference no. <span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`)}
     `,
@@ -467,6 +473,61 @@ async function buildUrgencyChangeEmail(submission, change) {
     `,
   });
   return { to: submission.email, subject: `CIVIX — Your report is now marked ${now} (${submission.trackingId})`, html };
+}
+
+// ── For the office's staff ──
+
+// Opens the report in the staff portal (after signing in, if needed).
+function staffReportUrl(submission) {
+  return `${SITE_URL}/staff/submissions?open=${encodeURIComponent(submission.id)}`;
+}
+
+// A new complaint or suggestion for a staff member's office, or one moved there
+// (`move`: { from, byName, reason }; see utils/staffEmails.js). `office` is the
+// staff member's office: for a report with no office yet, the receiving office.
+// The citizen's phone number and email stay in the staff portal.
+async function buildNewReportStaffEmail({ email, fullName }, submission, { office, move } = {}) {
+  const kind = (TYPE_LABELS[submission.type] || 'Report').toLowerCase();
+  const urgent = submission.type === 'COMPLAINT' && submission.priority === 'URGENT';
+  const noOffice = !submission.department || submission.department === 'UNASSIGNED';
+  const photos = submission.media?.length || 0;
+  const hi = `Hi ${escapeHtml(fullName || 'there')},`;
+  let title;
+  let intro;
+  if (move) {
+    const from = move.from && move.from !== 'UNASSIGNED' ? ` from the ${escapeHtml(officeLabel(move.from))}` : '';
+    title = `A ${kind} was moved to your office`;
+    intro = `${hi} ${escapeHtml(move.byName || 'a staff member')} moved this ${kind}${from} to your office.`;
+  } else if (noOffice) {
+    title = `New ${kind} with no office yet`;
+    intro = `${hi} CIVIX couldn't tell which office this ${kind} is for. Your office receives reports like this: please open it and move it to the right office.`;
+  } else {
+    title = `New ${urgent ? 'urgent ' : ''}${kind} for your office`;
+    intro = `${hi} a citizen sent this ${kind} to the ${escapeHtml(officeLabel(submission.department))}.`;
+  }
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: `${submission.trackingId}: ${excerpt(submission.description, 90)}`,
+    icon: urgent ? '!' : move ? '&#8594;' : '&#9993;', tone: urgent ? 'red' : 'blue', title, intro,
+    body: `
+      ${detailRows([
+        ['Transaction Code', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
+        ['Type', escapeHtml(TYPE_LABELS[submission.type] || submission.type)],
+        submission.type === 'COMPLAINT' && submission.priority && ['How urgent', urgencyPill(submission.priority)],
+        ['Office', noOffice ? 'No office yet' : escapeHtml(officeLabel(submission.department))],
+        submission.address && ['Location', escapeHtml(excerpt(submission.address, 120))],
+        photos && ['Photos', `${photos} photo${photos === 1 ? '' : 's'}`],
+        ['Received', formatPhDateTime(submission.createdAt || new Date())],
+        submission.dueAt && ['Due', formatPhDate(submission.dueAt)],
+      ])}
+      ${noteBlock('Why it was moved', move?.reason)}
+      ${submission.description ? quote('What the citizen wrote', escapeHtml(excerpt(submission.description))) : ''}
+      ${button(staffReportUrl(submission), 'Open this report')}
+      ${small("For the citizen's privacy, their phone number and email are not in this email. You can see them in the report in the staff portal.")}
+      ${office ? small(`You get these emails as staff of the ${escapeHtml(officeLabel(office))} in CIVIX.`) : ''}
+    `,
+  });
+  return { to: email, subject: `CIVIX — ${title} (${submission.trackingId})`, html };
 }
 
 const REQUEST_LABELS = { STAFF_ACCOUNT: 'a staff account', ADMIN_ACCESS: 'administrator access' };
@@ -654,6 +715,7 @@ async function buildNewDeviceSignInEmail({ email, fullName, role }, { createdAt,
 const sendSubmissionReceivedEmail = submission => deliver(buildSubmissionReceivedEmail(submission));
 const sendStatusUpdateEmail = (submission, newStatus, note) => deliver(buildStatusUpdateEmail(submission, newStatus, note));
 const sendUrgencyChangeEmail = (submission, change) => deliver(buildUrgencyChangeEmail(submission, change));
+const sendNewReportStaffEmail = (person, submission, info) => deliver(buildNewReportStaffEmail(person, submission, info));
 const sendAccessRequestAlertEmail = (to, request) => deliver(buildAccessRequestAlertEmail(to, request));
 const sendAdminAccessDecisionEmail = (user, approved, note, adminUrl) => deliver(buildAdminAccessDecisionEmail(user, approved, note, adminUrl));
 const sendStaffAccountDecisionEmail = (user, approved, note) => deliver(buildStaffAccountDecisionEmail(user, approved, note));
@@ -693,10 +755,11 @@ async function sendSignInCodeEmail(person, code, minutes, purpose) {
 
 module.exports = {
   sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail, sendUrgencyChangeEmail, sendVerificationCodeEmail,
-  sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail,
+  sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail, sendNewReportStaffEmail,
   sendPasswordResetCodeEmail, sendPasswordChangedEmail, sendNewDeviceSignInEmail, sendSignInCodeEmail,
   // For previews and tests.
   buildSubmissionReceivedEmail, buildFeedbackThanksEmail, buildStatusUpdateEmail, buildUrgencyChangeEmail, buildAccessRequestAlertEmail,
+  buildNewReportStaffEmail,
   buildAdminAccessDecisionEmail, buildStaffAccountDecisionEmail, buildVerificationCodeEmail, toPlainText,
   buildPasswordResetCodeEmail, buildPasswordChangedEmail, buildNewDeviceSignInEmail, buildSignInCodeEmail,
 };

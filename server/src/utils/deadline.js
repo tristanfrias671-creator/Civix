@@ -30,8 +30,8 @@ function phMonthStart(date = new Date()) {
 
 // Working days to resolve a report. The citizen says how urgent a complaint is:
 // Urgent and Can wait have their own times; Normal is the time for its type (a
-// suggestion is Normal unless the office changes it). Feedback rates the
-// municipality's service as a whole: no office acts on it, so it has no deadline (null).
+// suggestion is Normal unless the office changes it). Feedback has no status
+// steps, so it has no deadline (null).
 function deadlineDays(settings, type, priority = 'STANDARD') {
   if (type === 'FEEDBACK') return null;
   if (priority === 'URGENT') return settings.deadlineUrgentDays;

@@ -9,7 +9,7 @@ const prisma = require('../utils/prisma');
 
 // Reports staff marked as spam or invalid (status SPAM) are left out of every figure.
 // Status figures (pending, resolved, response rate, resolution time) count cases
-// only: feedback rates the municipality's service as a whole and has no workflow.
+// only: feedback has no workflow (no status steps or deadline).
 // Same rules as the admin dashboard (controllers/analytics.js).
 const NOT_SPAM = { status: { not: 'SPAM' } };
 const CASES = { type: { not: 'FEEDBACK' }, ...NOT_SPAM };
@@ -46,7 +46,10 @@ function fmtDate(d) {
 const fmtShortDate = d => new Date(d).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric' });
 
 // The office a report sits with, as shown in the logs.
-const officeName = s => (s.type === 'FEEDBACK' ? '—' : !s.department || s.department === 'UNASSIGNED' ? 'Unassigned' : s.department);
+// Feedback shows the office it is about, or a dash when it is about the municipality as a whole.
+const officeName = s => (s.type === 'FEEDBACK'
+  ? (s.department && !['General', 'UNASSIGNED'].includes(s.department) ? s.department : '—')
+  : !s.department || s.department === 'UNASSIGNED' ? 'Unassigned' : s.department);
 
 // Shortens text with "…" until it fits `width` at the current font and size.
 function fitText(doc, text, width) {
@@ -595,16 +598,16 @@ function drawPdfReport(doc, period, d, seal) {
       `A total of ${d.total.toLocaleString()} submission(s) have been recorded, comprising complaints, ` +
       `suggestions, and service feedback from registered citizens. The current response rate for complaints ` +
       `and suggestions stands at ${d.responseRate}%, with an average resolution time of ${d.avgDays} day(s). ` +
-      `Feedback rates the municipality's service as a whole and is not routed to an office. This document is intended ` +
-      `for review by municipal officials and designated department heads.`
+      `Feedback rates the service of the municipality as a whole or of one office, and has no status steps or deadline. ` +
+      `This document is intended for review by municipal officials and designated department heads.`
     : `This ${period.title.toLowerCase()} covers the citizen submissions filed through the CIVIX platform for the ` +
       `Municipality of Cantilan, Surigao del Sur, for the period ${period.rangeFull.replace(/ \(.*\)$/, '')}. ` +
       `${d.total.toLocaleString()} submission(s) were filed in this ${word}, compared with ` +
       `${d.previousTotal.toLocaleString()} in the previous ${word}. ` +
       (period.inProgress ? `The ${word} is still in progress, so the figures run up to the report date. ` : '') +
       `For the complaints and suggestions filed in this ${word}, the response rate is ${d.responseRate}% and the average ` +
-      `resolution time is ${d.avgDays} day(s); statuses are as of ${genDate}. Feedback rates the municipality's service ` +
-      `as a whole and is not routed to an office. This document is intended for review by municipal officials and designated department heads.`;
+      `resolution time is ${d.avgDays} day(s); statuses are as of ${genDate}. Feedback rates the service of the municipality ` +
+      `as a whole or of one office, and has no status steps or deadline. This document is intended for review by municipal officials and designated department heads.`;
   doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Executive Summary', 50, 394);
   doc.moveTo(50, 410).lineTo(W - 50, 410).lineWidth(0.5).stroke(DIVIDER);
   doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID);
@@ -1269,7 +1272,7 @@ async function generateExcel(req, res) {
       stCell.font = { color: { argb: stMeta.text }, bold: true };
       stCell.alignment = { horizontal: 'center' };
 
-      // Feedback has no urgency (no office acts on it).
+      // Feedback has no urgency.
       sLog.getCell(rl, 5).value = s.type === 'FEEDBACK' ? '—' : (PRIORITY_LABELS[s.priority] || titleCase(s.priority));
       sLog.getCell(rl, 5).alignment = { horizontal: 'center' };
       sLog.getCell(rl, 6).value = titleCase(s.sentiment);

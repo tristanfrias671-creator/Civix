@@ -40,12 +40,14 @@ function homeFor(role) {
 }
 
 // Each portal has its own sign-in (an admin and a staff sign-in can share one
-// browser). Signed out of the staff portal: its sign-in page; of the admin portal:
+// browser). Signed out of the staff portal: its sign-in page, which comes back to
+// this page afterwards (e.g. a report link from an email); of the admin portal:
 // the homepage (the admin sign-in page is private).
 function PrivateRoute({ children, role }) {
   const { user, loading } = useAuth();
+  const { pathname, search } = useLocation();
   if (loading) return <SkeletonAppShell />;
-  if (!user) return <Navigate to={role === 'STAFF' ? '/staff-login' : '/'} replace />;
+  if (!user) return <Navigate to={role === 'STAFF' ? `/staff-login?next=${encodeURIComponent(pathname + search)}` : '/'} replace />;
   if (role && user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
   return children;
 }

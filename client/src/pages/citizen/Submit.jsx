@@ -12,6 +12,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useLang, useText } from '../../i18n/LanguageContext';
 import SUBMIT_TEXT, { refusalText } from '../../i18n/submitText';
 import api from '../../utils/api';
+import { copyText } from '../../utils/clipboard';
 import { fetchFormTicket } from '../../utils/reportGuard';
 import { suggestLocations, withBarangay, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
 import { officeLabel } from '../../data/officeNames';
@@ -24,17 +25,14 @@ const fadeCss = `
 .submit-fade-2 { animation: submitFadeUp .45s .14s cubic-bezier(.22,1,.36,1) both; }
 `;
 
-const DEPARTMENTS = [
-  "Mayor's Office – CRMO", 'HR', 'Tourism', 'Motorpool', 'Traffic',
-  'CSDO', 'OSCA', 'MDRRMO',
-  'Municipal Budget Office', 'Municipal Accountant Office',
-  'Municipal Agriculture Office', 'Municipal Health Office',
-  'Municipal Civil Registry Office',
-  'Municipal Social Welfare & Development Office',
-  'Municipal Economic & Natural Resource Office',
-  'Municipal Treasurer Office', 'Municipal Engineering Office',
-  'Municipal Planning & Development Office',
-  'Sangguniang Bayan Office', 'Office of the Vice Mayor',
+// The offices to choose from are the ones in Settings → Departments (from
+// /settings/public). This list is only used if that list can't be loaded; the
+// server then sends a report for an office that isn't on it to the receiving office.
+const FALLBACK_OFFICES = [
+  // The five offices of the study's scope. Same list as the
+  // server's default (controllers/settings.js).
+  'HR', 'Municipal Health Office', 'CSDO',
+  'Municipal Treasurer Office', 'Municipal Civil Registry Office',
 ];
 
 function ConfidenceBadge({ confidence, text }) {
@@ -107,8 +105,8 @@ export default function Submit() {
   const debounceRef = useRef(null);
 
   const [form, setForm] = useState({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
-  // Feedback rates the municipality's service as a whole: no office, no photos,
-  // no deadline (see server controllers/submissions.js).
+  // Feedback has no photos and no deadline, and its office is optional: none means
+  // it is about the municipality's service as a whole (see server controllers/submissions.js).
   const isFeedback = form.type === 'FEEDBACK';
   const [trackInput, setTrackInput] = useState('');
   const [photos, setPhotos] = useState([]);
@@ -139,6 +137,22 @@ export default function Submit() {
   const [loading, setLoading] = useState(false);
   const [trackingId, setTrackingId] = useState(null);
   const [dueAt, setDueAt] = useState(null);
+  // Feedback: the office it went to (null when it is about the whole municipality).
+  const [sentOffice, setSentOffice] = useState(null);
+  // The confirmation's "Copy code" button shows "Copied!" for a moment after a tap.
+  const [codeCopied, setCodeCopied] = useState(false);
+  const copiedTimer = useRef(null);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  async function copyCode() {
+    if (await copyText(trackingId)) {
+      setCodeCopied(true);
+      toast.success(t.codeCopiedToast, { id: 'code-copied' });
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCodeCopied(false), 2500);
+    } else {
+      toast.error(t.copyFailed, { id: 'code-copied' });
+    }
+  }
   // How urgent the AI finds a complaint ({ priority, words }, while typing), the
   // working days for each level and the emergency hotline (Settings), and what the
   // server decided when the report was sent (confirmation).
@@ -146,11 +160,14 @@ export default function Submit() {
   const [deadlines, setDeadlines] = useState(DEFAULT_DEADLINES);
   const [hotline, setHotline] = useState('');
   const [sentPriority, setSentPriority] = useState(null);
+  // The offices citizens can choose (Settings → Departments); null while loading.
+  const [offices, setOffices] = useState(null);
   useEffect(() => {
     api.get('/settings/public').then(r => {
       if (r.data.deadlines) setDeadlines(d => ({ ...d, ...r.data.deadlines }));
       setHotline(r.data.emergencyHotline || '');
-    }).catch(() => {});
+      setOffices(Array.isArray(r.data.departments) ? r.data.departments : FALLBACK_OFFICES);
+    }).catch(() => setOffices(FALLBACK_OFFICES));
   }, []);
   // Why the last send didn't go through, shown above Submit: { text, trackingId? }
   // (trackingId when the same report was already sent).
@@ -333,7 +350,7 @@ export default function Submit() {
     try {
       const fd = new FormData();
       fd.append('type', form.type);
-      if (!isFeedback) fd.append('citizenDepartment', form.department);
+      if (form.department) fd.append('citizenDepartment', form.department);
       fd.append('description', form.description);
       if (form.contactNumber) fd.append('contactNumber', form.contactNumber);
       if (form.email) fd.append('email', form.email);
@@ -383,6 +400,8 @@ export default function Submit() {
       }
       setTrackingId(res.data.trackingId);
       setDueAt(res.data.submission?.dueAt || null);
+      const savedOffice = res.data.submission?.department;
+      setSentOffice(isFeedback && savedOffice && !['General', 'UNASSIGNED'].includes(savedOffice) ? savedOffice : null);
       setSentPriority(form.type === 'COMPLAINT' ? res.data.submission?.priority || null : null);
       toast.success(t.sentToast);
     } catch (err) {
@@ -407,6 +426,8 @@ export default function Submit() {
   function resetForm() {
     setTrackingId(null);
     setDueAt(null);
+    setSentOffice(null);
+    setCodeCopied(false);
     setNotice(null);
     setForm({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
     setPhotos([]);
@@ -442,6 +463,7 @@ export default function Submit() {
                 <span className="block text-sm font-semibold text-gray-700 mt-1">{t.youRated(feedbackRating)}</span>
               </p>
             )}
+            {sentOffice && <p className="text-gray-700 font-medium mb-2">{t.feedbackSentTo(officeLabel(sentOffice))}</p>}
             <p className="text-gray-600 mb-2">{t.thanksHelps}</p>
             <p className="text-sm text-gray-500 mb-1">{t.thanksEmailed}</p>
             <p className="text-xs text-gray-500 mb-8">{t.referenceNo} <span className="font-mono">{trackingId}</span></p>
@@ -473,10 +495,26 @@ export default function Submit() {
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2">{t.receivedTitle}</h2>
             <p className="text-gray-500 mb-2">{t.yourCode}</p>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl px-6 py-4 font-mono text-xl font-bold mb-3"
+            {/* select-all: one press selects the whole code, not just the part between dashes. */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-6 py-4 font-mono text-xl font-bold mb-3 select-all break-all"
               style={{ color: dark ? '#60a5fa' : '#2563eb' }}>
               {trackingId}
             </div>
+            <button type="button" onClick={copyCode} data-copy-code
+              className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 mb-4 rounded-lg border font-semibold text-sm transition-colors ${codeCopied
+                ? 'border-green-300 bg-green-50 text-green-700'
+                : 'border-blue-200 bg-white text-blue-700 hover:bg-gray-50'}`}>
+              {codeCopied ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+              )}
+              {codeCopied ? t.codeCopied : t.copyCode}
+            </button>
             {sentPriority && (
               <p className="flex items-center justify-center gap-2 mb-3 text-sm">
                 <span className="text-gray-700">{t.urgencyOnConfirm}</span>
@@ -565,26 +603,20 @@ export default function Submit() {
                 <option value="FEEDBACK">{t.types.FEEDBACK}</option>
               </select>
             </div>
-            {/* Feedback rates the municipality's service as a whole: no office to choose. */}
-            {isFeedback ? (
-              <div className="flex items-start gap-2.5 sm:self-end rounded-lg border border-green-200 bg-green-50 px-3.5 py-2.5">
-                <Icon name="feedback" className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-700" />
-                <p className="text-sm text-gray-700 leading-snug">
-                  {t.feedbackNoOffice}
-                </p>
-              </div>
-            ) : (
+            {/* The office. For feedback it is optional: no office means the feedback is
+                about the municipality's service as a whole. */}
+            <div>
             <div ref={deptFieldRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {t.officeLabel}
-                {form.department && (
+                {isFeedback ? t.feedbackOfficeLabel : t.officeLabel}
+                {form.department && !isFeedback && (
                   <span className="ml-2 text-xs text-primary font-normal">{t.officeAuto}</span>
                 )}
               </label>
               <button type="button" onClick={() => setDeptOpen(v => !v)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm text-left bg-white flex items-center justify-between gap-2">
-                <span className={form.department ? 'text-gray-900' : 'text-gray-500'}>
-                  {form.department ? officeLabel(form.department) : t.officePlaceholder}
+                <span className={form.department || isFeedback ? 'text-gray-900' : 'text-gray-500'}>
+                  {form.department ? officeLabel(form.department) : isFeedback ? t.feedbackWhole : t.officePlaceholder}
                 </span>
                 <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${deptOpen ? 'rotate-180' : ''}`}
                   fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -595,7 +627,19 @@ export default function Submit() {
               {deptOpen && (
                 <div className="absolute z-20 top-full left-0 right-0 mt-1.5 bg-white rounded-lg border border-gray-200 shadow-lg overflow-y-auto"
                   style={{ maxHeight: '16rem' }}>
-                  {DEPARTMENTS.map(d => (
+                  {offices === null && (
+                    <p className="px-4 py-2.5 text-sm text-gray-500">{t.officesLoading}</p>
+                  )}
+                  {isFeedback && offices !== null && (
+                    <button type="button"
+                      onClick={() => { setForm(p => ({ ...p, department: '' })); setDeptOpen(false); }}
+                      className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                        !form.department ? 'bg-blue-50 text-primary font-semibold' : 'text-gray-700 hover:bg-gray-50'
+                      }`}>
+                      {t.feedbackWhole}
+                    </button>
+                  )}
+                  {(offices || []).map(d => (
                     <button key={d} type="button"
                       onClick={() => {
                         setForm(p => ({ ...p, department: d }));
@@ -611,7 +655,8 @@ export default function Submit() {
                 </div>
               )}
             </div>
-            )}
+            {isFeedback && <p className="text-xs text-gray-500 mt-1">{t.feedbackOfficeHint}</p>}
+            </div>
           </div>
 
           {/* LOCATION */}
@@ -762,7 +807,7 @@ export default function Submit() {
             )}
 
             {/* AI Suggestion Panel */}
-            {aiResult && !aiDismissed && !form.department && (
+            {aiResult && !aiDismissed && !form.department && (!offices || offices.includes(aiResult.department)) && (
               <div className="mt-3 rounded-xl border border-blue-200 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-2.5 bg-blue-600 text-white">
                   <div className="flex items-center gap-2">

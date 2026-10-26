@@ -1089,7 +1089,7 @@ export default function Settings() {
             </p>
             <select id="unassigned-office" value={departments.includes(unassignedOffice) ? unassignedOffice : ''} onChange={e => setUnassignedOffice(e.target.value)}
               className="w-full sm:max-w-md px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
-              <option value="">Default (Mayor's Office – CRMO, or the first office)</option>
+              <option value="">Default (the first office on the list)</option>
               {departments.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>

@@ -8,16 +8,10 @@ const prisma = require('../utils/prisma');
 const BRANDING_FIELDS = { seal: 'sealUrl', hero: 'heroImageUrl' };
 
 const DEFAULT_DEPARTMENTS = [
-  "Mayor's Office – CRMO", 'HR', 'Tourism', 'Motorpool', 'Traffic',
-  'CSDO', 'OSCA', 'MDRRMO',
-  'Municipal Budget Office', 'Municipal Accountant Office',
-  'Municipal Agriculture Office', 'Municipal Health Office',
-  'Municipal Civil Registry Office',
-  'Municipal Social Welfare & Development Office',
-  'Municipal Economic & Natural Resource Office',
-  'Municipal Treasurer Office', 'Municipal Engineering Office',
-  'Municipal Planning & Development Office',
-  'Sangguniang Bayan Office', 'Office of the Vice Mayor',
+  // The five offices of the study's scope. HR comes first: it receives the reports
+  // that have no office yet. More offices can be added in Settings → Departments.
+  'HR', 'Municipal Health Office', 'CSDO',
+  'Municipal Treasurer Office', 'Municipal Civil Registry Office',
 ];
 
 function parseJsonArray(raw, fallback) {
@@ -61,11 +55,11 @@ async function getDepartmentList() {
 
 // The office that receives reports with no office yet (the citizen didn't pick one
 // and the classifier couldn't tell) and forwards them to the right office. Chosen
-// in Settings; otherwise the Mayor's Office – CRMO, or the first office on the list.
+// in Settings; otherwise the first office on the list (HR by default).
 function receivingOfficeOf(row) {
   const list = parseJsonArray(row.departmentsJson, DEFAULT_DEPARTMENTS);
   if (row.unassignedOffice && list.includes(row.unassignedOffice)) return row.unassignedOffice;
-  return list.find(d => /CRMO/i.test(d)) || list[0] || null;
+  return list[0] || null;
 }
 
 async function getReceivingOffice() {

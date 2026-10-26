@@ -13,8 +13,8 @@ const STATUS_OPTS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED', 'SPA
 const STATUS_LABELS = { '':'All Statuses', PENDING:'Pending', REVIEWING:'Reviewing', IN_PROGRESS:'In Progress', RESOLVED:'Resolved', SPAM:'Spam' };
 const REACTION_LABELS = { EXCELLENT: 'Excellent', GOOD: 'Good', OKAY: 'Okay', POOR: 'Poor', TERRIBLE: 'Terrible' };
 
-// Feedback rates the municipality's service as a whole: it has no status steps,
-// deadline or office, so its list shows the rating instead.
+// Feedback rates the service of the municipality as a whole or of one office: it has
+// no status steps or deadline, so its list shows the rating and the office instead.
 function RatingCell({ rating, reaction, dark }) {
   const n = Math.max(0, Math.min(5, Number(rating) || 0));
   return (
@@ -72,7 +72,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
     : 'All Submissions';
   const feedbackPage = typeFilter === 'FEEDBACK';
   const headers = feedbackPage
-    ? ['Reference', 'Citizen', 'Rating', 'Date', '']
+    ? ['Reference', 'Citizen', 'Rating', 'Office', 'Date', '']
     : ['Transaction Code', 'Citizen', 'Type', 'Status', 'Deadline', 'Department', 'Date', ''];
 
   const textPrimary = dark ? '#f1f5f9' : '#111827';
@@ -161,7 +161,12 @@ export default function AdminSubmissions({ type: typeFilter }) {
                       <td className="px-4 py-3.5 font-mono text-xs whitespace-nowrap" style={{ color: textMuted }}>{s.trackingId}</td>
                       <td className="px-4 py-3.5 font-semibold whitespace-nowrap" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: textMuted, fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
                       {feedbackPage ? (
-                        <td className="px-4 py-3.5"><RatingCell rating={s.rating} reaction={s.reaction} dark={dark} /></td>
+                        <>
+                          <td className="px-4 py-3.5"><RatingCell rating={s.rating} reaction={s.reaction} dark={dark} /></td>
+                          <td className="px-4 py-3.5 text-xs font-medium max-w-48" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>
+                            {s.department === 'General' ? 'Whole municipality' : s.department}
+                          </td>
+                        </>
                       ) : (
                         <>
                           <td className="px-4 py-3.5">

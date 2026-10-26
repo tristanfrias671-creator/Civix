@@ -519,7 +519,7 @@ export default function StaffRegister() {
                     </div>
                   }>
                   <textarea id="rg-note" className="rg-input resize-none" rows={3} maxLength={NOTE_MAX} value={form.reason} onChange={set('reason')}
-                    placeholder="e.g., Administrative Aide, Municipal Engineering Office" />
+                    placeholder="e.g., Administrative Aide, Municipal Health Office" />
                 </Field>
 
                 <div className="rg-rise" style={{ animationDelay: '.36s' }}>

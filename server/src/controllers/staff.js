@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { Prisma } = require('@prisma/client');
 const { sendStatusUpdateEmail, sendUrgencyChangeEmail } = require('../utils/mailer');
+const { emailOfficeStaff } = require('../utils/staffEmails');
 const { sendStatusUpdateSms } = require('../utils/sms');
 const { phDayStart, phMonthStart, deadlineDays, dueAfterUrgencyChange } = require('../utils/deadline');
 const { PRIORITIES, PRIORITY_LABELS } = require('../utils/urgency');
@@ -20,6 +21,13 @@ const SPAM = 'SPAM';
 const NOT_SPAM = { status: { not: SPAM } };
 const CLOSED = ['RESOLVED', SPAM];
 const NEEDS_SPAM_REASON = 'Please say why this report is spam or invalid.';
+// Feedback sent to an office has no status steps, urgency or deadline: the office
+// reads it, may move it to another office, or marks it as spam. It is left out of
+// the office's case figures and alerts (new feedback shows in the activity feed).
+const NOT_FEEDBACK = { type: { not: 'FEEDBACK' } };
+const FEEDBACK_NO_STEPS = 'Feedback has no status steps. You can move it to another office or mark it as spam.';
+// A status step on feedback: anything but marking it as spam or putting it back.
+const feedbackStep = (submission, status) => submission.type === 'FEEDBACK' && status !== SPAM && submission.status !== SPAM;
 
 // Proof of the work: moving a report forward to In Progress or Resolved needs at
 // least one photo (of the work being done, or of the finished work or the reply).
@@ -198,7 +206,8 @@ async function deleteStaff(req, res) {
 // ── Staff portal: own department endpoints ────────────────────────────────────
 
 // GET /api/staff/portal/stats — stats for the authenticated staff's department.
-// `?type=COMPLAINT|SUGGESTION|FEEDBACK` counts only that kind of report.
+// `?type=COMPLAINT|SUGGESTION|FEEDBACK` counts only that kind of report. Feedback
+// counts in `total`, `feedbacks` and `todayCount` only (it has no status steps).
 // Days and months follow the Philippine calendar.
 async function getMyStats(req, res) {
   try {
@@ -213,17 +222,17 @@ async function getMyStats(req, res) {
     const [totals] = await prisma.$queryRaw`
       SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN status='PENDING'     THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status='REVIEWING'   THEN 1 ELSE 0 END) as reviewing,
-        SUM(CASE WHEN status='IN_PROGRESS' THEN 1 ELSE 0 END) as inProgress,
-        SUM(CASE WHEN status='RESOLVED'    THEN 1 ELSE 0 END) as resolved,
+        SUM(CASE WHEN status='PENDING'     AND type<>'FEEDBACK' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status='REVIEWING'   AND type<>'FEEDBACK' THEN 1 ELSE 0 END) as reviewing,
+        SUM(CASE WHEN status='IN_PROGRESS' AND type<>'FEEDBACK' THEN 1 ELSE 0 END) as inProgress,
+        SUM(CASE WHEN status='RESOLVED'    AND type<>'FEEDBACK' THEN 1 ELSE 0 END) as resolved,
         SUM(CASE WHEN type='COMPLAINT'     THEN 1 ELSE 0 END) as complaints,
         SUM(CASE WHEN type='SUGGESTION'    THEN 1 ELSE 0 END) as suggestions,
         SUM(CASE WHEN type='FEEDBACK'      THEN 1 ELSE 0 END) as feedbacks,
         SUM(CASE WHEN createdAt >= ${phDayStart(now)} THEN 1 ELSE 0 END) as todayCount,
-        SUM(CASE WHEN status<>'RESOLVED' AND dueAt < ${now} THEN 1 ELSE 0 END) as overdue,
-        SUM(CASE WHEN status<>'RESOLVED' AND dueAt >= ${now} AND dueAt < ${weekAhead} THEN 1 ELSE 0 END) as dueThisWeek,
-        SUM(CASE WHEN status='RESOLVED' AND updatedAt >= ${phMonthStart(now)} THEN 1 ELSE 0 END) as resolvedThisMonth,
+        SUM(CASE WHEN status<>'RESOLVED' AND type<>'FEEDBACK' AND dueAt < ${now} THEN 1 ELSE 0 END) as overdue,
+        SUM(CASE WHEN status<>'RESOLVED' AND type<>'FEEDBACK' AND dueAt >= ${now} AND dueAt < ${weekAhead} THEN 1 ELSE 0 END) as dueThisWeek,
+        SUM(CASE WHEN status='RESOLVED' AND type<>'FEEDBACK' AND updatedAt >= ${phMonthStart(now)} THEN 1 ELSE 0 END) as resolvedThisMonth,
         SUM(CASE WHEN department='UNASSIGNED' THEN 1 ELSE 0 END) as unassigned
       FROM Submission
       WHERE department IN (${Prisma.join(scope.departments)}) AND status <> 'SPAM' ${onlyType}
@@ -262,14 +271,15 @@ async function getMyStats(req, res) {
 // GET /api/staff/portal/alerts — what needs this staff member's office now:
 // urgent, overdue and due-within-2-days reports, plus new (still Pending) ones.
 // Each report appears once, in its most serious group. `counts` (all open and all
-// overdue reports in the office) feeds the sidebar.
+// overdue reports in the office) feeds the sidebar. Feedback needs no action, so it
+// never alerts.
 async function getMyAlerts(req, res) {
   try {
     const scope = await officeScope(req.user.id);
     if (!scope) return res.status(400).json({ error: NO_OFFICE });
     const now = new Date();
     const soon = new Date(now.getTime() + 2 * DAY_MS);
-    const open = { department: { in: scope.departments }, status: { notIn: CLOSED } };
+    const open = { department: { in: scope.departments }, status: { notIn: CLOSED }, ...NOT_FEEDBACK };
     const notUrgent = { priority: { not: 'URGENT' } };
     const select = {
       id: true, trackingId: true, type: true, department: true, status: true,
@@ -325,6 +335,9 @@ async function getMySubmissions(req, res) {
       where.status = status;
     }
     if (TYPES.includes(type)) where.type = type;
+    // Feedback has no status steps: a status tab lists complaints and suggestions
+    // only (the Spam tab lists every type).
+    else if (STATUSES.includes(status)) Object.assign(where, NOT_FEEDBACK);
     if (search) {
       where.OR = [
         { trackingId:  { contains: search } },
@@ -339,14 +352,14 @@ async function getMySubmissions(req, res) {
     let total;
 
     if (sortBy === 'priority' || sortBy === 'due') {
-      // Open reports first, ranked by priority or deadline; resolved ones follow,
-      // most recently finished first. Priority enum is declared URGENT/STANDARD/LOW,
-      // so MySQL sorts it in that order — 'asc' puts urgent reports first.
+      // Open reports first, ranked by priority or deadline; resolved ones and feedback
+      // (no deadline to rank by) follow, most recent first. Priority enum is declared
+      // URGENT/STANDARD/LOW, so MySQL sorts it in that order — 'asc' puts urgent reports first.
       const orderBy = sortBy === 'priority'
         ? [{ priority: 'asc' }, { dueAt: 'asc' }, { createdAt: 'desc' }]
         : [{ dueAt: 'asc' }, { createdAt: 'desc' }];
-      const openWhere = { AND: [where, { status: { not: 'RESOLVED' } }] };
-      const doneWhere = { AND: [where, { status: 'RESOLVED' }] };
+      const openWhere = { AND: [where, { status: { not: 'RESOLVED' } }, NOT_FEEDBACK] };
+      const doneWhere = { AND: [where, { OR: [{ status: 'RESOLVED' }, { type: 'FEEDBACK' }] }] };
       const [openTotal, doneTotal] = await Promise.all([
         prisma.submission.count({ where: openWhere }),
         prisma.submission.count({ where: doneWhere }),
@@ -409,6 +422,7 @@ async function updateMySubmission(req, res) {
     const { status } = req.body;
     const note = String(req.body.note || '').trim().slice(0, 1000);
     if (![...STATUSES, SPAM].includes(status)) return refuse(400, { error: 'Invalid status' });
+    if (feedbackStep(submission, status)) return refuse(400, { error: FEEDBACK_NO_STEPS });
     if (status === SPAM && status !== submission.status && !note) {
       return refuse(400, { error: NEEDS_SPAM_REASON });
     }
@@ -644,6 +658,7 @@ async function assignSubmission(req, res) {
     }
     if (status) {
       if (![...STATUSES, SPAM].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      if (status !== existing.status && feedbackStep(existing, status)) return res.status(400).json({ error: FEEDBACK_NO_STEPS });
       if (status === SPAM && status !== existing.status && !String(note || '').trim()) {
         return res.status(400).json({ error: NEEDS_SPAM_REASON });
       }
@@ -655,6 +670,7 @@ async function assignSubmission(req, res) {
 
     const statusChanged = status && status !== existing.status;
     const changedBy = { id: req.user.id, name: req.user.fullName || req.user.email, role: req.user.role };
+    const moveReason = String(reason || '').trim().slice(0, 500) || null;
 
     // One transaction: the status history, the report itself, and the office move record.
     const results = await prisma.$transaction([
@@ -679,7 +695,7 @@ async function assignSubmission(req, res) {
             submissionId: existing.id, trackingId: existing.trackingId,
             changedById: changedBy.id, changedByName: changedBy.name, changedByRole: changedBy.role,
             fromDepartment: existing.department, toDepartment: data.department,
-            reason: String(reason || '').trim().slice(0, 500) || null,
+            reason: moveReason,
           },
         }),
         // A person corrected the office the report went to.
@@ -687,6 +703,9 @@ async function assignSubmission(req, res) {
       ] : []),
     ]);
     const updated = results[statusChanged ? 1 : 0];
+
+    // The office it was moved to gets an email (not waited for).
+    if (data.department) emailOfficeStaff(updated, { from: existing.department, byName: changedBy.name, reason: moveReason });
 
     // Notify citizen if status changed
     if (statusChanged) {

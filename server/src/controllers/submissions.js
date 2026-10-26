@@ -3,9 +3,10 @@ const path = require('path');
 const UPLOAD_ROOT = require('../utils/uploadRoot');
 const { generateTrackingId } = require('../utils/trackingId');
 const { analyzeSentiment } = require('../utils/sentiment');
-const { classifyText, OFFICES } = require('../utils/classifier');
+const { classifyText } = require('../utils/classifier');
 const { detectUrgency } = require('../utils/urgencyDetector');
 const { sendSubmissionReceivedEmail } = require('../utils/mailer');
+const { emailOfficeStaff } = require('../utils/staffEmails');
 const { normalizePhMobile, sendReportReceivedSms, configured: smsConfigured } = require('../utils/sms');
 const { createLimiter } = require('../utils/rateLimit');
 const { networkKey } = require('../utils/clientIp');
@@ -45,8 +46,9 @@ function sentimentFromFeedback(rating) {
 //     daily amount of photos (PHOTO_MB_PER_DAY).
 // A refused report leaves nothing behind: its photos are deleted.
 const TYPES = ['COMPLAINT', 'SUGGESTION', 'FEEDBACK'];
-// The "office" of feedback: it rates the municipality's service as a whole, so it
-// goes to no office (staff lists are per office; administrators see all feedback).
+// The "office" of general feedback, which rates the municipality's service as a
+// whole: no office gets it (staff lists are per office; administrators see all
+// feedback). Feedback about one office goes to that office.
 const GENERAL_OFFICE = 'General';
 const HOUR_MS = 60 * 60 * 1000;
 const PER_CONTACT_HOUR = Number(process.env.REPORTS_PER_CONTACT_HOUR) || 3;
@@ -119,19 +121,21 @@ async function createSubmission(req, res) {
     // and feedback are Normal.
     const urgency = type === 'COMPLAINT' ? detectUrgency(description) : null;
     const priority = urgency ? urgency.priority : 'STANDARD';
-    // Feedback rates the municipality's service as a whole: it goes to no office
-    // (administrators read it), carries no photos and has no deadline.
+    // Feedback carries no photos and has no deadline. It is about the office the
+    // citizen chose (that office's staff read it) or, with no office chosen, about
+    // the municipality's service as a whole (administrators read it).
     const isFeedback = type === 'FEEDBACK';
     if (isFeedback && req.files?.length) {
       discardUploads(req);
       req.files = [];
     }
-    // An office that isn't on the list (a page left open while an office was renamed,
-    // or a bot) counts as no office chosen: the receiving office forwards the report.
+    // Only offices on the Settings list take reports. One that isn't (removed in
+    // Settings while the page was open, or a bot) counts as no office chosen: the
+    // receiving office forwards a complaint or suggestion, and feedback is general.
+    const offices = await getDepartmentList();
     const chosen = String(citizenDepartment || '').trim();
-    const listed = !isFeedback && chosen && chosen !== 'UNASSIGNED'
-      && (OFFICES.includes(chosen) || (await getDepartmentList()).includes(chosen));
-    const office = isFeedback ? GENERAL_OFFICE : (listed ? chosen : 'UNASSIGNED');
+    const listed = chosen && chosen !== 'UNASSIGNED' && offices.includes(chosen);
+    const office = listed ? chosen : (isFeedback ? GENERAL_OFFICE : 'UNASSIGNED');
 
     let parsedRating = rating ? parseInt(rating, 10) : null;
     let parsedReaction = reaction ? String(reaction).slice(0, 40) : null;
@@ -197,8 +201,9 @@ async function createSubmission(req, res) {
       ? sentimentFromFeedback(parsedRating)
       : analyzeSentiment(description);
 
-    // The office classifier routes complaints and suggestions; feedback isn't routed.
-    const aiResult = isFeedback ? null : classifyText(description);
+    // The office classifier routes complaints and suggestions (to an office on the
+    // list only); feedback isn't routed (it goes where the citizen chose).
+    const aiResult = isFeedback ? null : classifyText(description, offices);
 
     const finalDepartment = isFeedback || office !== 'UNASSIGNED'
       ? office
@@ -273,6 +278,8 @@ async function createSubmission(req, res) {
     // code to follow and no status updates will come.
     if (submission.email && mayReceipt(receipts.emailHour, receipts.emailDay)) sendSubmissionReceivedEmail(submission);
     if (smsConfigured && !isFeedback && mayReceipt(receipts.smsHour, receipts.smsDay)) sendReportReceivedSms(submission);
+    // The office's staff get an email about a new complaint or suggestion.
+    emailOfficeStaff(submission);
   } catch (err) {
     console.error(err);
     if (res.headersSent) return;
@@ -300,7 +307,7 @@ async function getSubmissions(req, res) {
       where.status = 'SPAM'; // the Spam view: every type, ready to delete
     } else if (status) {
       where.status = status;
-      // Feedback has no status steps (no office acts on it), so a status filter
+      // Feedback has no status steps, so a status filter
       // lists complaints and suggestions only.
       if (!type) where.type = { not: 'FEEDBACK' };
     } else {
@@ -423,8 +430,9 @@ async function getSubmissionsByUser(req, res) {
 }
 
 // ── Spam / Invalid and deleting (administrators) ────────────────────────────
-// Staff mark their office's reports as spam or invalid (staff portal). Feedback
-// goes to no office, so the administrator marks feedback. An administrator may then
+// Staff mark their office's reports as spam or invalid (staff portal). General
+// feedback goes to no office, so the administrator marks feedback (feedback sent to
+// an office can also be marked by that office's staff). An administrator may then
 // delete a report for good, but only one marked as spam; every deletion is kept in
 // DeletedReport (who marked it and why, who deleted it, when), without the
 // citizen's details.

@@ -28,8 +28,10 @@ api.interceptors.response.use(
       // Only this portal's sign-in has ended; the other portal stays signed in.
       clearSession(portalOf());
       const path = window.location.pathname;
-      // The admin sign-in page is private, so admins go back to the homepage.
-      window.location.href = path.startsWith('/staff') ? '/staff-login' : '/';
+      // Staff sign in again and come back to this page; the admin sign-in page is
+      // private, so admins go back to the homepage.
+      window.location.href = path.startsWith('/staff')
+        ? `/staff-login?next=${encodeURIComponent(path + window.location.search)}` : '/';
     }
     if (!err.response) {
       err.message = 'Cannot reach the server. Start the backend (port 5000) and try again.';
