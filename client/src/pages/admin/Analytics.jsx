@@ -6,6 +6,10 @@ import {
 } from 'recharts';
 import { Skel, SkeletonStatCards, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
+import LabelRule from '../../components/common/LabelRule';
+import CsmResultsDetails, {
+  RangeSwitch, RatingBadge, ScoreHeadline, CodeFacts, LabelCounts, useSatisfaction, pctText, SCORE_NOTE, RATING_NOTE, RANGE_WORDS,
+} from '../../components/common/CsmResults';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
@@ -662,6 +666,190 @@ function QuarterlyChart({ data }) {
   );
 }
 
+/* ─── Client satisfaction (ARTA CSM) ────────────────────────────────────────
+   Each office's results on the satisfaction form (a table on wide screens, cards
+   on narrow ones), then the details of one office or of all of them. */
+function Satisfaction() {
+  const { dark, ink, inkMuted } = useChartTheme();
+  const { range, setRange, data, failed, loading } = useSatisfaction('/analytics/satisfaction');
+  const [office, setOffice] = useState(''); // '' = all offices
+  const detailsRef = useRef(null);
+  const line = dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb';
+  const picked = dark ? 'rgba(37,99,235,0.14)' : '#eff6ff';
+  const allTint = dark ? 'rgba(255,255,255,0.04)' : '#f8fafc';
+  const body = dark ? '#cbd5e1' : '#374151';
+
+  const chosen = (office && data?.offices.find(o => o.department === office)) || null;
+  const shown = chosen ? office : '';
+  const result = chosen || data?.all;
+  const services = !data ? [] : chosen ? data.services.filter(s => s.department === office) : data.services;
+  const rows = data ? [...data.offices, { ...data.all, department: '' }] : [];
+
+  // "Details" on an office: show its details and move there (focus for screen readers).
+  function showDetails(name) {
+    setOffice(name);
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    detailsRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    detailsRef.current?.focus({ preventScroll: true });
+  }
+
+  const detailsButton = (name, label) => (
+    <button type="button" onClick={() => showDetails(name)} aria-pressed={shown === name}
+      aria-label={`${label}: ${name || 'All offices'}`}
+      className="px-3 min-h-[36px] rounded-lg text-xs font-bold whitespace-nowrap"
+      style={{ background: dark ? 'rgba(37,99,235,0.18)' : '#dbeafe', color: dark ? '#93c5fd' : '#1d4ed8' }}>
+      {label}
+    </button>
+  );
+
+  return (
+    <section className="an-card p-6 mb-6" aria-labelledby="csm-title" data-csm-section>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div className="min-w-0">
+          <h2 id="csm-title" className="font-semibold" style={{ color: ink }}>Client Satisfaction (ARTA CSM)</h2>
+          <p className="text-xs mt-0.5" style={{ color: inkMuted }}>
+            How clients rated each office on the satisfaction form{data && !failed ? `: ${data.label}` : ''}
+          </p>
+        </div>
+        <RangeSwitch value={range} onChange={setRange} />
+      </div>
+
+      <div className="transition-opacity" aria-busy={loading} style={{ opacity: loading && data ? 0.55 : 1 }}>
+        {failed ? (
+          <p className="text-sm py-8 text-center" style={{ color: inkMuted }}>Could not load the satisfaction results. Please reload the page.</p>
+        ) : !data ? (
+          <div className="space-y-3">{[0, 1, 2, 3, 4].map(i => <Skel key={i} className="h-9 w-full" />)}</div>
+        ) : data.all.responses === 0 && !data.all.codes?.given ? (
+          <div className="flex flex-col items-center text-center py-8" data-csm-empty>
+            <p className="font-semibold" style={{ color: ink }}>No satisfaction forms answered{RANGE_WORDS[range]} yet</p>
+            <p className="text-sm mt-1 max-w-lg" style={{ color: inkMuted }}>
+              Each office gives its clients a slip with a QR code (New client in the staff portal). The answers show here, office by office.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Wide screens: one row per office, then all offices together */}
+            <div className="hidden xl:block overflow-x-auto">
+              <table className="w-full text-sm" data-csm-table>
+                <caption className="sr-only">Satisfaction results by office</caption>
+                <thead>
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide" style={{ color: inkMuted }}>
+                    <th scope="col" className="py-2 pr-3">Office</th>
+                    <th scope="col" className="py-2 px-3 text-right">Answers</th>
+                    <th scope="col" className="py-2 px-3 text-right">Overall score</th>
+                    <th scope="col" className="py-2 px-3">Rating</th>
+                    <th scope="col" className="py-2 px-3 text-right">Satisfied (SQD0)</th>
+                    <th scope="col" className="py-2 px-3 text-right">Positive</th>
+                    <th scope="col" className="py-2 px-3 text-right">Neutral</th>
+                    <th scope="col" className="py-2 px-3 text-right">Negative</th>
+                    <th scope="col" className="py-2 px-3 text-right">Codes given</th>
+                    <th scope="col" className="py-2 pl-3"><span className="sr-only">Details</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(o => {
+                    const all = o.department === '';
+                    return (
+                      <tr key={o.department || 'all'} className={all ? 'font-bold' : ''}
+                        style={{ borderTop: `${all ? 2 : 1}px solid ${line}`, background: shown === o.department ? picked : all ? allTint : 'transparent', color: body }}>
+                        <th scope="row" className="py-2.5 pr-3 text-left font-semibold" style={{ color: ink }}>{all ? 'All offices' : o.department}</th>
+                        <td className="py-2.5 px-3 text-right tabular-nums">{o.responses}</td>
+                        <td className="py-2.5 px-3 text-right tabular-nums font-bold" style={{ color: ink }}>{pctText(o.overall)}</td>
+                        <td className="py-2.5 px-3">
+                          {o.responses ? <RatingBadge rating={o.rating} /> : <span className="text-xs" style={{ color: inkMuted }}>No answers yet</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-right tabular-nums">{pctText(o.sqd.sqd0.score)}</td>
+                        <td className="py-2.5 px-3 text-right tabular-nums">{o.sentiment.POSITIVE}</td>
+                        <td className="py-2.5 px-3 text-right tabular-nums">{o.sentiment.NEUTRAL}</td>
+                        <td className="py-2.5 px-3 text-right tabular-nums">{o.sentiment.NEGATIVE}</td>
+                        <td className="py-2.5 px-3 text-right tabular-nums" data-codes-cell>
+                          {o.codes.given}
+                          {/* Darker than inkMuted: the picked row's light blue needs it for 4.5:1 */}
+                          {o.codes.given > 0 && <span className="block text-xs font-normal" style={{ color: dark ? '#cbd5e1' : '#4b5563' }}>{pctText(o.codes.rate)} answered</span>}
+                        </td>
+                        <td className="py-1.5 pl-3 text-right">{detailsButton(o.department, 'Details')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Narrower screens: a card per office */}
+            <ul className="xl:hidden grid grid-cols-1 sm:grid-cols-2 gap-3" data-csm-cards>
+              {rows.map(o => {
+                const all = o.department === '';
+                return (
+                  <li key={o.department || 'all'} className="rounded-xl border p-4 flex flex-col gap-2"
+                    style={{ borderColor: line, background: shown === o.department ? picked : all ? allTint : 'transparent' }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="font-bold" style={{ color: ink }}>{all ? 'All offices' : o.department}</p>
+                      {o.responses > 0 && <RatingBadge rating={o.rating} />}
+                    </div>
+                    {o.responses ? (
+                      <>
+                        <p className="text-sm" style={{ color: body }}>
+                          <span className="text-2xl font-bold tabular-nums mr-1.5" style={{ color: ink }}>{pctText(o.overall)}</span>overall score
+                        </p>
+                        <p className="text-sm" style={{ color: body }}>
+                          {o.responses} {o.responses === 1 ? 'answer' : 'answers'} · Satisfied (SQD0) <span className="font-bold tabular-nums">{pctText(o.sqd.sqd0.score)}</span>
+                        </p>
+                        <LabelCounts sentiment={o.sentiment} />
+                      </>
+                    ) : (
+                      <p className="text-sm" style={{ color: inkMuted }}>No answers{RANGE_WORDS[range]} yet</p>
+                    )}
+                    <p className="text-sm" style={{ color: body }} data-codes-line>
+                      Codes given <span className="font-bold tabular-nums">{o.codes.given}</span>
+                      {o.codes.given > 0 && <> · {pctText(o.codes.rate)} answered</>}
+                    </p>
+                    <div className="mt-1">{detailsButton(o.department, 'Show details')}</div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <p className="text-xs mt-4" style={{ color: inkMuted }}>{SCORE_NOTE}</p>
+            <p className="text-xs mt-1" style={{ color: inkMuted }}>{RATING_NOTE}</p>
+
+            {/* The details of the office picked above (all offices at first) */}
+            <div ref={detailsRef} tabIndex={-1} aria-labelledby="csm-details-title" role="region"
+              className="mt-6 pt-6 border-t focus:outline-none scroll-mt-4" style={{ borderColor: line }} data-csm-details>
+              <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+                <h3 id="csm-details-title" className="font-semibold" style={{ color: ink }}>
+                  Details: {shown || 'All offices'}
+                </h3>
+                <div>
+                  <label htmlFor="csm-office" className="block text-xs font-semibold mb-1" style={{ color: inkMuted }}>Show the details of</label>
+                  <select id="csm-office" value={shown} onChange={e => setOffice(e.target.value)}
+                    className="h-11 px-3 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary">
+                    <option value="">All offices</option>
+                    {data.offices.map(o => <option key={o.department} value={o.department}>{o.department}</option>)}
+                  </select>
+                </div>
+              </div>
+              {result.responses === 0 ? (
+                <>
+                  {result.codes?.given > 0 && <CodeFacts codes={result.codes} />}
+                  <p className="text-sm py-6 text-center" style={{ color: inkMuted }}>No answers for {shown || 'all offices'}{RANGE_WORDS[range]} yet.</p>
+                </>
+              ) : (
+                <>
+                  <ScoreHeadline result={result} />
+                  <div className="mt-6"><CodeFacts codes={result.codes} /></div>
+                  <div className="mt-6">
+                    <CsmResultsDetails result={result} services={services} showOffice={!chosen} />
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /* ─── Main ───────────────────────────────────────────────────────────────── */
 export default function Analytics() {
   const location = useLocation();
@@ -814,8 +1002,10 @@ export default function Analytics() {
         <KPICard label="Total Submissions" value={summary?.total} accent="#2563eb" icon="submissions" />
         <KPICard label="Response Rate" value={`${summary?.responseRate ?? 0}%`} accent="#7c3aed" icon="analytics" sub="Non-pending share" />
         <KPICard label="Avg Resolution" value={`${summary?.avgResolutionTime ?? 0}d`} accent="#0891b2" icon="clock" />
-        <KPICard label="Registered Citizens" value={summary?.citizens} accent="#475569" icon="citizens" />
+        <KPICard label="Overdue" value={summary?.overdue} accent="#dc2626" icon="complaint" sub="Past their deadline" />
       </div>
+
+      <Satisfaction />
 
       {/* Monthly Trend + Sentiment */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -865,10 +1055,11 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="Sentiment Distribution" subtitle="Tone analysis of submission descriptions">
+        <ChartCard title="Sentiment Distribution" subtitle="Positive, Neutral or Negative, for every type of report">
           {sentimentTotal === 0 ? <EmptyChart /> : (
             <Donut data={sentiment} colorFor={name => pal[name] || pal.total} centerLabel="Submissions" />
           )}
+          <LabelRule className="mt-4" />
         </ChartCard>
       </div>
 
@@ -952,6 +1143,48 @@ export default function Analytics() {
                       {done ? `${onTime} of ${done}` : '—'}
                     </dd>
                     <p className="text-xs mt-0.5" style={{ color: inkMuted }}>{done ? `${Math.round((onTime / done) * 100)}% by their finish-by date` : 'None resolved yet'}</p>
+                  </div>
+                </dl>
+              </div>
+            );
+          })()}
+        </ChartCard>
+      </div>
+
+      {/* How complaints and suggestions came in: online, or typed in by the office's staff */}
+      <div className="mb-6">
+        <ChartCard title="How Reports Came In"
+          subtitle="Complaints and suggestions: sent online by citizens, or typed in by the office's staff for a citizen who came, called, wrote or sent a message">
+          {!breakdown?.channel ? <EmptyChart height="h-40" /> : (() => {
+            const ways = breakdown.channel;
+            const all = ways.reduce((n, w) => n + w.value, 0);
+            const typed = ways.filter(w => w.key !== 'ONLINE').reduce((n, w) => n + w.value, 0);
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-3" data-channels>
+                  {ways.map(w => {
+                    const pct = all > 0 ? Math.round((w.value / all) * 100) : 0;
+                    return (
+                      <div key={w.key}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="font-medium" style={{ color: dark ? '#cbd5e1' : '#374151' }}>{w.name}</span>
+                          <span style={{ color: inkMuted }}>{w.value} ({pct}%)</span>
+                        </div>
+                        <div className="an-track w-full rounded-full h-2.5" style={{ background: dark ? 'rgba(255,255,255,0.08)' : '#f1f5f9' }}>
+                          <div className="an-fill h-2.5 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: pal.single }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <dl className="grid grid-cols-1 gap-3 content-start">
+                  <div className="rounded-xl px-4 py-3" style={{ background: dark ? 'rgba(37,99,235,0.12)' : '#eff6ff' }}>
+                    <dt className="text-xs font-semibold" style={{ color: dark ? '#93c5fd' : '#1e40af' }}>Typed in by staff</dt>
+                    <dd className="text-2xl font-bold mt-0.5" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>{typed}</dd>
+                    {/* Darker than inkMuted: the tile's light blue needs it for 4.5:1 */}
+                    <p className="text-xs mt-0.5" style={{ color: dark ? '#cbd5e1' : '#4b5563' }}>
+                      {all ? `${Math.round((typed / all) * 100)}% of complaints and suggestions` : 'None yet'}
+                    </p>
                   </div>
                 </dl>
               </div>

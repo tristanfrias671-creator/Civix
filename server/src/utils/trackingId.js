@@ -30,32 +30,34 @@ function getDeptCode(department) {
   return cleaned.substring(0, 3).toUpperCase() || 'UNA';
 }
 
-// A short random tail, e.g. "K7".
-const randomTail = () => crypto.randomInt(36 * 36).toString(36).toUpperCase().padStart(2, '0');
+// Letters and digits that can't be mixed up when typed from a slip or read aloud:
+// no 0/O and no 1/I/L.
+const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const randomPart = length => Array.from({ length }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join('');
 
-// The next free code for this office and day, e.g. ENG-20261004-0007.
-// Reports sent at the same moment can pick the same number; the database keeps
-// only one and createSubmission asks again with a higher `attempt`. Retries skip
-// ahead by a random amount so they don't all pick the same number again, and from
-// the 3rd retry the code gets a random tail (ENG-20261004-0042-K7), so the report
-// is always saved.
-async function generateTrackingId(prisma, department, attempt = 0) {
-  const deptCode = getDeptCode(department);
-  const yyyymmdd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const prefix = `${deptCode}-${yyyymmdd}-`;
-
-  const count = await prisma.submission.count({
-    where: { trackingId: { startsWith: prefix } },
-  });
-
-  let seq = count + 1 + (attempt ? crypto.randomInt(attempt * 4) : 0);
-  for (let tries = 0; tries < 10; tries++) {
-    const trackingId = `${prefix}${String(seq).padStart(4, '0')}`;
-    const existing = await prisma.submission.findUnique({ where: { trackingId }, select: { id: true } });
-    if (!existing) return attempt >= 3 ? `${trackingId}-${randomTail()}` : trackingId;
-    seq++;
-  }
-  return `${prefix}${String(seq).padStart(4, '0')}-${randomTail()}`;
+// Today's date in the Philippines (UTC+8, no daylight saving) as YYYYMMDD, so a
+// report sent at 7 AM gets today's date, not yesterday's.
+function phDate(now = new Date()) {
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
 }
 
-module.exports = { generateTrackingId };
+// A new transaction code for this office: OFFICE-YYYYMMDD-XXXX, e.g. MHO-20261029-K7Q3.
+// The last part is random, so no one can guess another person's code from their
+// own. A code is never given twice, not even after its report was deleted
+// (DeletedReport keeps the codes of deleted reports). Two reports sent at the same
+// moment can still draw the same code; the database keeps only one and
+// createSubmission asks again with a higher `attempt`.
+async function generateTrackingId(prisma, department, attempt = 0) {
+  const prefix = `${getDeptCode(department)}-${phDate()}-`;
+  for (let tries = 0; tries < 20; tries++) {
+    const trackingId = prefix + randomPart(attempt >= 3 ? 6 : 4);
+    const [live, deleted] = await Promise.all([
+      prisma.submission.findUnique({ where: { trackingId }, select: { id: true } }),
+      prisma.deletedReport.findFirst({ where: { trackingId }, select: { id: true } }),
+    ]);
+    if (!live && !deleted) return trackingId;
+  }
+  return prefix + randomPart(8);
+}
+
+module.exports = { generateTrackingId, phDate, getDeptCode, randomPart };

@@ -1,10 +1,12 @@
 // Emails for the office's staff: each active staff member of an office gets one
-// when a complaint or suggestion arrives for it, or is moved to it. Reports with no
-// office yet go to the receiving office (Settings), which forwards them. Feedback
-// needs no action, so it sends none; neither does a resolved or spam report.
+// when a complaint or suggestion arrives for it, or is moved to it, and when a
+// client answered the satisfaction form for it and was not satisfied (Negative
+// feedback). Reports with no office yet go to the receiving office (Settings), which
+// forwards them. Other feedback needs no action, so it sends none; neither does a
+// resolved or spam report.
 const prisma = require('./prisma');
 const { createLimiter } = require('./rateLimit');
-const { sendNewReportStaffEmail } = require('./mailer');
+const { sendNewReportStaffEmail, sendNegativeFeedbackStaffEmail } = require('./mailer');
 const { getReceivingOffice } = require('../controllers/settings');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -29,20 +31,23 @@ function mayEmail() {
 const handlingOffice = department => (department === 'UNASSIGNED' ? getReceivingOffice() : department);
 
 // Emails the staff of the office that acts on `submission` (as saved, with its
-// photos). `move` ({ from, byName, reason }) when a staff member moved it there.
+// photos). `move` ({ from, byName, reason }) when a staff member moved it there;
+// `except`, the staff member who typed in a walk-in report (they know already).
 // Each email goes to the person's linked Gmail if they have one, otherwise to
 // their sign-in email, like the administrators' alerts. Never throws; nobody
 // waits for it.
-async function emailOfficeStaff(submission, move = null) {
+async function emailOfficeStaff(submission, move = null, { except = null } = {}) {
   try {
-    if (submission.type === 'FEEDBACK' || ['RESOLVED', 'SPAM'].includes(submission.status)) return;
+    // Feedback: only a client who was not satisfied, when the answers arrive.
+    const unhappyClient = submission.type === 'FEEDBACK' && submission.sentiment === 'NEGATIVE' && !move;
+    if ((submission.type === 'FEEDBACK' && !unhappyClient) || ['RESOLVED', 'SPAM'].includes(submission.status)) return;
     const office = await handlingOffice(submission.department);
     if (!office) return;
     // A report with no office moved to the receiving office itself: its staff
     // already had the email when the report came in.
     if (move && (await handlingOffice(move.from)) === office) return;
     const staff = await prisma.user.findMany({
-      where: { role: 'STAFF', accountStatus: 'ACTIVE', department: office },
+      where: { role: 'STAFF', accountStatus: 'ACTIVE', department: office, ...(except ? { id: { not: except } } : {}) },
       select: { fullName: true, email: true, gmail: true },
     });
     const sent = new Set();
@@ -54,7 +59,8 @@ async function emailOfficeStaff(submission, move = null) {
         return;
       }
       sent.add(to.toLowerCase());
-      sendNewReportStaffEmail({ email: to, fullName: person.fullName }, submission, { office, move });
+      if (unhappyClient) sendNegativeFeedbackStaffEmail({ email: to, fullName: person.fullName }, submission, { office });
+      else sendNewReportStaffEmail({ email: to, fullName: person.fullName }, submission, { office, move });
     }
   } catch (err) {
     console.error('[staff-emails] Could not email the office:', err.message);

@@ -258,8 +258,11 @@ export default function AdminLayout() {
           </div>
         </header>
 
-        {/* The map page fills the height; it still scrolls if the screen is too short. */}
-        <main className={`flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
+        {/* The map page fills the height; it still scrolls if the screen is too short.
+            "relative" keeps anything a page places absolutely (e.g. a hidden note for
+            screen readers) inside this scrolling panel; outside it, such an element
+            made the whole window scroll, with a second scroll bar (Settings → Security). */}
+        <main className={`relative flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
           <Outlet key={location.key} />
         </main>
       </div>

@@ -1,8 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { StatusBadge, TypeBadge, PriorityBadge, SentimentBadge } from '../../components/common/StatusBadge';
+import { StatusBadge, TypeBadge, PriorityBadge, SentimentBadge, ChannelBadge } from '../../components/common/StatusBadge';
+import LabelRule from '../../components/common/LabelRule';
+import RemarkRule, { RemarkBadge } from '../../components/common/RemarkRule';
+import { CHANNEL_LABELS, typedIn } from '../../data/channels';
 import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
+import CsmAnswers from '../../components/common/CsmAnswers';
 import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import { SkeletonDetail } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
@@ -197,13 +201,22 @@ export default function SubmissionDetail() {
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
             <div className="flex flex-wrap gap-2 mb-4">
               <TypeBadge type={submission.type} />
+              <ChannelBadge channel={submission.channel} />
               {(!isFeedback || submission.status === 'SPAM') && <StatusBadge status={submission.status} />}
               {!isFeedback && <PriorityBadge priority={submission.priority} />}
               <SentimentBadge sentiment={submission.sentiment} />
             </div>
-            <h1 className="text-xl font-bold text-gray-800 dark:text-slate-100 mb-1">{isFeedback ? 'Feedback on our services' : submission.department}</h1>
+            <LabelRule type={submission.csm ? 'FEEDBACK' : 'REPORT'} className="-mt-2 mb-4" />
+            <h1 className="text-xl font-bold text-gray-800 dark:text-slate-100 mb-1">{isFeedback ? `Feedback for ${submission.department}` : submission.department}</h1>
             <p className="font-mono text-xs text-gray-500 dark:text-slate-400 mb-4">{submission.trackingId}</p>
-            {submission.type === 'FEEDBACK' && (submission.rating || submission.reaction) && (
+            {/* Feedback: the client's answers to the satisfaction form (ARTA CSM) */}
+            {submission.csm && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Satisfaction form (ARTA CSM)</h3>
+                <CsmAnswers csm={submission.csm} />
+              </div>
+            )}
+            {submission.type === 'FEEDBACK' && !submission.csm && (submission.rating || submission.reaction) && (
               <div className="mb-4">
                 <FeedbackRatingDisplay rating={submission.rating} reaction={submission.reaction} feedbackTags={submission.feedbackTags} />
               </div>
@@ -215,8 +228,14 @@ export default function SubmissionDetail() {
               </div>
             )}
             <div className="bg-gray-50 dark:bg-slate-900/40 rounded-xl p-4">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Description</h3>
-              <p className="text-sm text-gray-600 dark:text-slate-400 leading-relaxed">{submission.description}</p>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">{submission.csm ? "Client's suggestions" : 'Description'}</h3>
+              <p className="text-sm text-gray-600 dark:text-slate-400 leading-relaxed whitespace-pre-line break-words">{submission.description || (submission.csm ? 'No suggestions were written.' : '')}</p>
+              {submission.type === 'FEEDBACK' && submission.remark && (
+                <div className="mt-3 space-y-2" data-remark>
+                  <RemarkBadge remark={submission.remark} />
+                  <RemarkRule />
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
               <div>
@@ -228,6 +247,13 @@ export default function SubmissionDetail() {
                 <span className="ml-2 font-medium">{new Date(submission.updatedAt).toLocaleString()}</span>
               </div>
             </div>
+            {/* Typed in by the office's staff for a citizen who came, called, wrote or sent a message */}
+            {typedIn(submission) && (
+              <p className="mt-3 text-sm">
+                <span className="text-gray-500 dark:text-slate-400">Received via:</span>
+                <span className="ml-2 font-medium">{CHANNEL_LABELS[submission.channel]}, typed in by {submission.encodedByName || 'staff'}</span>
+              </p>
+            )}
           </div>
 
           {/* ── AI Classification Panel ── */}
@@ -255,7 +281,7 @@ export default function SubmissionDetail() {
                   </div>
                   <div className="bg-gray-50 dark:bg-slate-900/40 rounded-lg p-3">
                     <p className="text-xs text-gray-500 dark:text-slate-400 font-medium mb-1">
-                      Citizen Selected
+                      {typedIn(submission) ? 'Staff Selected' : 'Citizen Selected'}
                       {citizenOverrode && (
                         <span className="ml-1 text-amber-700 dark:text-amber-400">(overrode AI)</span>
                       )}
@@ -378,8 +404,13 @@ export default function SubmissionDetail() {
         {/* ── Right column ── */}
         <div className="space-y-5">
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
-            <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-4">Citizen Information</h3>
-            {submission.user ? (
+            <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-4">{isFeedback ? 'Client' : 'Citizen Information'}</h3>
+            {isFeedback ? (
+              <p className="text-sm text-gray-600 dark:text-slate-400">
+                <span className="font-semibold text-gray-800 dark:text-slate-100">Anonymous.</span> Feedback never shows who answered;
+                an email the client gave is only used for the thank-you note.
+              </p>
+            ) : submission.user ? (
               <div className="space-y-3 text-sm">
                 <div>
                   <p className="text-gray-500 dark:text-slate-400 text-xs">Full Name</p>
@@ -471,7 +502,10 @@ export default function SubmissionDetail() {
               {isFeedback
                 ? submission.department === 'General'
                   ? "View only. This feedback rates the municipality's service as a whole, so no office gets it."
-                  : `View only. This feedback was sent to ${submission.department}. That office's staff can read it, and move it if it is meant for another office.`
+                  : submission.csm
+                    // The client rated this office's service, so the rating stays with it.
+                    ? `View only. This rating is about the service of ${submission.department}, and that office's staff can read it.`
+                    : `View only. This feedback was sent to ${submission.department}. That office's staff can read it, and move it if it is meant for another office.`
                 : "View only. The assigned office's staff update this report's status, urgency and office."}
             </p>
           </div>

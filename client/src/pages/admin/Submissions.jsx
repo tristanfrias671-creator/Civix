@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { StatusBadge, TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
+import { StatusBadge, TypeBadge, PriorityBadge, ChannelBadge } from '../../components/common/StatusBadge';
 import DeadlineBadge from '../../components/common/DeadlineBadge';
 import { SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
+import { OverallAnswer } from '../../components/common/CsmAnswers';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
@@ -13,8 +14,9 @@ const STATUS_OPTS = ['', 'PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED', 'SPA
 const STATUS_LABELS = { '':'All Statuses', PENDING:'Pending', REVIEWING:'Reviewing', IN_PROGRESS:'In Progress', RESOLVED:'Resolved', SPAM:'Spam' };
 const REACTION_LABELS = { EXCELLENT: 'Excellent', GOOD: 'Good', OKAY: 'Okay', POOR: 'Poor', TERRIBLE: 'Terrible' };
 
-// Feedback rates the service of the municipality as a whole or of one office: it has
-// no status steps or deadline, so its list shows the rating and the office instead.
+// Feedback rates the service of one office (the ARTA satisfaction form; older
+// feedback had stars): it has no status steps or deadline, so its list shows the
+// overall answer and the office instead.
 function RatingCell({ rating, reaction, dark }) {
   const n = Math.max(0, Math.min(5, Number(rating) || 0));
   return (
@@ -72,7 +74,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
     : 'All Submissions';
   const feedbackPage = typeFilter === 'FEEDBACK';
   const headers = feedbackPage
-    ? ['Reference', 'Citizen', 'Rating', 'Office', 'Date', '']
+    ? ['Reference', 'Client', 'Overall answer', 'Office', 'Date', '']
     : ['Transaction Code', 'Citizen', 'Type', 'Status', 'Deadline', 'Department', 'Date', ''];
 
   const textPrimary = dark ? '#f1f5f9' : '#111827';
@@ -86,7 +88,8 @@ export default function AdminSubmissions({ type: typeFilter }) {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-extrabold" style={{ color: textPrimary }}>{title}</h1>
-          <p className="text-sm mt-0.5" style={{ color: textMuted }}>{total} submission{total !== 1 ? 's' : ''} total</p>
+          {/* On the page's background, so a shade darker than textMuted (4.5:1). */}
+          <p className="text-sm mt-0.5" style={{ color: dark ? '#94a3b8' : '#4b5563' }}>{total} submission{total !== 1 ? 's' : ''} total</p>
         </div>
       </div>
 
@@ -117,7 +120,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                 style={statusFilter === s
                   ? { background:'#2563eb', color:'white', boxShadow:'0 2px 8px rgba(37,99,235,0.3)' }
-                  : { background: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', color: dark ? '#94a3b8' : '#6b7280' }}>
+                  : { background: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', color: dark ? '#94a3b8' : '#4b5563' }}>
                 {feedbackPage && s === '' ? 'All' : STATUS_LABELS[s]}
               </button>
             ))}
@@ -162,7 +165,14 @@ export default function AdminSubmissions({ type: typeFilter }) {
                       <td className="px-4 py-3.5 font-semibold whitespace-nowrap" style={s.user?.fullName ? { color: dark ? '#e2e8f0' : '#1f2937' } : { color: textMuted, fontStyle: 'italic' }}>{s.user?.fullName || 'Anonymous'}</td>
                       {feedbackPage ? (
                         <>
-                          <td className="px-4 py-3.5"><RatingCell rating={s.rating} reaction={s.reaction} dark={dark} /></td>
+                          <td className="px-4 py-3.5">
+                            {s.csm ? (
+                              <span className="inline-flex flex-col gap-0.5">
+                                <OverallAnswer csm={s.csm} />
+                                {s.csm.service && <span className="text-xs" style={{ color: textMuted }}>{s.csm.service}</span>}
+                              </span>
+                            ) : <RatingCell rating={s.rating} reaction={s.reaction} dark={dark} />}
+                          </td>
                           <td className="px-4 py-3.5 text-xs font-medium max-w-48" style={{ color: dark ? '#94a3b8' : '#6b7280' }}>
                             {s.department === 'General' ? 'Whole municipality' : s.department}
                           </td>
@@ -173,6 +183,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
                             {/* How urgent, when it isn't Normal */}
                             <span className="inline-flex flex-wrap items-center gap-1.5">
                               <TypeBadge type={s.type} />
+                              <ChannelBadge channel={s.channel} />
                               {s.type !== 'FEEDBACK' && s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
                             </span>
                           </td>
@@ -188,7 +199,7 @@ export default function AdminSubmissions({ type: typeFilter }) {
                       <td className="px-4 py-3.5 text-xs whitespace-nowrap" style={{ color: textMuted }}>{new Date(s.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
                       <td className="px-4 py-3.5">
                         <Link to={`/admin/submissions/${s.id}`}
-                          className="inline-flex items-center gap-1 text-xs font-bold transition-colors" style={{ color: '#2563eb' }}>
+                          className="inline-flex items-center gap-1 text-xs font-bold transition-colors" style={{ color: dark ? '#60a5fa' : '#2563eb' }}>
                           View
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>

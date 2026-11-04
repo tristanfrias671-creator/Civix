@@ -56,7 +56,7 @@ export default function LanguageSwitcher({ className = '' }) {
   // The outer box takes the page's placement (e.g. absolute, top right); the inner
   // one anchors the list under the button.
   return (
-    <div ref={wrapRef} className={className}>
+    <div ref={wrapRef} className={className} data-tour="language">
       <div className="relative">
         <button ref={buttonRef} type="button" onClick={() => setOpen(o => !o)}
           onKeyDown={e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); } }}

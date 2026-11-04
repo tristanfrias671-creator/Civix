@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTheme } from '../../context/ThemeContext';
+import { CHANNEL_LABELS, CHANNEL_SHORT } from '../../data/channels';
 
 const STATUS_LIGHT = {
   PENDING:     { label: 'Pending',     dot: '#9ca3af', bg: '#f3f4f6', color: '#374151' },
@@ -83,6 +84,20 @@ export function PriorityBadge({ priority, label }) {
     <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
       style={{ background: cfg.bg, color: cfg.color }}>
       {label || cfg.label}
+    </span>
+  );
+}
+
+// How a report came in, when the office's staff typed it in (walk-in, phone call,
+// letter, message). Reports sent online show nothing.
+export function ChannelBadge({ channel }) {
+  const { dark } = useTheme();
+  if (!channel || channel === 'ONLINE') return null;
+  return (
+    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
+      style={dark ? { background: 'rgba(148,163,184,0.18)', color: '#e2e8f0' } : { background: '#f1f5f9', color: '#334155' }}
+      title={`Typed in by the office's staff: ${CHANNEL_LABELS[channel] || channel}`}>
+      {CHANNEL_SHORT[channel] || channel}
     </span>
   );
 }

@@ -20,6 +20,7 @@ const settingsRoutes = require('./src/routes/settings');
 const staffRoutes    = require('./src/routes/staff');
 const classifyRoutes = require('./src/routes/classify');
 const accessRequestRoutes = require('./src/routes/accessRequests');
+const feedbackRoutes = require('./src/routes/feedback');
 
 // A failed background task (an email or a text that couldn't be sent, for example)
 // is logged instead of stopping the whole server; requests keep being served.
@@ -64,6 +65,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/staff',    staffRoutes);
 app.use('/api/classify', classifyRoutes);
 app.use('/api/access-requests', accessRequestRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

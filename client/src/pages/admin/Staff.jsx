@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import api from '../../utils/api';
 import useMobileTable from '../../utils/useMobileTable';
+import { Req, RequiredNote } from '../../components/common/RequiredMark';
 
 const EMPTY_FORM = { fullName: '', email: '', password: '', department: '' };
 
@@ -64,7 +65,7 @@ function DepartmentPicker({ value, options, onChange }) {
       <button ref={buttonRef} type="button" onClick={() => (open ? setOpen(false) : openList())} onKeyDown={onKeyDown}
         aria-haspopup="listbox" aria-expanded={open}
         className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all flex items-center justify-between gap-2 text-left">
-        <span className={`truncate ${value ? 'text-gray-900' : 'text-gray-400'}`}>{value || 'Select department...'}</span>
+        <span className={`truncate ${value ? 'text-gray-900' : 'text-gray-500'}`}>{value || 'Select department...'}</span>
         <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -165,7 +166,7 @@ function StaffModal({ open, onClose, onSaved, editing }) {
             <h2 className="text-lg font-bold text-gray-900">
               {editing ? 'Edit Staff Account' : 'Add New Staff Account'}
             </h2>
-            <p className="text-xs text-gray-400 mt-0.5">Role will be set to <strong>Staff</strong> automatically</p>
+            <p className="text-xs text-gray-500 mt-0.5">Role will be set to <strong>Staff</strong> automatically</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -176,10 +177,11 @@ function StaffModal({ open, onClose, onSaved, editing }) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          <RequiredNote />
 
           {/* Full Name */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Full Name *</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Full Name<Req /></label>
             <input type="text" value={form.fullName} onChange={e => set('fullName', e.target.value)}
               placeholder="e.g. Juan dela Cruz" required
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
@@ -187,7 +189,7 @@ function StaffModal({ open, onClose, onSaved, editing }) {
 
           {/* Email / Username */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Email / Username *</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Email / Username<Req /></label>
             <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
               placeholder="e.g. juan@cantilan.gov.ph" required
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" />
@@ -195,14 +197,14 @@ function StaffModal({ open, onClose, onSaved, editing }) {
 
           {/* Department */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Department *</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Department<Req /></label>
             <DepartmentPicker value={form.department} options={departmentOptions} onChange={v => set('department', v)} />
           </div>
 
           {/* Password */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-              Password {editing ? <span className="font-normal text-gray-400">(leave blank to keep current)</span> : '*'}
+              Password{editing ? <span className="font-normal text-gray-500"> (leave blank to keep current)</span> : <Req />}
             </label>
             <div className="relative">
               <input type={showPass ? 'text' : 'password'} value={form.password}

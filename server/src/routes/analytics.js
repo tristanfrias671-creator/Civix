@@ -7,8 +7,8 @@ const {
   getSentiment,
   getMonthly,
   getBreakdown,
-  getCitizens,
   getOfficeUpdates,
+  getSatisfaction,
 } = require('../controllers/analytics');
 
 router.use(authenticate, requireAdmin);
@@ -19,6 +19,6 @@ router.get('/quarterly', getQuarterly);
 router.get('/sentiment', getSentiment);
 router.get('/monthly', getMonthly);
 router.get('/breakdown', getBreakdown);
-router.get('/citizens', getCitizens);
+router.get('/satisfaction', getSatisfaction);
 
 module.exports = router;

@@ -1,22 +1,30 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
 import Icon from '../../components/common/Icons';
 import { formatDueDate } from '../../components/common/DeadlineBadge';
 import { PriorityBadge } from '../../components/common/StatusBadge';
-import FeedbackRatingPanel from '../../components/citizen/FeedbackRatingPanel';
+import CsmForm from '../../components/citizen/CsmForm';
+import CsmFace from '../../components/common/CsmFace';
+import { RequiredNote, Starred } from '../../components/common/RequiredMark';
 import LocationPicker from '../../components/citizen/LocationPicker';
 import TurnstileBox from '../../components/citizen/TurnstileBox';
+import Tour, { markTour, shouldAutoStart } from '../../components/common/Tour';
 import { useTheme } from '../../context/ThemeContext';
 import { useLang, useText } from '../../i18n/LanguageContext';
 import SUBMIT_TEXT, { refusalText } from '../../i18n/submitText';
+import CSM_TEXT from '../../i18n/csmText';
+import TOUR_TEXT, { tourSteps } from '../../i18n/tourText';
 import api from '../../utils/api';
 import { copyText } from '../../utils/clipboard';
+import { typedMobile } from '../../utils/mobile';
 import { fetchFormTicket } from '../../utils/reportGuard';
 import { suggestLocations, withBarangay, CANTILAN_BARANGAY_OPTIONS } from '../../data/cantilanLocations';
-import { officeLabel } from '../../data/officeNames';
+import { officeLabel, DEFAULT_OFFICES } from '../../data/officeNames';
 import { DEFAULT_DEADLINES, urgencyDays, addWorkingDays } from '../../data/urgency';
+import { emptyCsm, unanswered, csmPayload, scaleMeta, NA, SQD_KEYS } from '../../data/csm';
+import { serviceNames } from '../../data/charter';
 
 const fadeCss = `
 @keyframes submitFadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
@@ -25,15 +33,10 @@ const fadeCss = `
 .submit-fade-2 { animation: submitFadeUp .45s .14s cubic-bezier(.22,1,.36,1) both; }
 `;
 
-// The offices to choose from are the ones in Settings → Departments (from
-// /settings/public). This list is only used if that list can't be loaded; the
-// server then sends a report for an office that isn't on it to the receiving office.
-const FALLBACK_OFFICES = [
-  // The five offices of the study's scope. Same list as the
-  // server's default (controllers/settings.js).
-  'HR', 'Municipal Health Office', 'CSDO',
-  'Municipal Treasurer Office', 'Municipal Civil Registry Office',
-];
+// The offices to choose from are the ones in Settings → Departments, or
+// DEFAULT_OFFICES if that list can't be loaded. For an office that isn't on the
+// server's list, the server takes the office the AI reads from the text, or asks
+// the citizen to choose again.
 
 function ConfidenceBadge({ confidence, text }) {
   const color = confidence >= 70 ? '#166534' : confidence >= 40 ? '#92400e' : '#b91c1c';
@@ -46,16 +49,6 @@ function ConfidenceBadge({ confidence, text }) {
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// The contact number is a PH mobile number: digits only, starting with 09, 11 in
-// all. A pasted "+63 917 123 4567" or "917 123 4567" becomes "09171234567".
-const MOBILE_DIGITS = 11;
-function cleanMobile(raw) {
-  const digits = String(raw).replace(/\D/g, '');
-  if (digits.startsWith('63')) return `0${digits.slice(2)}`;
-  if (digits.startsWith('9')) return `0${digits}`;
-  return digits;
-}
 
 // A form ticket only works a few seconds after it was issued (see utils/reportGuard).
 const TICKET_READY_MS = 3200;
@@ -95,19 +88,127 @@ function AutoUrgency({ t, priority, deadlines, hotline }) {
   );
 }
 
-export default function Submit() {
+// Server refusals about the code that opens the satisfaction form: the citizen
+// types another code.
+const CODE_REFUSALS = ['CODE_NOT_FOUND', 'CODE_USED', 'CODE_EXPIRED', 'IS_FEEDBACK', 'NOT_RESOLVED', 'ALREADY_RATED'];
+// "Please answer the questions marked in red": shown once however often Send is
+// pressed, and taken away when the form is sent.
+const MISSING_TOAST = 'csm-missing';
+
+// `rate`: opened at /rate or /rate/<code> (the QR code on a client's slip), which
+// shows the satisfaction form (Feedback) with the code checked right away.
+export default function Submit({ rate = false }) {
   const { dark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const { code: routeCode } = useParams();
   const { lang } = useLang();
   const t = useText(SUBMIT_TEXT);
+  const tc = useText(CSM_TEXT);
 
   const debounceRef = useRef(null);
 
-  const [form, setForm] = useState({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
-  // Feedback has no photos and no deadline, and its office is optional: none means
-  // it is about the municipality's service as a whole (see server controllers/submissions.js).
+  // From the Citizen's Charter page: "File a complaint" (or "Make a suggestion")
+  // brings the type, the office and the service it is about; "Rate this service"
+  // brings the service to rate and its office. Read once, as the form opens, so the
+  // office is in place before the AI's first reading (which would clear it).
+  const [preset] = useState(() => location.state || {});
+  const [form, setForm] = useState({ type: rate ? 'FEEDBACK' : preset.type || 'COMPLAINT', department: (!rate && preset.department) || '', description: '', contactNumber: '', email: '', address: '' });
+  // Feedback is the ARTA satisfaction form, opened with a code from the office
+  // (which decides the office); no name, phone, photos or deadline.
   const isFeedback = form.type === 'FEEDBACK';
+
+  // The guided tour of the form (with Feedback chosen: of the code step). It opens by
+  // itself on the first visit to /submit, and from "Show me how" beside the form's
+  // title; not by itself at /rate, where the client came with a slip's code to rate.
+  const tt = useText(TOUR_TEXT);
+  const tourName = isFeedback ? 'rate' : 'submit';
+  const formTourSteps = useMemo(() => tourSteps(tourName, tt), [tourName, tt]);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [autoTour] = useState(() => !rate && form.type !== 'FEEDBACK' && shouldAutoStart('submit', ['home']));
+  const closeTour = useCallback(how => {
+    setTourOpen(false);
+    markTour(tourName, how);
+  }, [tourName]);
+  useEffect(() => {
+    if (!autoTour) return undefined;
+    const timer = setTimeout(() => setTourOpen(true), 700);
+    return () => clearTimeout(timer);
+  }, [autoTour]);
+  const [csm, setCsm] = useState(emptyCsm);
+  const [missing, setMissing] = useState([]);
+  const [suggestions, setSuggestions] = useState('');
+  const [rateCode, setRateCode] = useState('');
+  // What the code rates (GET /feedback/code/:code), or why it can't be used.
+  const [codeInfo, setCodeInfo] = useState(null);
+  const [codeError, setCodeError] = useState(null);
+  const [codeChecking, setCodeChecking] = useState(false);
+  const codeRequest = useRef(0);
+  const codeFieldRef = useRef(null);
+
+  const checkCode = useCallback(async raw => {
+    const code = String(raw || '').toUpperCase().replace(/\s+/g, '');
+    const request = ++codeRequest.current;
+    setCodeInfo(null);
+    if (!code) {
+      setCodeError({ code: 'CODE_NEEDED' });
+      setCodeChecking(false);
+      return;
+    }
+    setCodeError(null);
+    setCodeChecking(true);
+    try {
+      const res = await api.get(`/feedback/code/${encodeURIComponent(code)}`);
+      if (request !== codeRequest.current) return;
+      setCodeInfo(res.data);
+      setRateCode(res.data.code);
+    } catch (err) {
+      if (request !== codeRequest.current) return;
+      setCodeError(err.response ? err.response.data || {} : { offline: true });
+    } finally {
+      if (request === codeRequest.current) setCodeChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!rate) return;
+    setForm(p => (p.type === 'FEEDBACK' ? p : { ...p, type: 'FEEDBACK' }));
+    if (routeCode) {
+      setRateCode(routeCode.toUpperCase());
+      checkCode(routeCode);
+    }
+  }, [rate, routeCode, checkCode]);
+
+  function setAnswer(key, answer) {
+    setCsm(c => ({ ...c, [key]: answer }));
+    setMissing(m => (m.includes(key) ? m.filter(k => k !== key) : m));
+  }
+
+  // The questions marked red: the first one is scrolled into view.
+  function pointTo(keys) {
+    setMissing(keys);
+    const el = document.getElementById(`csm-q-${keys[0]}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.querySelector('input, select')?.focus({ preventScroll: true });
+    }
+  }
+
+  // The service being rated: as typed on the slip, or the report's handling.
+  const lockedService = codeInfo?.kind === 'REPORT'
+    ? tc.reportService[codeInfo.reportType] || null
+    : codeInfo?.service || null;
+  const codeErrorText = codeError && (codeError.offline ? tc.codeFailed
+    : codeError.code === 'CODE_NEEDED' ? tc.codeNeeded
+    : refusalText(t, lang, codeError, true) || tc.codeFailed);
+  // True once the citizen picks the office from the list (or it came with "File a
+  // complaint" on the Charter page); until then the AI fills it in.
+  const [officeChosen, setOfficeChosen] = useState(Boolean(!rate && preset.department));
+  // The Citizen's Charter service a complaint or suggestion is about (sent as the
+  // first line of the report), and the service picked to rate ({ service, department }).
+  const [aboutService, setAboutService] = useState((!rate && preset.service) || null);
+  const [rateService, setRateService] = useState(rate && preset.service && preset.department
+    ? { service: preset.service, department: preset.department } : null);
   const [trackInput, setTrackInput] = useState('');
   const [photos, setPhotos] = useState([]);
   const [pin, setPin] = useState(null); // { lat, lng, barangay } from the map, optional
@@ -116,15 +217,9 @@ export default function Submit() {
   // Keeps the contact number to 09 and 9 more digits: a key that would break the
   // 09 start is ignored (with a note under the box), and so is a 12th digit.
   function handlePhone(raw) {
-    const next = cleanMobile(raw);
-    if (next !== '' && next !== '0' && !next.startsWith('09')) {
-      setPhoneNote(true);
-      return;
-    }
-    setPhoneNote(false);
-    setForm(f => (next.length > MOBILE_DIGITS && f.contactNumber.length >= MOBILE_DIGITS
-      ? f
-      : { ...f, contactNumber: next.slice(0, MOBILE_DIGITS) }));
+    const next = typedMobile(raw, form.contactNumber);
+    setPhoneNote(next === null);
+    if (next !== null) setForm(f => ({ ...f, contactNumber: next }));
   }
 
   // A new pin also puts its barangay in the Location field (keeping what was typed).
@@ -137,7 +232,7 @@ export default function Submit() {
   const [loading, setLoading] = useState(false);
   const [trackingId, setTrackingId] = useState(null);
   const [dueAt, setDueAt] = useState(null);
-  // Feedback: the office it went to (null when it is about the whole municipality).
+  // The office the report went to (confirmation).
   const [sentOffice, setSentOffice] = useState(null);
   // The confirmation's "Copy code" button shows "Copied!" for a moment after a tap.
   const [codeCopied, setCodeCopied] = useState(false);
@@ -160,14 +255,16 @@ export default function Submit() {
   const [deadlines, setDeadlines] = useState(DEFAULT_DEADLINES);
   const [hotline, setHotline] = useState('');
   const [sentPriority, setSentPriority] = useState(null);
+  // After a feedback that didn't go well: { service } for "File a complaint".
+  const [complaintOffer, setComplaintOffer] = useState(null);
   // The offices citizens can choose (Settings → Departments); null while loading.
   const [offices, setOffices] = useState(null);
   useEffect(() => {
     api.get('/settings/public').then(r => {
       if (r.data.deadlines) setDeadlines(d => ({ ...d, ...r.data.deadlines }));
       setHotline(r.data.emergencyHotline || '');
-      setOffices(Array.isArray(r.data.departments) ? r.data.departments : FALLBACK_OFFICES);
-    }).catch(() => setOffices(FALLBACK_OFFICES));
+      setOffices(Array.isArray(r.data.departments) ? r.data.departments : DEFAULT_OFFICES);
+    }).catch(() => setOffices(DEFAULT_OFFICES));
   }, []);
   // Why the last send didn't go through, shown above Submit: { text, trackingId? }
   // (trackingId when the same report was already sent).
@@ -198,9 +295,6 @@ export default function Submit() {
     for (let waited = 0; !botTokenRef.current && waited < 12000; waited += 250) await pause(250);
     return botTokenRef.current;
   }
-  const [feedbackRating, setFeedbackRating]     = useState(0);
-  const [feedbackReaction, setFeedbackReaction] = useState('');
-  const [feedbackTags, setFeedbackTags]         = useState([]);
 
   const [aiResult, setAiResult]       = useState(null);
   const [aiLoading, setAiLoading]     = useState(false);
@@ -281,9 +375,13 @@ export default function Submit() {
     setShowLocationSuggestions(true);
   }
 
+  // The service from the Charter fills in the form's service when the code is from
+  // that office's slip and the slip names none.
   useEffect(() => {
-    if (location.state?.type) setForm(p => ({ ...p, type: location.state.type }));
-  }, [location.state]);
+    if (!codeInfo || !rateService || codeInfo.kind === 'REPORT' || codeInfo.service) return;
+    if (codeInfo.department !== rateService.department) return;
+    setCsm(c => (c.service ? c : { ...c, service: rateService.service }));
+  }, [codeInfo, rateService]);
 
   // After each pause in typing, the AI suggests an office and reads how urgent the
   // text is. Only the newest answer counts (an older one can arrive late).
@@ -314,35 +412,47 @@ export default function Submit() {
     }, 600);
   }, []);
 
-  // Complaints are always read (for how urgent they are); a suggestion only while no
-  // office is chosen (for the office). Feedback isn't read.
+  // Complaints are always read (for how urgent they are); every type is read while
+  // the citizen hasn't picked the office (for the office).
   function handleDescriptionChange(e) {
     const text = e.target.value;
     setForm(p => ({ ...p, description: text }));
-    if (!isFeedback && (form.type === 'COMPLAINT' || !form.department)) runAI(text);
+    if (form.type === 'COMPLAINT' || !officeChosen) runAI(text);
     else { setAiResult(null); setAiLoading(false); }
   }
 
-  function applyAISuggestion() {
-    if (aiResult) {
-      setForm(p => ({ ...p, department: aiResult.department }));
-      setAiResult(null);
-    }
+  // The AI's office (only one on the list) fills the Office field until the citizen
+  // picks one; when the AI can't tell from the text, the field is empty again.
+  useEffect(() => {
+    if (officeChosen) return;
+    const next = aiResult && (!offices || offices.includes(aiResult.department)) ? aiResult.department : '';
+    setForm(p => (p.department === next ? p : { ...p, department: next }));
+  }, [aiResult, officeChosen, offices]);
+
+  // "Choose another office" in the AI box opens the office list.
+  function chooseOtherOffice() {
+    setDeptOpen(true);
+    deptFieldRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (loading) return;
-    if (!isFeedback && !form.department) return toast.error(t.needOffice);
-    if (form.description.trim().length < 20) return toast.error(t.descMin);
-    if (!form.contactNumber.trim()) return toast.error(t.phoneRequired);
-    // A PH mobile number (so updates can be texted once an SMS service is set up).
-    // The box only lets in digits starting with 09, so this checks all 11 are there.
-    if (!/^09\d{9}$/.test(form.contactNumber)) return toast.error(t.phoneInvalid);
-    if (!form.email.trim()) return toast.error(t.emailRequired);
-    if (form.type === 'FEEDBACK') {
-      if (!feedbackRating) return toast.error(t.ratingRequired);
-      if (!feedbackReaction) return toast.error(t.reactionRequired);
+    if (isFeedback) {
+      if (!codeInfo) return toast.error(tc.codeNeeded);
+      const left = unanswered(csm);
+      if (left.length) {
+        toast.error(tc.missingToast, { id: MISSING_TOAST });
+        return pointTo(left);
+      }
+    } else {
+      if (!form.department) return toast.error(t.needOffice);
+      if (form.description.trim().length < 20) return toast.error(t.descMin);
+      if (!form.contactNumber.trim()) return toast.error(t.phoneRequired);
+      // A PH mobile number (so updates can be texted once an SMS service is set up).
+      // The box only lets in digits starting with 09, so this checks all 11 are there.
+      if (!/^09\d{9}$/.test(form.contactNumber)) return toast.error(t.phoneInvalid);
+      if (!form.email.trim()) return toast.error(t.emailRequired);
     }
     setLoading(true);
     setNotice(null);
@@ -350,19 +460,23 @@ export default function Submit() {
     try {
       const fd = new FormData();
       fd.append('type', form.type);
-      if (form.department) fd.append('citizenDepartment', form.department);
-      fd.append('description', form.description);
-      if (form.contactNumber) fd.append('contactNumber', form.contactNumber);
-      if (form.email) fd.append('email', form.email);
-      if (form.address) fd.append('address', form.address);
-      if (pin) {
-        fd.append('latitude', String(pin.lat));
-        fd.append('longitude', String(pin.lng));
-      }
-      if (form.type === 'FEEDBACK') {
-        fd.append('rating', String(feedbackRating));
-        fd.append('reaction', feedbackReaction);
-        if (feedbackTags.length) fd.append('feedbackTags', JSON.stringify(feedbackTags));
+      if (isFeedback) {
+        // The office is the one the code belongs to; the email is optional.
+        fd.append('ratingCode', codeInfo.code);
+        fd.append('csm', JSON.stringify(csmPayload(csm)));
+        if (suggestions.trim()) fd.append('description', suggestions.trim());
+        if (form.email.trim()) fd.append('email', form.email.trim());
+      } else {
+        if (form.department) fd.append('citizenDepartment', form.department);
+        if (aboutService) fd.append('service', aboutService);
+        fd.append('description', form.description);
+        if (form.contactNumber) fd.append('contactNumber', form.contactNumber);
+        if (form.email) fd.append('email', form.email);
+        if (form.address) fd.append('address', form.address);
+        if (pin) {
+          fd.append('latitude', String(pin.lat));
+          fd.append('longitude', String(pin.lng));
+        }
       }
       const bait = honeypotRef.current?.value;
       if (bait) fd.append('leave_empty', bait);
@@ -400,17 +514,39 @@ export default function Submit() {
       }
       setTrackingId(res.data.trackingId);
       setDueAt(res.data.submission?.dueAt || null);
-      const savedOffice = res.data.submission?.department;
-      setSentOffice(isFeedback && savedOffice && !['General', 'UNASSIGNED'].includes(savedOffice) ? savedOffice : null);
+      setSentOffice(res.data.submission?.department || null);
       setSentPriority(form.type === 'COMPLAINT' ? res.data.submission?.priority || null : null);
+      // A feedback marked Negative, with any statement disagreed with, or whose
+      // suggestions read as a problem, is offered a complaint to the same office about
+      // the same service.
+      setComplaintOffer(isFeedback
+        && (res.data.submission?.sentiment === 'NEGATIVE' || res.data.commentSentiment === 'NEGATIVE'
+          || SQD_KEYS.some(key => csm[key] === 1 || csm[key] === 2))
+        ? { service: res.data.submission?.csm?.service || null }
+        : null);
+      toast.dismiss(MISSING_TOAST);
       toast.success(t.sentToast);
     } catch (err) {
       const data = err.response?.data;
+      // The satisfaction form: a question the server found unanswered is marked
+      // red; a code that can't be used (used a moment ago, for example) goes back to
+      // the code box, and the answers stay for another code.
+      if (isFeedback && data?.code === 'CSM_INCOMPLETE' && data.field) {
+        toast.error(tc.missingToast, { id: MISSING_TOAST });
+        pointTo([data.field]);
+        return;
+      }
+      if (isFeedback && CODE_REFUSALS.includes(data?.code)) {
+        setCodeInfo(null);
+        setCodeError(data);
+        codeFieldRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
       setNotice({
         text: err.response ? (refusalText(t, lang, data, isFeedback) || t.sendFailed) : t.offline,
-        // Already sent: a friendly note (plus a Track link, except for feedback).
+        // Already sent: a friendly note with a Track link.
         info: data?.code === 'DUPLICATE',
-        trackingId: data?.code === 'DUPLICATE' && !isFeedback ? data.trackingId : null,
+        trackingId: data?.code === 'DUPLICATE' ? data.trackingId : null,
       });
     } finally {
       setLoading(false);
@@ -423,77 +559,91 @@ export default function Submit() {
     }
   }
 
+  // After feedback, a new satisfaction form for the next client (an office may keep
+  // one phone or tablet for its clients); the used code is not checked again.
   function resetForm() {
+    const again = isFeedback ? 'FEEDBACK' : 'COMPLAINT';
     setTrackingId(null);
     setDueAt(null);
     setSentOffice(null);
     setCodeCopied(false);
     setNotice(null);
-    setForm({ type: 'COMPLAINT', department: '', description: '', contactNumber: '', email: '', address: '' });
+    setForm({ type: again, department: '', description: '', contactNumber: '', email: '', address: '' });
+    setOfficeChosen(false);
     setPhotos([]);
     setPin(null);
     setPhoneNote(false);
-    setFeedbackRating(0);
-    setFeedbackReaction('');
-    setFeedbackTags([]);
+    setCsm(emptyCsm());
+    setMissing([]);
+    setSuggestions('');
+    setRateCode('');
+    setCodeInfo(null);
+    setCodeError(null);
+    if (routeCode) navigate('/rate', { replace: true });
     setAiResult(null);
     setAiDismissed(false);
     setUrgency(null);
     setSentPriority(null);
+    setComplaintOffer(null);
+    setAboutService(null);
+    setRateService(null);
   }
 
-  // Feedback: a thank-you, with no code to keep (nothing to track or wait for).
-  if (trackingId && isFeedback) {
+  // From the thank-you screen of a feedback that didn't go well: a complaint to the
+  // same office, about the same service.
+  function complainAfterFeedback() {
+    const office = sentOffice;
+    const service = complaintOffer?.service || null;
+    resetForm();
+    setForm(p => ({ ...p, type: 'COMPLAINT', department: office || '' }));
+    setOfficeChosen(Boolean(office));
+    setAboutService(service);
+    if (rate) navigate('/submit', { replace: true });
+    window.scrollTo(0, 0);
+  }
+
+  // Sent: the Transaction Code to keep, with Copy and Track, and the office it went
+  // to. Feedback also shows the overall answer (SQD0); a complaint, how urgent it is.
+  if (trackingId) {
+    const overall = isFeedback ? scaleMeta(csm.sqd0) : null;
     return (
       <CitizenPortalLayout>
         <div className="max-w-lg mx-auto py-8 text-center">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
             <div className="mb-4 flex justify-center">
-              <div className="p-4 rounded-full bg-green-50 text-green-700">
-                <Icon name="feedback" className="w-14 h-14" />
-              </div>
+              {isFeedback ? (
+                <div className="p-4 rounded-full bg-green-50 text-green-700">
+                  <Icon name="feedback" className="w-14 h-14" />
+                </div>
+              ) : (
+                <div className="p-4 rounded-full bg-green-50" style={{ color: '#16a34a' }}>
+                  <Icon name="checkCircle" className="w-14 h-14" />
+                </div>
+              )}
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">{t.thanksTitle}</h2>
-            {feedbackRating > 0 && (
-              <p className="mb-3">
-                <span className="text-2xl tracking-wider" aria-hidden="true">
-                  <span style={{ color: '#f59e0b' }}>{'★'.repeat(feedbackRating)}</span>
-                  <span style={{ color: '#cbd5e1' }}>{'★'.repeat(5 - feedbackRating)}</span>
-                </span>
-                <span className="block text-sm font-semibold text-gray-700 mt-1">{t.youRated(feedbackRating)}</span>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">{isFeedback ? t.thanksTitle : t.receivedTitle}</h2>
+            {isFeedback && csm.sqd0 != null && (
+              <p data-overall-answer className="mb-3 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-1.5 text-sm text-gray-700">
+                {overall && <CsmFace value={overall.value} className="w-5 h-5 flex-shrink-0" />}
+                <span>{tc.overallAnswer} <strong className="text-gray-900">{csm.sqd0 === NA ? tc.scale.NA : tc.scale[csm.sqd0]}</strong></span>
               </p>
             )}
-            {sentOffice && <p className="text-gray-700 font-medium mb-2">{t.feedbackSentTo(officeLabel(sentOffice))}</p>}
-            <p className="text-gray-600 mb-2">{t.thanksHelps}</p>
-            <p className="text-sm text-gray-500 mb-1">{t.thanksEmailed}</p>
-            <p className="text-xs text-gray-500 mb-8">{t.referenceNo} <span className="font-mono">{trackingId}</span></p>
-            <div className="flex flex-wrap gap-3 justify-center">
-              <button onClick={resetForm}
-                className="px-5 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                {t.sendAnother}
-              </button>
-              <button onClick={() => navigate('/')}
-                className="px-5 py-2.5 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
-                {t.backHome}
-              </button>
-            </div>
-          </div>
-        </div>
-      </CitizenPortalLayout>
-    );
-  }
-
-  if (trackingId) {
-    return (
-      <CitizenPortalLayout>
-        <div className="max-w-lg mx-auto py-8 text-center">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-10">
-            <div className="mb-4 flex justify-center">
-              <div className="p-4 rounded-full bg-green-50" style={{ color: '#16a34a' }}>
-                <Icon name="checkCircle" className="w-14 h-14" />
+            {sentOffice && (
+              <p data-sent-office className="text-gray-700 font-medium mb-2">
+                {(isFeedback ? t.feedbackSentTo : t.reportSentTo)(officeLabel(sentOffice))}
+              </p>
+            )}
+            {isFeedback && <p className="text-gray-600 mb-4">{tc.thanksHelps}</p>}
+            {complaintOffer && (
+              <div data-complaint-offer className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left">
+                <p className="text-sm font-bold text-gray-900">{t.offerTitle}</p>
+                <p className="text-sm text-gray-700 mt-1">{t.offerText(officeLabel(sentOffice))}</p>
+                <button type="button" onClick={complainAfterFeedback}
+                  className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors">
+                  <Icon name="complaint" className="w-4 h-4" /> {t.offerButton}
+                </button>
               </div>
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">{t.receivedTitle}</h2>
+            )}
             <p className="text-gray-500 mb-2">{t.yourCode}</p>
             {/* select-all: one press selects the whole code, not just the part between dashes. */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-6 py-4 font-mono text-xl font-bold mb-3 select-all break-all"
@@ -528,19 +678,19 @@ export default function Submit() {
               </div>
             )}
             <p className="text-sm text-gray-500 mb-1 font-medium">
-              {t.saveCode}
+              {isFeedback ? t.saveCodeFeedback : t.saveCode}
             </p>
             <p className="text-xs text-gray-500 mb-8">
-              {t.noAccount}
+              {!isFeedback ? t.noAccount : form.email.trim() ? t.thanksEmailed : null}
             </p>
-            <div className="flex gap-3 justify-center">
+            <div className="flex flex-wrap gap-3 justify-center">
               <button onClick={resetForm}
                 className="px-5 py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                {t.submitAnother}
+                {isFeedback ? t.sendAnother : t.submitAnother}
               </button>
               <button onClick={() => navigate('/track', { state: { prefill: trackingId } })}
                 className="px-5 py-2.5 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
-                {t.trackThis}
+                {isFeedback ? t.trackFeedback : t.trackThis}
               </button>
             </div>
           </div>
@@ -561,9 +711,9 @@ export default function Submit() {
             </svg>
           </div>
           <div className="flex-1">
-            <h1 className="text-xl font-bold text-gray-800">{t.pageTitle}</h1>
-            <p className="text-gray-600 text-sm mt-0.5">{t.pageLead}</p>
-            <p className="text-gray-600 text-xs mt-0.5">{t.pageNote}</p>
+            <h1 className="text-xl font-bold text-gray-800">{isFeedback ? tc.pageTitle : t.pageTitle}</h1>
+            <p className="text-gray-600 text-sm mt-0.5">{isFeedback ? tc.pageLead : t.pageLead}</p>
+            <p className="text-gray-600 text-xs mt-0.5">{isFeedback ? tc.pageNote : t.pageNote}</p>
           </div>
         </div>
 
@@ -573,50 +723,92 @@ export default function Submit() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           <span>
-            {t.privacy[0]}<strong>{t.privacy[1]}</strong>{t.privacy[2]}
+            {(isFeedback ? tc.privacy : t.privacy)[0]}<strong>{(isFeedback ? tc.privacy : t.privacy)[1]}</strong>{(isFeedback ? tc.privacy : t.privacy)[2]}
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="submit-fade-1 bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-          <h2 className="flex items-center gap-2 text-base font-bold text-gray-800 -mb-2">
-            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-            {t.formTitle}
-          </h2>
+        <form onSubmit={handleSubmit} className={`submit-fade-1 bg-white rounded-2xl shadow-sm border border-gray-100 ${isFeedback ? 'p-4 sm:p-6' : 'p-6'} space-y-6`}>
+          <div className="-mb-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <h2 className="flex items-center gap-2 text-base font-bold text-gray-800">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                {isFeedback ? tc.formTitle : t.formTitle}
+              </h2>
+              <button type="button" onClick={() => setTourOpen(true)} data-tour-replay
+                className="inline-flex items-center gap-1.5 min-h-[36px] text-sm font-semibold text-blue-700 hover:underline underline-offset-2 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" /><path d="M10 8.5v7l5.5-3.5z" />
+                </svg>
+                {tt.ui.showMeHow}
+              </button>
+            </div>
+            <RequiredNote className="mt-1">{t.requiredNote}</RequiredNote>
+          </div>
 
-          {/* REPORT TYPE + DEPARTMENT */}
+          {/* REPORT TYPE + DEPARTMENT (feedback: the code from the office) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.typeLabel}</label>
-              <select value={form.type}
+            <div data-tour="submit-type">
+              <label htmlFor="report-type" className="block text-sm font-medium text-gray-700 mb-1"><Starred>{t.typeLabel}</Starred></label>
+              <select id="report-type" value={form.type} aria-describedby="report-type-meaning"
                 onChange={e => {
                   const type = e.target.value;
                   setForm(p => ({ ...p, type }));
-                  if (type === 'FEEDBACK') { setAiResult(null); setAiLoading(false); setDeptOpen(false); }
                   // A complaint's text is read again for how urgent it is.
-                  else if (type === 'COMPLAINT') runAI(form.description);
+                  if (type === 'COMPLAINT') runAI(form.description);
+                  // The address of the satisfaction form isn't kept for a report.
+                  if (rate && type !== 'FEEDBACK') navigate('/submit', { replace: true });
                 }}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm">
                 <option value="COMPLAINT">{t.types.COMPLAINT}</option>
                 <option value="SUGGESTION">{t.types.SUGGESTION}</option>
                 <option value="FEEDBACK">{t.types.FEEDBACK}</option>
               </select>
+              {/* What the chosen type is for, in one line. */}
+              <p id="report-type-meaning" data-type-meaning={form.type} className="text-xs text-gray-500 mt-1">{t.typeMeaning[form.type]}</p>
             </div>
-            {/* The office. For feedback it is optional: no office means the feedback is
-                about the municipality's service as a whole. */}
-            <div>
+            {isFeedback ? (
+              <div ref={codeFieldRef} className="scroll-mt-24" data-tour="rate-code">
+                <label htmlFor="rate-code" className="block text-sm font-medium text-gray-700 mb-1"><Starred>{tc.codeLabel}</Starred></label>
+                <div className="flex gap-2">
+                  <input id="rate-code" type="text" value={rateCode} maxLength={40} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                    onChange={e => {
+                      setRateCode(e.target.value.toUpperCase());
+                      setCodeInfo(null);
+                      setCodeError(null);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        checkCode(rateCode);
+                      }
+                    }}
+                    placeholder={tc.codePlaceholder}
+                    aria-describedby="rate-code-hint"
+                    className="flex-1 min-w-0 px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono tracking-wide" />
+                  <button type="button" onClick={() => checkCode(rateCode)} disabled={codeChecking}
+                    className="flex-shrink-0 px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60">
+                    {codeChecking ? tc.codeChecking : tc.codeCheck}
+                  </button>
+                </div>
+                <p id="rate-code-hint" className="text-xs text-gray-500 mt-1">{tc.codeHint}</p>
+              </div>
+            ) : (
+            /* The office the report goes to: the AI fills it in from the text until
+               the citizen picks one. */
+            <div data-tour="submit-office">
             <div ref={deptFieldRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {isFeedback ? t.feedbackOfficeLabel : t.officeLabel}
-                {form.department && !isFeedback && (
+                <Starred>{t.officeLabel}</Starred>
+                {form.department && !officeChosen && (
                   <span className="ml-2 text-xs text-primary font-normal">{t.officeAuto}</span>
                 )}
               </label>
               <button type="button" onClick={() => setDeptOpen(v => !v)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm text-left bg-white flex items-center justify-between gap-2">
-                <span className={form.department || isFeedback ? 'text-gray-900' : 'text-gray-500'}>
-                  {form.department ? officeLabel(form.department) : isFeedback ? t.feedbackWhole : t.officePlaceholder}
+                <span className={form.department ? 'text-gray-900' : 'text-gray-500'}>
+                  {form.department ? officeLabel(form.department) : t.officePlaceholder}
                 </span>
                 <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${deptOpen ? 'rotate-180' : ''}`}
                   fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -630,19 +822,11 @@ export default function Submit() {
                   {offices === null && (
                     <p className="px-4 py-2.5 text-sm text-gray-500">{t.officesLoading}</p>
                   )}
-                  {isFeedback && offices !== null && (
-                    <button type="button"
-                      onClick={() => { setForm(p => ({ ...p, department: '' })); setDeptOpen(false); }}
-                      className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
-                        !form.department ? 'bg-blue-50 text-primary font-semibold' : 'text-gray-700 hover:bg-gray-50'
-                      }`}>
-                      {t.feedbackWhole}
-                    </button>
-                  )}
                   {(offices || []).map(d => (
                     <button key={d} type="button"
                       onClick={() => {
                         setForm(p => ({ ...p, department: d }));
+                        setOfficeChosen(true);
                         setAiResult(null);
                         setDeptOpen(false);
                       }}
@@ -655,12 +839,52 @@ export default function Submit() {
                 </div>
               )}
             </div>
-            {isFeedback && <p className="text-xs text-gray-500 mt-1">{t.feedbackOfficeHint}</p>}
+            <p className="text-xs text-gray-500 mt-1">{t.officeHint}</p>
             </div>
+            )}
           </div>
 
+          {/* Feedback: what the code rates (then the form), why it can't be used, or
+              how to start */}
+          {isFeedback && (codeInfo ? (
+            <div data-code-ok className="flex items-start gap-3 rounded-xl border border-green-200 dark:border-green-500/40 bg-green-50 px-4 py-3">
+              <svg className="w-5 h-5 mt-0.5 flex-shrink-0 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-sm text-gray-700">{tc.ratingOffice}</p>
+                <p className="text-base font-bold text-gray-900">{officeLabel(codeInfo.department)}</p>
+                {lockedService && <p className="text-sm text-gray-700 mt-0.5">{tc.ratingService} <strong className="text-gray-900">{lockedService}</strong></p>}
+              </div>
+            </div>
+          ) : codeError ? (
+            <div role="alert" data-code-error={codeError.code || 'OFFLINE'}
+              className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed">
+              <Icon name="complaint" className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-700" />
+              <div className="min-w-0">
+                <p className="text-red-700">{codeErrorText}</p>
+                <p className="text-gray-700 mt-1">{tc.noCode}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm leading-relaxed">
+              {rateService && (
+                <p data-rate-service className="text-gray-700 mb-1">{tc.fromCharter} <strong className="text-gray-900">{rateService.service}</strong></p>
+              )}
+              <p className="text-gray-700">{codeChecking ? tc.codeChecking : tc.codeStart}</p>
+              <p className="text-gray-600 mt-1">{tc.noCode}</p>
+            </div>
+          ))}
+
+          {isFeedback && codeInfo && (
+            <CsmForm value={csm} onChange={setAnswer} missing={missing} office={officeLabel(codeInfo.department)} lockedService={lockedService}
+              serviceOptions={serviceNames(codeInfo.department)}
+              suggestions={suggestions} onSuggestions={setSuggestions}
+              email={form.email} onEmail={email => setForm(p => ({ ...p, email }))} />
+          )}
+
           {/* LOCATION */}
-          <div ref={locationFieldRef}>
+          {!isFeedback && <div ref={locationFieldRef} data-tour="submit-location">
             <label className="block text-sm font-medium text-gray-700 mb-1">{t.locationLabel}</label>
             <div className="relative">
               <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -719,62 +943,58 @@ export default function Submit() {
                 </button>
               </p>
             ))}
-          </div>
+          </div>}
 
           {/* MAP PIN (optional) */}
-          <LocationPicker value={pin} onChange={handlePin} />
+          {!isFeedback && <LocationPicker value={pin} onChange={handlePin} />}
 
           {/* CONTACT NUMBER (REQUIRED) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{t.phoneLabel}</label>
+          {!isFeedback && <div data-tour="submit-phone">
+            <label className="block text-sm font-medium text-gray-700 mb-1"><Starred>{t.phoneLabel}</Starred></label>
             <input type="tel" inputMode="numeric" autoComplete="tel" value={form.contactNumber} required
               onChange={e => handlePhone(e.target.value)}
               placeholder={t.phonePlaceholder}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
             <p aria-live="polite" className={phoneNote ? 'text-xs text-red-700 mt-1' : 'sr-only'}>{phoneNote ? t.phoneStart : ''}</p>
-            {/* No hint for reports: CIVIX has no SMS service yet, so it promises no texts. */}
-            {isFeedback && <p className="text-xs text-gray-500 mt-1">{t.phoneHintFeedback}</p>}
-          </div>
+            {/* No hint: CIVIX has no SMS service yet, so it promises no texts. */}
+          </div>}
 
-          {/* EMAIL (REQUIRED) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{t.emailLabel}</label>
+          {/* EMAIL (REQUIRED; feedback has its own, optional) */}
+          {!isFeedback && <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1"><Starred>{t.emailLabel}</Starred></label>
             <input type="email" value={form.email} required maxLength={191}
               onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
               placeholder={t.emailPlaceholder}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-            <p className="text-xs text-gray-500 mt-1">
-              {isFeedback
-                ? t.emailHintFeedback
-                : t.emailHint}
-            </p>
-          </div>
-
-          {form.type === 'FEEDBACK' && (
-            <FeedbackRatingPanel rating={feedbackRating} reaction={feedbackReaction} tags={feedbackTags}
-              onRatingChange={setFeedbackRating} onReactionChange={setFeedbackReaction} onTagsChange={setFeedbackTags} />
-          )}
+            <p className="text-xs text-gray-500 mt-1">{t.emailHint}</p>
+          </div>}
 
           {/* DESCRIPTION + AI */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {form.type === 'FEEDBACK' ? t.tellUsMore : t.descLabel}
-            </label>
-            {form.type !== 'FEEDBACK' && (
-              <div className="mb-2 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 leading-relaxed">
-                <strong>{t.includeTitle}</strong>{' '}
-                {t.include.map((part, i) => (
-                  <React.Fragment key={i}>
-                    ({i + 1}) {part.b && <strong>{part.b}</strong>}{part.t}{i < t.include.length - 1 ? ', ' : ''}
-                  </React.Fragment>
-                ))}
+          {!isFeedback && <div data-tour="submit-description">
+            <label className="block text-sm font-medium text-gray-700 mb-1"><Starred>{t.descLabel}</Starred></label>
+            {aboutService && (
+              <div data-about-service className="mb-2 flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="text-gray-700">{t.aboutService} <strong className="text-gray-900">{aboutService}</strong></p>
+                  <p className="text-xs text-gray-600 mt-0.5">{t.aboutServiceNote}</p>
+                </div>
+                <button type="button" onClick={() => setAboutService(null)}
+                  className="flex-shrink-0 text-sm font-semibold text-blue-700 hover:underline">
+                  {t.aboutServiceRemove}
+                </button>
               </div>
             )}
+            <div className="mb-2 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 leading-relaxed">
+              <strong>{t.includeTitle}</strong>{' '}
+              {t.include.map((part, i) => (
+                <React.Fragment key={i}>
+                  ({i + 1}) {part.b && <strong>{part.b}</strong>}{part.t}{i < t.include.length - 1 ? ', ' : ''}
+                </React.Fragment>
+              ))}
+            </div>
             <div className="relative">
               <textarea value={form.description} onChange={handleDescriptionChange} rows={5} maxLength={2000}
-                placeholder={form.type === 'FEEDBACK'
-                  ? t.feedbackPlaceholder
-                  : t.descPlaceholder}
+                placeholder={t.descPlaceholder}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
               {aiLoading && (
                 <div className="absolute bottom-3 right-3 flex items-center gap-1.5 text-xs text-gray-500">
@@ -806,8 +1026,8 @@ export default function Submit() {
               <AutoUrgency t={t} priority={urgency.priority} deadlines={deadlines} hotline={hotline} />
             )}
 
-            {/* AI Suggestion Panel */}
-            {aiResult && !aiDismissed && !form.department && (!offices || offices.includes(aiResult.department)) && (
+            {/* What the AI read: the office it filled in, and the words that decided it */}
+            {aiResult && !aiDismissed && !officeChosen && form.department === aiResult.department && (
               <div className="mt-3 rounded-xl border border-blue-200 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-2.5 bg-blue-600 text-white">
                   <div className="flex items-center gap-2">
@@ -839,23 +1059,17 @@ export default function Submit() {
                       </div>
                     </div>
                   )}
-                  <div className="flex gap-2">
-                    <button type="button" onClick={applyAISuggestion}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors">
-                      {t.aiApply}
-                    </button>
-                    <button type="button" onClick={() => setAiDismissed(true)}
-                      className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
-                      {t.aiManual}
-                    </button>
-                  </div>
+                  <button type="button" onClick={chooseOtherOffice}
+                    className="w-full px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
+                    {t.aiChange}
+                  </button>
                 </div>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* FILE ATTACHMENT (not for feedback) */}
-          {!isFeedback && <div>
+          {!isFeedback && <div data-tour="submit-photos">
             <label className="block text-sm font-medium text-gray-700 mb-1">{t.photosLabel}</label>
             <div
               onDragOver={e => { e.preventDefault(); setDragActive(true); }}
@@ -902,8 +1116,8 @@ export default function Submit() {
             <input ref={honeypotRef} id="leave_empty" name="leave_empty" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
           </div>
 
-          {/* SUBMIT BUTTON */}
-          <div className="space-y-3">
+          {/* SUBMIT BUTTON (feedback: once the code is checked) */}
+          {(!isFeedback || codeInfo) && <div className="space-y-3">
             {notice && (
               <div role="alert"
                 className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm leading-relaxed ${
@@ -925,14 +1139,14 @@ export default function Submit() {
             {siteKey && (
               <TurnstileBox siteKey={siteKey} theme={dark ? 'dark' : 'light'} onToken={handleBotToken} resetSignal={botCheckRound} />
             )}
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading} data-tour="submit-send"
               className="w-full bg-primary text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
               </svg>
-              {loading ? t.sending : t.send}
+              {isFeedback ? (loading ? tc.sending : tc.send) : (loading ? t.sending : t.send)}
             </button>
-          </div>
+          </div>}
         </form>
         </div>
 
@@ -944,9 +1158,9 @@ export default function Submit() {
                 <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-bold text-gray-800 mb-1">{t.mattersTitle}</h3>
+            <h3 className="text-lg font-bold text-gray-800 mb-1">{isFeedback ? tc.mattersTitle : t.mattersTitle}</h3>
             <p className="text-sm text-gray-600">
-              {t.mattersText}
+              {isFeedback ? tc.mattersText : t.mattersText}
             </p>
           </div>
 
@@ -980,12 +1194,14 @@ export default function Submit() {
               </svg>
             </div>
             <div>
-              <p className="text-sm font-bold text-gray-800">{t.noNameTitle}</p>
-              <p className="text-xs text-gray-600">{t.noNameText}</p>
+              <p className="text-sm font-bold text-gray-800">{isFeedback ? tc.anonTitle : t.noNameTitle}</p>
+              <p className="text-xs text-gray-600">{isFeedback ? tc.anonText : t.noNameText}</p>
             </div>
           </div>
         </div>
       </div>
+
+      <Tour open={tourOpen} steps={formTourSteps} labels={tt.ui} dark={dark} lang={lang} onClose={closeTour} />
     </CitizenPortalLayout>
   );
 }

@@ -41,6 +41,17 @@ enum Sentiment {
   NEGATIVE
 }
 
+// How a report reached the office: sent online by the citizen, or typed in by the
+// office's staff ("Walk-in report" in the staff portal) for a citizen who came to the
+// office, called, wrote a letter or sent a message (Facebook, email).
+enum ReportChannel {
+  ONLINE
+  WALK_IN
+  PHONE
+  LETTER
+  MESSAGE
+}
+
 enum AccountStatus {
   PENDING
   ACTIVE
@@ -103,6 +114,14 @@ model Submission {
   // Resolve-by date, set when the report is submitted: working days for its type and
   // urgency (see SystemSettings). Moves only when the office changes the urgency.
   dueAt       DateTime?
+  // When the office's staff first opened the report. The Track page shows feedback
+  // as "Read by the office" from then on.
+  readAt      DateTime?
+  // How it came in, and for one typed in by staff, who typed it in (copied, so the
+  // record stays readable if the account is renamed or removed). From Oct 30, 2026.
+  channel       ReportChannel  @default(ONLINE)
+  encodedById   String?
+  encodedByName String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   user             User?             @relation(fields: [userId], references: [id])
@@ -110,6 +129,8 @@ model Submission {
   media            Media[]
   aiClassification AIClassification?
   statusLogs       StatusUpdateLog[]
+  // Feedback: the client's answers to the ARTA satisfaction form (from Oct 30, 2026)
+  csm              CsmResponse?
 }
 
 model Location {
@@ -211,6 +232,60 @@ model StatusPhoto {
   statusLog   StatusUpdateLog @relation(fields: [statusLogId], references: [id], onDelete: Cascade)
 
   @@index([statusLogId])
+}
+
+// A queuing code for one client of an office (staff portal: "New client"). It is
+// printed on the client's slip with a QR code that opens the satisfaction form
+// (Feedback) for that office. Each code can be used once, until it expires.
+model QueueCode {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  department    String
+  // What the client came for, when the staff member typed it (e.g. "Birth certificate")
+  service       String?
+  createdById   String
+  createdByName String
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  // When the client sent the form with it
+  usedAt        DateTime?
+
+  @@index([department, createdAt])
+}
+
+// One client's answers to the ARTA Client Satisfaction Measurement form (ARTA
+// MC 2022-05), kept with the feedback they sent. The client had a queuing code from
+// the office, or is rating a complaint or suggestion the office resolved.
+model CsmResponse {
+  id            String     @id @default(cuid())
+  submissionId  String     @unique
+  queueCodeId   String?    @unique
+  ratedReportId String?    @unique
+  service       String?
+  // CITIZEN, BUSINESS or GOVERNMENT (an employee or another agency)
+  clientType    String
+  // MALE or FEMALE, age and region of residence: all optional
+  sex           String?
+  age           Int?
+  region        String?
+  // The Citizen's Charter questions, numbered as on the form: CC1 1–4, CC2 1–5 and
+  // CC3 1–4, where the last option is N/A (both are N/A when CC1 is 4).
+  cc1           Int
+  cc2           Int
+  cc3           Int
+  // Service quality: 5 Strongly agree, 4 Agree, 3 Neither agree nor disagree,
+  // 2 Disagree, 1 Strongly disagree; empty (null) for N/A.
+  sqd0          Int?
+  sqd1          Int?
+  sqd2          Int?
+  sqd3          Int?
+  sqd4          Int?
+  sqd5          Int?
+  sqd6          Int?
+  sqd7          Int?
+  sqd8          Int?
+  createdAt     DateTime   @default(now())
+  submission    Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
 }
 
 model SystemSettings {

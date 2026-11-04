@@ -13,6 +13,7 @@ import Login from './pages/citizen/Login';
 import Submit from './pages/citizen/Submit';
 import Track from './pages/citizen/Track';
 import Guidelines from './pages/citizen/Guidelines';
+import Charter from './pages/citizen/Charter';
 
 import AdminLayout    from './pages/admin/AdminLayout';
 import StaffLayout    from './pages/staff/StaffLayout';
@@ -88,8 +89,12 @@ function AppRoutes() {
 
       {/* Public citizen routes — no auth required */}
       <Route path="/submit" element={<Submit />} />
+      {/* The satisfaction form (Feedback); the QR code on a client's slip opens /rate/<code> */}
+      <Route path="/rate" element={<Submit rate />} />
+      <Route path="/rate/:code" element={<Submit rate />} />
       <Route path="/track" element={<Track />} />
       <Route path="/guidelines" element={<Guidelines />} />
+      <Route path="/charter" element={<Charter />} />
 
       {/* Admin portal */}
       <Route path="/admin" element={<PrivateRoute role="ADMIN"><AdminLayout /></PrivateRoute>}>

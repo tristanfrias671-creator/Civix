@@ -1,10 +1,15 @@
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const crypto = require('crypto');
-const { ensureSettings } = require('./settings');
+const { ensureSettings, getDepartmentList } = require('./settings');
 const { loadSealImage } = require('../utils/branding');
 const { parsePeriod, PeriodError, phDate, phIsoDate, phMonthKey, MONTHS } = require('../utils/reportPeriod');
 const { PRIORITY_LABELS } = require('../utils/urgency');
+const { CC_QUESTIONS, SQD, SQD_STATEMENTS } = require('../utils/csm');
+const { satisfactionResults } = require('../utils/csmResults');
+const { SQD_ACTIONS, lowParts } = require('../utils/csmActions');
+const { REMARKS, REMARK_PLURAL } = require('../utils/remarks');
+const { CHANNEL_LABELS } = require('../utils/channels');
 const prisma = require('../utils/prisma');
 
 // Reports staff marked as spam or invalid (status SPAM) are left out of every figure.
@@ -324,6 +329,328 @@ function drawLineChart(doc, data, x, y, w, h) {
   doc.moveTo(x, y + h).lineTo(x + w, y + h).lineWidth(0.7).stroke(TEXT_LIGHT);
 }
 
+// ── Client satisfaction: the ARTA Client Satisfaction Measurement form ───────
+// Each rating as dark text on a light fill.
+const RATING_COLORS = {
+  Outstanding:         { light: '#dcfce7', text: '#166534' },
+  'Very Satisfactory': { light: '#ccfbf1', text: '#115e59' },
+  Satisfactory:        { light: '#dbeafe', text: '#1e40af' },
+  Fair:                { light: '#fef3c7', text: '#92400e' },
+  Poor:                { light: '#fee2e2', text: '#991b1b' },
+};
+const pctText = value => (value == null ? '—' : `${value.toFixed(1)}%`);
+const SCORE_NOTE = 'A score is the share of Agree and Strongly agree among the answers that are not N/A. The overall score ' +
+  'covers SQD1–SQD8 together; SQD0 (overall satisfaction) is shown on its own. Ratings (ARTA): 95% and up Outstanding, ' +
+  '90–94.9% Very Satisfactory, 80–89.9% Satisfactory, 60–79.9% Fair, below 60% Poor.';
+const CODES_NOTE = "Each client gets a code on a slip from the office (New client), and one code opens one satisfaction form for 7 days, so each code is one transaction. RESPONSE RATE: the share of the codes given that were used to answer the form. Ratings of resolved complaints and suggestions use their Transaction Code instead and are not counted here.";
+const SQD_SHORT = { sqd0: 'Overall satisfaction', ...Object.fromEntries(SQD.slice(1).map(key => [key, SQD_STATEMENTS[key].dimension])) };
+
+// The overall row of ARTA's statement table: SQD1–SQD8's answers added up.
+function overallCounts(result) {
+  const counts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0, NA: 0 };
+  for (const key of SQD.slice(1)) for (const answer of Object.keys(counts)) counts[answer] += result.sqd[key].counts[answer];
+  return { counts, total: result.responses * (SQD.length - 1), score: result.overall };
+}
+
+// The Citizen's Charter rows: each question (short, to fit one line), then how many
+// chose each option.
+const CC_SHORT = {
+  cc1: "CC1  Awareness of a Citizen's Charter",
+  cc2: "CC2  If aware: was this office's Citizen's Charter easy to see?",
+  cc3: "CC3  If aware: how much did the Citizen's Charter help in the transaction?",
+};
+function charterRows(result) {
+  return ['cc1', 'cc2', 'cc3'].flatMap(key => [
+    { head: true, label: CC_SHORT[key] },
+    ...CC_QUESTIONS[key].options.map((option, i) => ({ label: option, count: result.charter[key][i] })),
+  ]);
+}
+
+// Who answered: client type, sex and age group.
+function clientRows(result) {
+  return [
+    { head: true, label: 'Client type' }, ...result.clients.types,
+    { head: true, label: 'Sex' }, ...result.clients.sexes,
+    { head: true, label: 'Age' }, ...result.clients.ages,
+  ];
+}
+
+// A small title inside a section, on a new page when too little room is left.
+function subHead(doc, title, y, room = 90) {
+  if (y + room > doc.page.height - 70) { doc.addPage(); y = 50; }
+  doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text(title, 50, y, { width: doc.page.width - 100 });
+  return y + 17;
+}
+
+// A rating as a colored tag, centered in its cell ("—" when there is no score).
+function ratingTag(doc, rating, x, y, width) {
+  const c = RATING_COLORS[rating];
+  if (!c) {
+    doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID).text(rating || '—', x, y + 2, { width, align: 'center', lineBreak: false });
+    return;
+  }
+  doc.rect(x + 4, y, width - 8, 12).fill(c.light);
+  doc.fontSize(7).font('Helvetica-Bold').fillColor(c.text).text(rating, x, y + 3, { width, align: 'center', lineBreak: false });
+}
+
+// Rows with a count and its share of `whole`; head rows name the group below them.
+function shareTable(doc, y, firstLabel, rows, whole) {
+  return pdfTable(doc, y, [
+    { label: firstLabel, x: 55, width: 370 },
+    { label: 'COUNT', x: 425, width: 50, align: 'center' },
+    { label: '% OF ANSWERS', x: 475, width: 70, align: 'center' },
+  ], rows, (row, ry) => {
+    if (row.head) {
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor(TEXT_DARK)
+        .text(fitText(doc, row.label, 365), 55, ry + 4, { width: 370, lineBreak: false });
+      return;
+    }
+    doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_DARK)
+      .text(fitText(doc, row.label, 355), 65, ry + 4, { width: 360, lineBreak: false })
+      .text(String(row.count), 425, ry + 4, { width: 50, align: 'center', lineBreak: false })
+      .text(pctText(whole ? Math.round((row.count * 1000) / whole) / 10 : null), 475, ry + 4, { width: 70, align: 'center', lineBreak: false });
+  }, { rowH: 15 });
+}
+
+// The codes each office gave its clients (New client) in the time, with how many
+// were used to answer the form: the clients served and the response rate.
+function drawCodes(doc, s, y) {
+  const W = doc.page.width;
+  const rows = [...s.offices, { department: 'All offices', ...s.all, isTotal: true }];
+  y = subHead(doc, 'Codes given to clients and response rate, by office', y);
+  y = pdfTable(doc, y, [
+    { label: 'OFFICE',        x: 55,  width: 170 },
+    { label: 'CODES GIVEN',   x: 225, width: 65, align: 'center' },
+    { label: 'ANSWERED',      x: 290, width: 60, align: 'center' },
+    { label: 'NOT USED YET',  x: 350, width: 65, align: 'center' },
+    { label: 'EXPIRED',       x: 415, width: 55, align: 'center' },
+    { label: 'RESPONSE RATE', x: 470, width: 75, align: 'center' },
+  ], rows, (o, ry) => {
+    doc.fontSize(7.5).font(o.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK);
+    doc.text(fitText(doc, o.department, 165), 55, ry + 5, { width: 170, lineBreak: false })
+      .text(String(o.codes.given), 225, ry + 5, { width: 65, align: 'center', lineBreak: false })
+      .text(String(o.codes.answered), 290, ry + 5, { width: 60, align: 'center', lineBreak: false })
+      .text(String(o.codes.waiting), 350, ry + 5, { width: 65, align: 'center', lineBreak: false })
+      .text(String(o.codes.expired), 415, ry + 5, { width: 55, align: 'center', lineBreak: false })
+      .text(pctText(o.codes.rate), 470, ry + 5, { width: 75, align: 'center', lineBreak: false });
+  });
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID).text(CODES_NOTE, 50, y + 5, { width: W - 100 });
+  return doc.y + 16;
+}
+
+// The clients' remarks (utils/remarks.js): comments, complaints and suggestions by
+// label for all offices, then by office.
+const REMARKS_NOTE = 'A remark is what a client wrote in the last box of the form, sorted from its words (English, Filipino or Bisaya): '
+  + 'a complaint names a problem, a suggestion asks for a change, and a comment is any other remark, such as thanks. '
+  + 'A remark is not a complaint report and has no deadline.';
+function drawRemarks(doc, s, officeRows, y) {
+  const W = doc.page.width;
+  y = subHead(doc, "Clients' remarks: comments, complaints and suggestions", y);
+  const r = s.all.remarks;
+  const labelRows = [
+    ...REMARKS.map(kind => ({ label: REMARK_PLURAL[kind], ...r[kind] })),
+    { label: 'No remark written', ...r.none },
+    { label: 'All forms', ...s.all.sentiment, total: s.all.responses, isTotal: true },
+  ];
+  y = pdfTable(doc, y, [
+    { label: 'REMARK, ALL OFFICES', x: 55, width: 190 },
+    { label: 'POSITIVE', x: 245, width: 75, align: 'center' },
+    { label: 'NEUTRAL', x: 320, width: 75, align: 'center' },
+    { label: 'NEGATIVE', x: 395, width: 75, align: 'center' },
+    { label: 'TOTAL', x: 470, width: 75, align: 'center' },
+  ], labelRows, (row, ry) => {
+    doc.fontSize(7.5).font(row.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK)
+      .text(row.label, 55, ry + 4, { width: 190, lineBreak: false });
+    ['POSITIVE', 'NEUTRAL', 'NEGATIVE', 'total'].forEach((key, i) => {
+      doc.font(row.isTotal || key === 'total' ? 'Helvetica-Bold' : 'Helvetica')
+        .text(String(row[key]), 245 + i * 75, ry + 4, { width: 75, align: 'center', lineBreak: false });
+    });
+  }, { rowH: 15 });
+  y += 10;
+  y = pdfTable(doc, y, [
+    { label: 'OFFICE', x: 55, width: 190 },
+    { label: 'COMMENTS', x: 245, width: 75, align: 'center' },
+    { label: 'COMPLAINTS', x: 320, width: 75, align: 'center' },
+    { label: 'SUGGESTIONS', x: 395, width: 75, align: 'center' },
+    { label: 'NO REMARK', x: 470, width: 75, align: 'center' },
+  ], officeRows, (o, ry) => {
+    doc.fontSize(7.5).font(o.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK)
+      .text(fitText(doc, o.department, 185), 55, ry + 4, { width: 190, lineBreak: false });
+    [...REMARKS.map(kind => o.remarks[kind].total), o.remarks.none.total].forEach((value, i) => {
+      doc.text(String(value), 245 + i * 75, ry + 4, { width: 75, align: 'center', lineBreak: false });
+    });
+  }, { rowH: 15 });
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID).text(REMARKS_NOTE, 50, y + 5, { width: W - 100 });
+  return doc.y + 16;
+}
+
+// What to improve: each office's parts of the service under 80% (below
+// Satisfactory), the lowest first, with the suggested actions (utils/csmActions.js).
+const ACTIONS_NOTE = "Suggested actions for each office's action plan, based on the Citizen's Charter and RA 11032 (Ease of Doing Business); each office decides its own.";
+const ALL_SATISFACTORY = "Every part of each office's service is Satisfactory (80%) or better.";
+function drawImprove(doc, s, y) {
+  const W = doc.page.width;
+  const bottom = () => doc.page.height - 70;
+  y = subHead(doc, 'What to improve: parts under 80% (below Satisfactory), by office', y);
+  const offices = s.offices.map(o => ({ o, low: lowParts(o) })).filter(x => x.low.length);
+  if (!offices.length) {
+    doc.fontSize(8).font('Helvetica').fillColor(TEXT_MID).text(ALL_SATISFACTORY, 50, y, { width: W - 100 });
+    return doc.y + 16;
+  }
+  for (const { o, low } of offices) {
+    if (y + 50 > bottom()) { doc.addPage(); y = 50; }
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor(TEXT_DARK).text(o.department, 50, y, { width: W - 100 });
+    y = doc.y + 4;
+    for (const key of low) {
+      const actions = SQD_ACTIONS[key];
+      if (y + 16 + actions.length * 20 > bottom()) { doc.addPage(); y = 50; }
+      const part = o.sqd[key];
+      doc.fontSize(8).font('Helvetica-Bold').fillColor(TEXT_DARK)
+        .text(`${key.toUpperCase()} ${SQD_SHORT[key]}: ${pctText(part.score)}, ${part.rating}`, 60, y, { width: W - 110 });
+      y = doc.y + 2;
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID);
+      for (const action of actions) {
+        doc.text(`\u2022  ${action}`, 68, y, { width: W - 118 });
+        y = doc.y + 1.5;
+      }
+      y += 5;
+    }
+    y += 3;
+  }
+  doc.fontSize(7.5).font('Helvetica-Oblique').fillColor(TEXT_MID).text(ACTIONS_NOTE, 50, y, { width: W - 100 });
+  return doc.y + 16;
+}
+
+function drawSatisfaction(doc, period, s, y) {
+  const W = doc.page.width;
+  const filed = period.kind === 'all' ? '' : ` sent ${period.rangeFull}`;
+  doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
+    .text(`Answers to the ARTA Client Satisfaction Measurement (CSM) form${filed}. A client rates one office's service with ` +
+      `the code on the slip from that office, or with the Transaction Code of a resolved complaint or suggestion. ${SCORE_NOTE}`,
+    50, y, { width: W - 100, lineGap: 2, align: 'justify' });
+  y = doc.y + 14;
+  if (!s.all.responses) {
+    doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK)
+      .text(period.kind === 'all' ? 'No client has answered the satisfaction form yet.' : `No client answered the satisfaction form in this ${period.word}.`, 50, y);
+    y = doc.y + 14;
+    return s.all.codes.given ? drawCodes(doc, s, y) : y - 4;
+  }
+
+  // Each office (the offices on the Settings list, even with no answers), then all of them.
+  const officeRows = [...s.offices, { department: 'All offices', ...s.all, isTotal: true }];
+  y = subHead(doc, 'Results by office', y);
+  y = pdfTable(doc, y, [
+    { label: 'OFFICE',   x: 55,  width: 135 },
+    { label: 'ANSWERS',  x: 190, width: 45, align: 'center' },
+    { label: 'OVERALL',  x: 235, width: 60, align: 'center' },
+    { label: 'RATING',   x: 295, width: 85, align: 'center' },
+    { label: 'SQD0',     x: 380, width: 45, align: 'center' },
+    { label: 'POSITIVE', x: 425, width: 40, align: 'center' },
+    { label: 'NEUTRAL',  x: 465, width: 40, align: 'center' },
+    { label: 'NEGATIVE', x: 505, width: 40, align: 'center' },
+  ], officeRows, (o, ry) => {
+    doc.fontSize(7.5).font(o.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK);
+    doc.text(fitText(doc, o.department, 130), 55, ry + 6, { width: 135, lineBreak: false })
+      .text(String(o.responses), 190, ry + 6, { width: 45, align: 'center', lineBreak: false })
+      .text(pctText(o.overall), 235, ry + 6, { width: 60, align: 'center', lineBreak: false })
+      .text(pctText(o.sqd.sqd0.score), 380, ry + 6, { width: 45, align: 'center', lineBreak: false })
+      .text(String(o.sentiment.POSITIVE), 425, ry + 6, { width: 40, align: 'center', lineBreak: false })
+      .text(String(o.sentiment.NEUTRAL), 465, ry + 6, { width: 40, align: 'center', lineBreak: false })
+      .text(String(o.sentiment.NEGATIVE), 505, ry + 6, { width: 40, align: 'center', lineBreak: false });
+    ratingTag(doc, o.responses ? o.rating : 'No answers', 295, ry + 4, 85);
+  }, { rowH: 20 });
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+    .text('OVERALL: the overall score (SQD1–SQD8). SQD0: satisfied with the service. POSITIVE / NEUTRAL / NEGATIVE: the label of each answered form, from its SQD0 answer (or the average of SQD1–SQD8 when SQD0 is N/A).',
+      50, y + 5, { width: W - 100 });
+  y = doc.y + 16;
+
+  y = drawRemarks(doc, s, officeRows, y);
+  y = drawCodes(doc, s, y);
+
+  // The score of each statement, office by office.
+  y = subHead(doc, 'Score of each part of the service, by office', y);
+  y = pdfTable(doc, y, [
+    { label: 'OFFICE', x: 55, width: 120 },
+    ...SQD.map((key, i) => ({ label: key.toUpperCase(), x: 175 + i * 40, width: 40, align: 'center' })),
+  ], officeRows, (o, ry) => {
+    doc.fontSize(7).font(o.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK);
+    doc.text(fitText(doc, o.department, 115), 55, ry + 5, { width: 120, lineBreak: false });
+    SQD.forEach((key, i) => doc.text(pctText(o.sqd[key].score), 175 + i * 40, ry + 5, { width: 40, align: 'center', lineBreak: false }));
+  });
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+    .text(SQD.map(key => `${key.toUpperCase()} ${SQD_SHORT[key]}`).join('  ·  '), 50, y + 5, { width: W - 100 });
+  y = doc.y + 16;
+
+  y = drawImprove(doc, s, y);
+
+  // ARTA's table: how many gave each answer to each statement.
+  y = subHead(doc, 'Answers to each statement, all offices', y);
+  const statementRows = [
+    ...SQD.map(key => ({ label: `${key.toUpperCase()} ${SQD_SHORT[key]}`, counts: s.all.sqd[key].counts, total: s.all.responses, score: s.all.sqd[key].score })),
+    { label: 'Overall (SQD1–SQD8)', ...overallCounts(s.all), isTotal: true },
+  ];
+  y = pdfTable(doc, y, [
+    { label: 'STATEMENT',     x: 55,  width: 110 },
+    { label: 'STR. AGREE',    x: 165, width: 50, align: 'center' },
+    { label: 'AGREE',         x: 215, width: 40, align: 'center' },
+    { label: 'NEITHER',       x: 255, width: 44, align: 'center' },
+    { label: 'DISAGREE',      x: 299, width: 46, align: 'center' },
+    { label: 'STR. DISAGREE', x: 345, width: 58, align: 'center' },
+    { label: 'N/A',           x: 403, width: 32, align: 'center' },
+    { label: 'TOTAL',         x: 435, width: 38, align: 'center' },
+    { label: 'SCORE',         x: 473, width: 72, align: 'center' },
+  ], statementRows, (row, ry) => {
+    doc.fontSize(7).font(row.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK);
+    doc.text(fitText(doc, row.label, 106), 55, ry + 5, { width: 110, lineBreak: false });
+    [[5, 165, 50], [4, 215, 40], [3, 255, 44], [2, 299, 46], [1, 345, 58], ['NA', 403, 32]].forEach(([answer, x, width]) => {
+      doc.text(String(row.counts[answer]), x, ry + 5, { width, align: 'center', lineBreak: false });
+    });
+    doc.text(String(row.total), 435, ry + 5, { width: 38, align: 'center', lineBreak: false })
+      .text(pctText(row.score), 473, ry + 5, { width: 72, align: 'center', lineBreak: false });
+  });
+  y += 16;
+
+  // The Citizen's Charter.
+  y = subHead(doc, "Citizen's Charter, all offices", y, 120);
+  const cc = s.all.charter;
+  doc.fontSize(8).font('Helvetica').fillColor(TEXT_MID)
+    .text(`Know what a Citizen's Charter is: ${pctText(cc.aware)}   ·   Saw this office's Charter: ${pctText(cc.sawCharter)}   ·   ` +
+      `Easy to see: ${pctText(cc.easyToSee)}   ·   It helped: ${pctText(cc.helped)}  (the last two of those who did not answer N/A)`,
+    50, y, { width: W - 100 });
+  y = doc.y + 8;
+  y = shareTable(doc, y, 'QUESTION AND ANSWER', charterRows(s.all), s.all.responses) + 16;
+
+  // The services rated, when the slips named them.
+  if (s.services.length) {
+    const shown = s.services.slice(0, 15);
+    y = subHead(doc, 'Services rated', y);
+    y = pdfTable(doc, y, [
+      { label: 'OFFICE',  x: 55,  width: 140 },
+      { label: 'SERVICE', x: 195, width: 170 },
+      { label: 'ANSWERS', x: 365, width: 50, align: 'center' },
+      { label: 'OVERALL', x: 415, width: 55, align: 'center' },
+      { label: 'RATING',  x: 470, width: 75, align: 'center' },
+    ], shown, (row, ry) => {
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_DARK);
+      doc.text(fitText(doc, row.department, 135), 55, ry + 6, { width: 140, lineBreak: false })
+        .text(fitText(doc, row.service, 165), 195, ry + 6, { width: 170, lineBreak: false })
+        .text(String(row.responses), 365, ry + 6, { width: 50, align: 'center', lineBreak: false })
+        .text(pctText(row.overall), 415, ry + 6, { width: 55, align: 'center', lineBreak: false });
+      ratingTag(doc, row.rating, 470, ry + 4, 75);
+    }, { rowH: 20 });
+    if (s.services.length > shown.length) {
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+        .text(`The ${shown.length} services with the most answers, of ${s.services.length}. The Excel report lists all of them.`, 50, y + 5, { width: W - 100 });
+      y = doc.y;
+    }
+    y += 16;
+  }
+
+  // Who answered.
+  y = subHead(doc, 'Who answered, all offices', y, 120);
+  return shareTable(doc, y, 'CLIENT', clientRows(s.all), s.all.responses) + 10;
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // REPORT DATA — the same figures for the PDF and the Excel workbook, for one
 // period: ?period=week|month|year|all&date=YYYY-MM-DD (see utils/reportPeriod.js).
@@ -340,7 +667,7 @@ async function gatherReport(period) {
     total, pending, reviewing, inProgress, resolved,
     positive, neutral, negative,
     complaints, suggestions, feedbacks,
-    citizens, previousTotal,
+    previousTotal,
   ] = await Promise.all([
     prisma.submission.count({ where: ALL }),
     prisma.submission.count({ where: { ...CASE, status: 'PENDING' } }),
@@ -353,7 +680,6 @@ async function gatherReport(period) {
     prisma.submission.count({ where: { ...ALL, type: 'COMPLAINT' } }),
     prisma.submission.count({ where: { ...ALL, type: 'SUGGESTION' } }),
     prisma.submission.count({ where: { ...ALL, type: 'FEEDBACK' } }),
-    prisma.user.count({ where: { role: 'CITIZEN' } }),
     period.prevFrom
       ? prisma.submission.count({ where: { ...NOT_SPAM, createdAt: { gte: period.prevFrom, lt: period.prevTo } } })
       : null,
@@ -437,12 +763,16 @@ async function gatherReport(period) {
     where: ALL,
     orderBy: { createdAt: 'desc' },
     take: period.kind === 'all' ? LOG_LIMIT.all : LOG_LIMIT.period,
-    select: { trackingId: true, type: true, department: true, status: true, priority: true, sentiment: true, createdAt: true },
+    select: { trackingId: true, type: true, department: true, status: true, priority: true, sentiment: true, createdAt: true, channel: true },
   });
+
+  // How clients rated each office on the satisfaction form (ARTA CSM), for the
+  // forms sent in the period.
+  const satisfaction = await satisfactionResults(prisma, { offices: await getDepartmentList(), from: period.from, to: period.to });
 
   return {
     total, pending, reviewing, inProgress, resolved, positive, neutral, negative,
-    complaints, suggestions, feedbacks, citizens, previousTotal, avgDays, responseRate,
+    complaints, suggestions, feedbacks, previousTotal, avgDays, responseRate,
     urgent, normal, canWait, urgentResolved: urgentDone.length, urgentOnTime,
     trend,
     quarters: Object.values(quarters).sort((a, b) => a.year - b.year || a.q - b.q),
@@ -453,6 +783,7 @@ async function gatherReport(period) {
       .sort((a, b) => b[1] - a[1]).slice(0, 15)
       .map(([name, value]) => ({ name, value })),
     log,
+    satisfaction,
   };
 }
 
@@ -592,13 +923,18 @@ function drawPdfReport(doc, period, d, seal) {
   }
 
   // Executive Summary
+  const rated = d.satisfaction.all;
+  const satisfactionText = rated.responses
+    ? `Clients rated the offices' service on the ARTA Client Satisfaction Measurement form ${rated.responses.toLocaleString()} time(s)` +
+      (rated.overall == null ? '. ' : `, for an overall score of ${pctText(rated.overall)} (${rated.rating}). `)
+    : `No client ${isAll ? 'has answered' : 'answered'} the ARTA Client Satisfaction Measurement form${isAll ? ' yet' : ` in this ${word}`}. `;
   const summaryText = isAll
     ? `This report presents a comprehensive statistical analysis of citizen engagement submissions ` +
       `recorded through the CIVIX platform for the Municipality of Cantilan, Surigao del Sur. ` +
       `A total of ${d.total.toLocaleString()} submission(s) have been recorded, comprising complaints, ` +
-      `suggestions, and service feedback from registered citizens. The current response rate for complaints ` +
+      `suggestions, and service feedback from citizens. The current response rate for complaints ` +
       `and suggestions stands at ${d.responseRate}%, with an average resolution time of ${d.avgDays} day(s). ` +
-      `Feedback rates the service of the municipality as a whole or of one office, and has no status steps or deadline. ` +
+      `Feedback is the satisfaction form: it rates one office's service and has no status steps or deadline. ${satisfactionText}` +
       `This document is intended for review by municipal officials and designated department heads.`
     : `This ${period.title.toLowerCase()} covers the citizen submissions filed through the CIVIX platform for the ` +
       `Municipality of Cantilan, Surigao del Sur, for the period ${period.rangeFull.replace(/ \(.*\)$/, '')}. ` +
@@ -606,8 +942,9 @@ function drawPdfReport(doc, period, d, seal) {
       `${d.previousTotal.toLocaleString()} in the previous ${word}. ` +
       (period.inProgress ? `The ${word} is still in progress, so the figures run up to the report date. ` : '') +
       `For the complaints and suggestions filed in this ${word}, the response rate is ${d.responseRate}% and the average ` +
-      `resolution time is ${d.avgDays} day(s); statuses are as of ${genDate}. Feedback rates the service of the municipality ` +
-      `as a whole or of one office, and has no status steps or deadline. This document is intended for review by municipal officials and designated department heads.`;
+      `resolution time is ${d.avgDays} day(s); statuses are as of ${genDate}. Feedback is the satisfaction form: it rates ` +
+      `one office's service and has no status steps or deadline. ${satisfactionText}` +
+      `This document is intended for review by municipal officials and designated department heads.`;
   doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Executive Summary', 50, 394);
   doc.moveTo(50, 410).lineTo(W - 50, 410).lineWidth(0.5).stroke(DIVIDER);
   doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID);
@@ -624,7 +961,8 @@ function drawPdfReport(doc, period, d, seal) {
     [3, 'Sentiment Analysis'],
     [4, trendTitle],
     [5, 'Submission Breakdown by Department'],
-    [6, logTitle],
+    [6, 'Client Satisfaction (ARTA CSM)'],
+    [7, logTitle],
   ];
   const tocRowY = {};
   let ty = tocTop + 27;
@@ -816,12 +1154,21 @@ function drawPdfReport(doc, period, d, seal) {
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // PAGE 5 — Submissions Log (continues over more pages when needed)
+  // PAGE 5 — Client Satisfaction: the ARTA satisfaction form, by office
   // ══════════════════════════════════════════════════════════════════════
   doc.addPage();
   y = 50;
   sectionPage[6] = pageNo();
-  y = sectionHead(doc, 6, logTitle, y);
+  y = sectionHead(doc, 6, 'Client Satisfaction (ARTA CSM)', y);
+  drawSatisfaction(doc, period, d.satisfaction, y);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PAGE 6 — Submissions Log (continues over more pages when needed)
+  // ══════════════════════════════════════════════════════════════════════
+  doc.addPage();
+  y = 50;
+  sectionPage[7] = pageNo();
+  y = sectionHead(doc, 7, logTitle, y);
 
   const shown = d.log.slice(0, isAll ? PDF_LOG_LIMIT.all : PDF_LOG_LIMIT.period);
   const intro = isAll
@@ -922,6 +1269,10 @@ const XL_SENTIMENT = {
   Neutral:  { bar: 'FF6B7280', light: 'FFF3F4F6', text: 'FF374151' },
   Negative: { bar: 'FFDC2626', light: 'FFFEE2E2', text: 'FF991B1B' },
 };
+// The satisfaction ratings (the same colors as the PDF's).
+const XL_RATING = Object.fromEntries(Object.entries(RATING_COLORS).map(([rating, c]) => [rating, {
+  light: `FF${c.light.slice(1).toUpperCase()}`, text: `FF${c.text.slice(1).toUpperCase()}`,
+}]));
 
 function xlBorderThin() {
   return {
@@ -1051,20 +1402,28 @@ async function generateExcel(req, res) {
       ['Can-Wait Reports', d.canWait],
       ['Urgent Reports Resolved On Time', d.urgentResolved ? `${d.urgentOnTime} of ${d.urgentResolved}` : 'None resolved yet'],
     ];
+    // The satisfaction form (ARTA CSM): the "Client Satisfaction" sheet has the details.
+    const rated = d.satisfaction.all;
+    const satisfactionRows = [
+      ['Satisfaction Forms Answered', rated.responses],
+      ['Overall Satisfaction Score (ARTA)', rated.overall == null ? 'No answers yet' : `${pctText(rated.overall)} (${rated.rating})`],
+      ['Codes Given to Clients', rated.codes.given],
+      ['Satisfaction Form Response Rate', rated.codes.given ? `${pctText(rated.codes.rate)} (${rated.codes.answered} of ${rated.codes.given} codes used)` : 'No codes given yet'],
+    ];
     const kpiRows = isAll ? [
       ['Total Submissions', d.total],
       ['Response Rate (%)', d.responseRate],
       ['Avg. Resolution Time (days)', d.avgDays],
-      ['Registered Citizens', d.citizens],
       ...urgencyRows,
+      ...satisfactionRows,
     ] : [
       ['Reporting Period', period.rangeFull],
       ['Total Submissions', d.total],
       [`Submissions in the Previous ${titleCase(word)}`, d.previousTotal],
       ['Response Rate (%)', d.responseRate],
       ['Avg. Resolution Time (days)', d.avgDays],
-      ['Registered Citizens (all time)', d.citizens],
       ...urgencyRows,
+      ...satisfactionRows,
     ];
     kpiRows.forEach(([label, value]) => {
       const text = typeof value === 'string';
@@ -1237,22 +1596,186 @@ async function generateExcel(req, res) {
     if (d.citedDepartments.length) xlDataBar(sDept, `B${citedStart}:B${rd - 1}`, 'FF7C3AED');
 
     // ══════════════════════════════════════════════════════════════════════
-    // SHEET 5 — Submissions: every one filed in the period (all time: the most
+    // SHEET 5 — Client Satisfaction: the ARTA satisfaction form, by office
+    // ══════════════════════════════════════════════════════════════════════
+    const sat = d.satisfaction;
+    const sCsm = workbook.addWorksheet('Client Satisfaction', { views: [{ showGridLines: false }] });
+    xlPrintSetup(sCsm, '1:2');
+    sCsm.columns = [{ width: 44 }, ...Array.from({ length: 9 }, () => ({ width: 14 }))];
+    let rs = xlBanner(sCsm, 10, 'CIVIX — Client Satisfaction (ARTA CSM)',
+      `${isAll ? 'All answers so far' : `Forms sent ${period.rangeFull}`}   |   Generated ${genDate}`);
+    sCsm.mergeCells(rs, 1, rs, 10);
+    sCsm.getCell(rs, 1).value = SCORE_NOTE;
+    sCsm.getCell(rs, 1).font = { size: 9, color: { argb: XL_TEXT_MID } };
+    sCsm.getCell(rs, 1).alignment = { wrapText: true, vertical: 'top', indent: 1 };
+    sCsm.getRow(rs).height = 30;
+    rs += 2;
+
+    // One row of a table: `values` from column A; numbers centered, percentages as
+    // "96.4%" (a dash when there is none), ratings tinted.
+    const csmRow = (values, { bold = false, total = false, zebraRow = false, indent = 0 } = {}) => {
+      values.forEach((value, i) => {
+        const cell = sCsm.getCell(rs, i + 1);
+        const kind = value && typeof value === 'object' ? value : { value };
+        if (kind.percent !== undefined) {
+          cell.value = kind.percent == null ? '—' : kind.percent;
+          if (kind.percent != null) cell.numFmt = '0.0"%"';
+        } else if (kind.rating !== undefined) {
+          cell.value = kind.rating || '—';
+          const tint = XL_RATING[kind.rating];
+          if (tint) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tint.light } };
+            cell.font = { bold: true, color: { argb: tint.text } };
+          }
+        } else {
+          cell.value = kind.value;
+        }
+        if (!cell.fill && zebraRow) cell.fill = zebra;
+        if (bold && !cell.font) cell.font = { bold: true, color: { argb: XL_TEXT_DARK } };
+        cell.alignment = i === 0 ? { horizontal: 'left', indent, wrapText: true, vertical: 'middle' } : { horizontal: 'center', vertical: 'middle' };
+        cell.border = total ? { ...xlBorderThin(), top: { style: 'medium', color: { argb: XL_BRAND } } } : xlBorderThin();
+      });
+      rs++;
+    };
+    const csmNote = text => {
+      sCsm.mergeCells(rs, 1, rs, 10);
+      sCsm.getCell(rs, 1).value = text;
+      sCsm.getCell(rs, 1).font = { italic: true, size: 9, color: { argb: XL_TEXT_MID } };
+      sCsm.getCell(rs, 1).alignment = { wrapText: true, indent: 1 };
+      rs++;
+    };
+    // A header row whose labels may take two lines.
+    const csmHeader = labels => {
+      const row = rs;
+      rs = xlHeaderRow(sCsm, rs, labels);
+      labels.forEach((_, i) => { sCsm.getCell(row, i + 1).alignment = { ...sCsm.getCell(row, i + 1).alignment, wrapText: true }; });
+      sCsm.getRow(row).height = 32;
+    };
+
+    rs = xlSectionLabel(sCsm, rs, 10, 'Results by Office');
+    csmHeader(['Office', 'Answers', 'Overall Score (%)', 'Rating', 'Satisfied, SQD0 (%)', 'Positive', 'Neutral', 'Negative', 'Codes Given', 'Response Rate (%)']);
+    const csmOffices = [...sat.offices, { department: 'All offices', ...sat.all, isTotal: true }];
+    csmOffices.forEach((o, i) => csmRow([
+      o.department, o.responses, { percent: o.overall }, { rating: o.responses ? o.rating : 'No answers' },
+      { percent: o.sqd.sqd0.score }, o.sentiment.POSITIVE, o.sentiment.NEUTRAL, o.sentiment.NEGATIVE,
+      o.codes.given, { percent: o.codes.rate },
+    ], { bold: o.isTotal, total: o.isTotal, zebraRow: i % 2 === 0 && !o.isTotal }));
+    csmNote('Overall score: SQD1–SQD8 together. SQD0: satisfied with the service. Positive / Neutral / Negative: the label of each answered form, from its SQD0 answer (or the average of SQD1–SQD8 when SQD0 is N/A).');
+    csmNote(`Codes given: ${CODES_NOTE.replace('RESPONSE RATE:', 'Response rate:')}`);
+    sCsm.getRow(rs - 1).height = 26;
+    rs += 1;
+
+    // The clients' remarks: by label for all offices, then by office.
+    rs = xlSectionLabel(sCsm, rs, 10, "Clients' Remarks: Comments, Complaints and Suggestions");
+    csmHeader(['Remark, All Offices', 'Positive', 'Neutral', 'Negative', 'Total']);
+    [...REMARKS.map(kind => [REMARK_PLURAL[kind], sat.all.remarks[kind]]), ['No remark written', sat.all.remarks.none]]
+      .forEach(([label, c], i) => csmRow([label, c.POSITIVE, c.NEUTRAL, c.NEGATIVE, c.total], { zebraRow: i % 2 === 0 }));
+    csmRow(['All forms', sat.all.sentiment.POSITIVE, sat.all.sentiment.NEUTRAL, sat.all.sentiment.NEGATIVE, sat.all.responses], { bold: true, total: true });
+    rs += 1;
+    csmHeader(['Office', 'Comments', 'Complaints', 'Suggestions', 'No Remark']);
+    csmOffices.forEach((o, i) => csmRow([o.department, ...REMARKS.map(kind => o.remarks[kind].total), o.remarks.none.total],
+      { bold: o.isTotal, total: o.isTotal, zebraRow: i % 2 === 0 && !o.isTotal }));
+    csmNote(REMARKS_NOTE);
+    sCsm.getRow(rs - 1).height = 26;
+    rs += 1;
+
+    rs = xlSectionLabel(sCsm, rs, 10, 'Score of Each Part of the Service, by Office (%)');
+    csmHeader(['Office', ...SQD.map(key => `${key.toUpperCase()} ${SQD_SHORT[key]}`)]);
+    csmOffices.forEach((o, i) => csmRow([o.department, ...SQD.map(key => ({ percent: o.sqd[key].score }))],
+      { bold: o.isTotal, total: o.isTotal, zebraRow: i % 2 === 0 && !o.isTotal }));
+    rs += 1;
+
+    // What to improve: each office's parts under 80%, with the suggested actions.
+    rs = xlSectionLabel(sCsm, rs, 10, 'What to Improve: Parts under 80% (below Satisfactory), by Office');
+    const improve = sat.offices.flatMap(o => lowParts(o).map(key => ({ o, key })));
+    if (!improve.length) {
+      csmNote(ALL_SATISFACTORY);
+    } else {
+      const head = rs;
+      csmHeader(['Office', 'Part of the Service', 'Score (%)', 'Rating', 'Suggested Actions', '', '', '', '', '']);
+      sCsm.mergeCells(head, 5, head, 10);
+      improve.forEach(({ o, key }, i) => {
+        const row = rs;
+        const actions = SQD_ACTIONS[key];
+        csmRow([o.department, `${key.toUpperCase()} ${SQD_SHORT[key]}`, { percent: o.sqd[key].score }, { rating: o.sqd[key].rating },
+          actions.map(action => `• ${action}`).join('\n'), '', '', '', '', ''], { zebraRow: i % 2 === 0 });
+        sCsm.mergeCells(row, 5, row, 10);
+        sCsm.getCell(row, 2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        sCsm.getCell(row, 5).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+        const lines = actions.reduce((n, action) => n + Math.ceil((action.length + 2) / 80), 0);
+        sCsm.getRow(row).height = Math.max(30, lines * 13 + 6);
+      });
+      csmNote(ACTIONS_NOTE);
+    }
+    rs += 1;
+
+    // ARTA's table, for all offices and for each office with answers.
+    const statementTable = (title, result) => {
+      rs = xlSectionLabel(sCsm, rs, 10, title);
+      csmHeader(['Statement', 'Strongly Agree', 'Agree', 'Neither', 'Disagree', 'Strongly Disagree', 'N/A', 'Total', 'Score (%)', 'Rating']);
+      const rows = [
+        ...SQD.map(key => ({ label: `${key.toUpperCase()} ${SQD_SHORT[key]}`, counts: result.sqd[key].counts, total: result.responses, score: result.sqd[key].score, rating: result.sqd[key].rating })),
+        { label: 'Overall (SQD1–SQD8)', ...overallCounts(result), rating: result.rating, isTotal: true },
+      ];
+      rows.forEach((row, i) => csmRow([
+        row.label, row.counts[5], row.counts[4], row.counts[3], row.counts[2], row.counts[1], row.counts.NA, row.total,
+        { percent: row.score }, { rating: row.rating },
+      ], { bold: row.isTotal, total: row.isTotal, zebraRow: i % 2 === 0 && !row.isTotal }));
+      rs += 1;
+    };
+    if (sat.all.responses) {
+      statementTable('Answers to Each Statement — All Offices', sat.all);
+      sat.offices.filter(o => o.responses).forEach(o => statementTable(`Answers to Each Statement — ${o.department}`, o));
+    }
+
+    rs = xlSectionLabel(sCsm, rs, 10, "Citizen's Charter — All Offices");
+    csmHeader(['Question and Answer', 'Count', '% of Answers']);
+    const share = count => ({ percent: sat.all.responses ? Math.round((count * 1000) / sat.all.responses) / 10 : null });
+    ['cc1', 'cc2', 'cc3'].forEach(key => {
+      csmRow([`${key.toUpperCase()}  ${CC_QUESTIONS[key].text}`, '', ''], { bold: true });
+      sCsm.getRow(rs - 1).height = 30;
+      CC_QUESTIONS[key].options.forEach((option, i) => csmRow([option, sat.all.charter[key][i], share(sat.all.charter[key][i])], { indent: 2 }));
+    });
+    const cc = sat.all.charter;
+    csmNote(`Know what a Citizen's Charter is: ${pctText(cc.aware)}  ·  Saw this office's Charter: ${pctText(cc.sawCharter)}  ·  ` +
+      `Easy to see: ${pctText(cc.easyToSee)}  ·  It helped: ${pctText(cc.helped)} (the last two of those who did not answer N/A).`);
+    rs += 1;
+
+    // The services the slips named, office by office.
+    rs = xlSectionLabel(sCsm, rs, 10, 'Services Rated');
+    csmHeader(['Service', 'Answers', 'Overall Score (%)', 'Rating', 'Satisfied, SQD0 (%)']);
+    if (!sat.services.length) csmNote('No service was named on the slips.');
+    sat.offices.forEach(o => {
+      const services = sat.services.filter(row => row.department === o.department);
+      if (!services.length) return;
+      csmRow([o.department, '', '', '', ''], { bold: true, zebraRow: true });
+      services.forEach(row => csmRow([row.service, row.responses, { percent: row.overall }, { rating: row.rating }, { percent: row.satisfied }], { indent: 2 }));
+    });
+    rs += 1;
+
+    rs = xlSectionLabel(sCsm, rs, 10, 'Who Answered — All Offices');
+    csmHeader(['Client', 'Count', '% of Answers']);
+    clientRows(sat.all).forEach(row => (row.head
+      ? csmRow([row.label, '', ''], { bold: true, zebraRow: true })
+      : csmRow([row.label, row.count, share(row.count)], { indent: 2 })));
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SHEET 6 — Submissions: every one filed in the period (all time: the most
     // recent 100). Filters on the header row.
     // ══════════════════════════════════════════════════════════════════════
     const logName = isAll ? 'Recent Submissions' : 'Submissions';
     const sLog = workbook.addWorksheet(logName, { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
     xlPrintSetup(sLog, '1:4');
     sLog.columns = [
-      { width: 20 }, { width: 13 }, { width: 40 }, { width: 14 }, { width: 11 }, { width: 12 }, { width: 22 },
+      { width: 20 }, { width: 13 }, { width: 40 }, { width: 14 }, { width: 11 }, { width: 12 }, { width: 22 }, { width: 22 },
     ];
     const logNote = isAll ? `Most recent ${d.log.length} submission(s)`
       : d.log.length < d.total ? `The ${d.log.length} most recent of ${d.total} submissions filed ${period.rangeFull}`
         : `All ${d.total} submission(s) filed ${period.rangeFull}`;
-    let rl = xlBanner(sLog, 7, `CIVIX — ${isAll ? 'Recent Submissions Log' : 'Submissions Log'}`, `${logNote}   |   Generated ${genDate}`);
+    let rl = xlBanner(sLog, 8, `CIVIX — ${isAll ? 'Recent Submissions Log' : 'Submissions Log'}`, `${logNote}   |   Generated ${genDate}`);
     const logHeader = rl;
-    rl = xlHeaderRow(sLog, rl, ['Transaction Code', 'Type', 'Office', 'Status', 'Urgency', 'Sentiment', 'Date Filed']);
-    if (d.log.length) sLog.autoFilter = { from: { row: logHeader, column: 1 }, to: { row: logHeader, column: 7 } };
+    rl = xlHeaderRow(sLog, rl, ['Transaction Code', 'Type', 'Office', 'Status', 'Urgency', 'Sentiment', 'Date Filed', 'Received Via']);
+    if (d.log.length) sLog.autoFilter = { from: { row: logHeader, column: 1 }, to: { row: logHeader, column: 8 } };
     d.log.forEach((s, i) => {
       sLog.getCell(rl, 1).value = s.trackingId;
 
@@ -1283,13 +1806,15 @@ async function generateExcel(req, res) {
       filed.value = new Date(new Date(s.createdAt).getTime() + 8 * 60 * 60 * 1000);
       filed.numFmt = 'mmm d, yyyy h:mm AM/PM';
       filed.alignment = { horizontal: 'left' };
+      // Online, or typed in by the office's staff (walk-in, phone call, letter, message).
+      sLog.getCell(rl, 8).value = CHANNEL_LABELS[s.channel] || 'Online';
 
-      for (let c = 1; c <= 7; c++) sLog.getCell(rl, c).border = xlBorderThin();
-      if (i % 2 === 0) for (const c of [1, 3, 5, 6, 7]) sLog.getCell(rl, c).fill = zebra;
+      for (let c = 1; c <= 8; c++) sLog.getCell(rl, c).border = xlBorderThin();
+      if (i % 2 === 0) for (const c of [1, 3, 5, 6, 7, 8]) sLog.getCell(rl, c).fill = zebra;
       rl++;
     });
     if (!d.log.length) {
-      sLog.mergeCells(rl, 1, rl, 7);
+      sLog.mergeCells(rl, 1, rl, 8);
       sLog.getCell(rl, 1).value = `No submissions were filed in this ${word}.`;
       sLog.getCell(rl, 1).font = { italic: true, color: { argb: XL_TEXT_MID } };
       sLog.getCell(rl, 1).alignment = { horizontal: 'center' };

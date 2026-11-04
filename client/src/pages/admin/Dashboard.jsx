@@ -156,7 +156,7 @@ export default function AdminDashboard() {
         <StatCard stack label="In Review"      value={stats?.reviewing  ?? 0} tone="violet" icon="search" />
         <StatCard stack label="In Progress"    value={stats?.inProgress ?? 0} tone="yellow" icon="activity" />
         <StatCard stack label="Overdue"        value={stats?.overdue    ?? 0} tone="red" icon="complaint" sub="Past their deadline" />
-        <StatCard stack label="Total Citizens" value={stats?.citizens   ?? 0} tone="sky" icon="citizens" />
+        <StatCard stack label="Urgent"         value={stats?.urgentOpen ?? 0} tone="sky" icon="bell" sub="Still open" />
       </div>
 
       {/* Quick links */}

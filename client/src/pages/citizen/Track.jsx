@@ -1,15 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import CitizenPortalLayout from '../../components/common/CitizenPortalLayout';
 import { StatusBadge, TypeBadge, PriorityBadge } from '../../components/common/StatusBadge';
 import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
+import CsmFace from '../../components/common/CsmFace';
 import { Skel } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import { useTheme } from '../../context/ThemeContext';
-import { useText } from '../../i18n/LanguageContext';
+import { useLang, useText } from '../../i18n/LanguageContext';
 import TRACK_TEXT from '../../i18n/trackText';
+import CSM_TEXT from '../../i18n/csmText';
+import SUBMIT_TEXT, { refusalText } from '../../i18n/submitText';
+import { scaleMeta } from '../../data/csm';
 import { officeLabel } from '../../data/officeNames';
 import api from '../../utils/api';
 import { copyText } from '../../utils/clipboard';
@@ -113,7 +117,9 @@ const STATUS_TONE = {
 // History dot for an urgency change, by the new urgency.
 const URGENCY_DOT = { URGENT: '#b91c1c', STANDARD: '#1d4ed8', LOW: '#475569' };
 
-// Feedback has no status steps; it may name an office ('General' = the whole municipality).
+// Feedback has no status steps: it waits for its office (PENDING look), then shows
+// "Read by the office" in this look. Feedback sent before Oct 29, 2026 could be
+// about the whole municipality ('General'): it only says it was received.
 const FEEDBACK_TONE = {
   color: '#15803d', textDark: '#4ade80', bg: '#f0fdf4', border: '#bbf7d0', darkBg: 'rgba(22,163,74,0.10)', darkBorder: 'rgba(22,163,74,0.35)',
   icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
@@ -122,6 +128,9 @@ const FEEDBACK_TONE = {
 const lookupError = err => (err.response?.status === 404 ? 'notFound' : err.response?.status === 429 ? 'tooMany' : 'offline');
 
 const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+// The code on an office's slip (MHO-7K3QP): no date in the middle, unlike a
+// Transaction Code. It opens the satisfaction form, so Track says so.
+const SLIP_CODE = /^[A-Z]{2,4}-?[2-9A-HJKMNP-Z]{5,7}$/;
 const fmtDateTime = d => new Date(d).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
 function PhotoTile({ src, index, onOpen }) {
@@ -264,11 +273,16 @@ function ProgressTimeline({ result }) {
 export default function Track() {
   const { dark } = useTheme();
   const t = useText(TRACK_TEXT);
+  const tc = useText(CSM_TEXT);
+  const ts = useText(SUBMIT_TEXT);
+  const { lang } = useLang();
   const routerLocation = useLocation();
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(''); // a TRACK_TEXT key: notFound, tooMany or offline
+  // A slip's code: what it rates ({ info }), or why it can't be used ({ refusal })
+  const [slip, setSlip] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
   useEffect(() => {
@@ -278,11 +292,29 @@ export default function Track() {
     setCode(prefill);
     setLoading(true);
     setError('');
-    withMinDuration(api.get(`/submissions/track/${prefill.trim().toUpperCase()}`))
-      .then(res => setResult(res.data))
+    find(prefill.trim().toUpperCase())
       .catch(err => setError(lookupError(err)))
       .finally(() => setLoading(false));
   }, []); // runs once on mount
+
+  // A Transaction Code shows its report. A slip's code shows the office and the
+  // button to the satisfaction form, or why it can't be used any more (used once,
+  // or past its 7 days); one that doesn't exist is "not found", like any code.
+  async function find(target) {
+    if (SLIP_CODE.test(target)) {
+      try {
+        const res = await withMinDuration(api.get(`/feedback/code/${encodeURIComponent(target)}`));
+        setSlip({ info: res.data });
+      } catch (err) {
+        const data = err.response?.data;
+        if (!data?.code || data.code === 'CODE_NOT_FOUND' || data.code === 'RATE_LIMITED') throw err;
+        setSlip({ refusal: data });
+      }
+      return;
+    }
+    const res = await withMinDuration(api.get(`/submissions/track/${target}`));
+    setResult(res.data);
+  }
 
   async function lookupCode(overrideCode) {
     const target = (overrideCode || code).trim().toUpperCase();
@@ -290,9 +322,9 @@ export default function Track() {
     setLoading(true);
     setError('');
     setResult(null);
+    setSlip(null);
     try {
-      const res = await withMinDuration(api.get(`/submissions/track/${target}`));
-      setResult(res.data);
+      await find(target);
     } catch (err) {
       setError(lookupError(err));
     } finally {
@@ -384,6 +416,37 @@ export default function Track() {
           </div>
         )}
 
+        {/* A code from an office's slip */}
+        {slip && !loading && (
+          <div data-slip-code={slip.info ? 'ok' : slip.refusal.code} className="track-fade-1 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
+            <div className="flex items-start gap-4">
+              <div className="p-2.5 rounded-xl bg-blue-50 text-blue-700 flex-shrink-0">
+                <Icon name="feedback" className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-gray-900">{t.slipTitle}</h2>
+                <p className="font-mono text-sm font-semibold text-gray-700 mt-0.5 break-all">{slip.info ? slip.info.code : code.trim().toUpperCase()}</p>
+                {slip.info ? (
+                  <>
+                    <p className="text-sm text-gray-700 mt-3 leading-relaxed">{t.slipLead(officeLabel(slip.info.department))}</p>
+                    {slip.info.service && (
+                      <p className="text-sm text-gray-700 mt-1.5">{t.slipService} <strong className="text-gray-900">{slip.info.service}</strong></p>
+                    )}
+                    {slip.info.expiresAt && <p className="text-sm text-gray-700 mt-1.5">{t.slipUntil(fmtDate(slip.info.expiresAt))}</p>}
+                    <Link to={`/rate/${encodeURIComponent(slip.info.code)}`}
+                      className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-blue-700 transition-colors">
+                      <Icon name="feedback" className="w-4 h-4" /> {t.slipRate}
+                    </Link>
+                  </>
+                ) : (
+                  <p role="alert" className="text-sm text-red-700 mt-3 leading-relaxed">{refusalText(ts, lang, slip.refusal, true)}</p>
+                )}
+                <p className="text-xs text-gray-600 mt-4">{t.slipTrackNote}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Loading skeleton */}
         {loading && (
           <div className="track-fade-2 bg-white rounded-2xl border border-gray-100 overflow-hidden" style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
@@ -409,10 +472,19 @@ export default function Track() {
         {result && (() => {
           const isFeedback = result.type === 'FEEDBACK';
           const isSpam = result.status === 'SPAM'; // closed as spam / invalid by the office
-          const tone = isSpam ? STATUS_TONE.SPAM : isFeedback ? FEEDBACK_TONE : (STATUS_TONE[result.status] || STATUS_TONE.PENDING);
-          const words = isFeedback
-            ? t.tones[isSpam ? 'FEEDBACK_SPAM' : 'FEEDBACK']
-            : (t.tones[result.status] || t.tones.PENDING);
+          // The office it was sent to ("Not yet assigned" for an older report that had none).
+          const hasOffice = result.department && !['General', 'UNASSIGNED'].includes(result.department);
+          const sentTo = hasOffice ? officeLabel(result.department) : isFeedback ? null : t.notAssigned;
+          const feedbackWaiting = isFeedback && !isSpam && sentTo && !result.readAt;
+          const tone = isSpam ? STATUS_TONE.SPAM
+            : feedbackWaiting ? STATUS_TONE.PENDING
+            : isFeedback ? FEEDBACK_TONE
+            : (STATUS_TONE[result.status] || STATUS_TONE.PENDING);
+          const words = !isFeedback ? (t.tones[result.status] || t.tones.PENDING)
+            : isSpam ? t.tones.FEEDBACK_SPAM
+            : !sentTo ? t.tones.FEEDBACK
+            : result.readAt ? { title: t.tones.FEEDBACK_READ.title, message: t.tones.FEEDBACK_READ.message(sentTo, fmtDateTime(result.readAt)) }
+            : { title: t.tones.FEEDBACK_SENT.title, message: t.tones.FEEDBACK_SENT.message(sentTo) };
           const latestNote = result.statusLogs?.find(l => l.status === result.status && l.note)?.note;
           // Status updates and urgency changes, newest first; the submission itself is
           // the oldest event.
@@ -421,11 +493,14 @@ export default function Track() {
             ...(result.urgencyChanges || []).map(u => ({ key: `urgency-${u.createdAt}`, urgency: u, at: u.createdAt, note: u.reason })),
           ].sort((a, b) => new Date(b.at) - new Date(a.at));
           history.push({ key: 'submitted', status: null, at: result.createdAt, note: null });
-          const office = result.department && result.department !== 'UNASSIGNED' ? officeLabel(result.department) : t.notAssigned;
-          // Feedback about one office names it ('General' = about the whole municipality).
-          const feedbackOffice = isFeedback && result.department && !['General', 'UNASSIGNED'].includes(result.department)
-            ? officeLabel(result.department) : null;
           const sectionTitle = 'text-xs font-bold text-gray-500 uppercase tracking-wide mb-3';
+          // Feedback is the satisfaction form: the service and the overall answer
+          // (SQD0) show (older feedback had stars instead). A resolved complaint or
+          // suggestion can be rated once, with its own code.
+          const csm = isFeedback ? result.csm : null;
+          const answerText = value => (value == null ? tc.scale.NA : tc.scale[value]);
+          const serviceName = name => ({ 'Complaint handling': tc.reportService.COMPLAINT, 'Suggestion handling': tc.reportService.SUGGESTION }[name] || name);
+          const rated = result.serviceRating;
           return (
             <div className="track-fade-2 bg-white rounded-2xl border border-gray-100 overflow-hidden"
               style={{ boxShadow: '0 2px 4px rgba(15,23,42,0.03), 0 12px 32px -12px rgba(15,23,42,0.16)' }}>
@@ -457,7 +532,8 @@ export default function Track() {
                   </div>
                   {(!isFeedback || isSpam) && <StatusBadge status={result.status} label={t.status[result.status]} />}
                 </div>
-                <h3 className="font-bold text-gray-900 text-lg mt-3">{isFeedback ? t.feedbackHeading : office}</h3>
+                {sentTo && <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mt-3">{t.sentTo}</p>}
+                <h3 data-sent-to className={`font-bold text-gray-900 text-lg ${sentTo ? 'mt-0.5' : 'mt-3'}`}>{sentTo || t.feedbackHeading}</h3>
                 <div className="flex items-center gap-2 flex-wrap mt-2">
                   <TypeBadge type={result.type} label={t.types[result.type]} />
                   {!isFeedback && !isSpam && <PriorityBadge priority={result.priority} label={t.priority[result.priority]} />}
@@ -490,11 +566,39 @@ export default function Track() {
                   </div>
                 </div>
 
+                {/* A resolved complaint or suggestion: rate how the office handled it */}
+                {!isFeedback && result.status === 'RESOLVED' && (rated ? (
+                  <div data-service-rated className="flex items-start gap-3 rounded-xl border border-green-200 dark:border-green-500/40 bg-green-50 px-4 py-3">
+                    {scaleMeta(rated.sqd0)
+                      ? <CsmFace value={rated.sqd0} className="w-7 h-7 flex-shrink-0 text-green-700" />
+                      : <Icon name="checkCircle" className="w-6 h-6 flex-shrink-0 text-green-700" />}
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900">{t.ratedTitle}</p>
+                      <p className="text-sm text-gray-700 mt-0.5">
+                        {t.ratedText(fmtDateTime(rated.createdAt))} {tc.overallAnswer} <strong className="text-gray-900">{answerText(rated.sqd0)}</strong>
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div data-rate-service className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-blue-200 dark:border-blue-500/40 bg-blue-50 px-4 py-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-900">{t.rateTitle}</p>
+                      <p className="text-sm text-gray-700 mt-0.5">{t.rateText}</p>
+                    </div>
+                    <Link to={`/rate/${encodeURIComponent(result.trackingId)}`}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-blue-700 transition-colors flex-shrink-0">
+                      <Icon name="feedback" className="w-4 h-4" />
+                      {t.rateButton}
+                    </Link>
+                  </div>
+                ))}
+
                 {/* Details */}
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    ...(feedbackOffice ? [{ label: t.officeRow, value: feedbackOffice, icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' }] : []),
-                    { label: t.location, value: result.address || t.notSpecified, icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' },
+                    ...(csm
+                      ? (csm.service ? [{ label: t.service, value: serviceName(csm.service), icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' }] : [])
+                      : [{ label: t.location, value: result.address || t.notSpecified, icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' }]),
                     { label: t.filed, value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
                     ...(isFeedback ? [] : [{ label: t.lastUpdated, value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' }]),
                     ...(result.dueAt && !isFeedback && !isSpam ? [{
@@ -518,15 +622,29 @@ export default function Track() {
                   ))}
                 </dl>
 
-                {/* Description */}
-                <div>
-                  <h4 className={sectionTitle}>{isFeedback ? t.yourFeedback : t.description}</h4>
+                {/* Feedback: the overall answer */}
+                {csm && (
+                  <div data-overall-answer className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    {scaleMeta(csm.sqd0)
+                      ? <CsmFace value={csm.sqd0} className="w-9 h-9 flex-shrink-0 text-gray-700" />
+                      : <span className="w-9 text-center text-xs font-bold text-gray-700 flex-shrink-0" aria-hidden="true">N/A</span>}
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t.overallAnswer}</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">{answerText(csm.sqd0)}</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{tc.statements.sqd0}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Description (feedback: the client's suggestions, when given) */}
+                {(!csm || result.description) && <div>
+                  <h4 className={sectionTitle}>{csm ? t.yourSuggestions : isFeedback ? t.yourFeedback : t.description}</h4>
                   <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line break-words rounded-xl border-l-4 border-gray-200 bg-gray-50/70 dark:bg-slate-900/40 px-4 py-3">
                     {result.description}
                   </p>
-                </div>
+                </div>}
 
-                {/* Feedback panel */}
+                {/* Feedback panel (older feedback: stars) */}
                 {result.type === 'FEEDBACK' && (result.rating || result.reaction) && (
                   <div className="p-3 bg-green-50 rounded-xl border border-green-100">
                     <FeedbackRatingDisplay rating={result.rating} reaction={result.reaction} feedbackTags={result.feedbackTags} citizen />
@@ -587,7 +705,7 @@ export default function Track() {
         })()}
 
         {/* Empty state */}
-        {!result && !error && !loading && (
+        {!result && !error && !slip && !loading && (
           <div className="track-fade-2 text-center py-12 px-4 text-gray-600">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
               <Icon name="inbox" className="w-8 h-8 text-gray-300" />

@@ -127,31 +127,6 @@ async function googleLogin(req, res) {
   }
 }
 
-async function register(req, res) {
-  try {
-    const { fullName, email, gmail, mobileNumber, password } = req.body;
-    if (!fullName || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-    const existing = await prisma.user.findFirst({ where: { email } });
-    if (existing) {
-      return res.status(409).json({ error: 'Email already registered' });
-    }
-    // Auto-generate unique Citizen ID: CIT-YYYYMMDD-XXXXX
-    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const randPart = Math.random().toString(36).substring(2, 7).toUpperCase();
-    const citizenId = `CIT-${datePart}-${randPart}`;
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { fullName, citizenId, email, gmail: gmail || null, mobileNumber: mobileNumber || null, password: hashed, role: 'CITIZEN' },
-    });
-    res.status(201).json({ message: 'Registration successful', userId: user.id });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Registration failed' });
-  }
-}
-
 // Tells the website whether an address is the private admin sign-in page,
 // so that address never has to be written into the website's code.
 async function checkPortalPath(req, res) {
@@ -867,7 +842,7 @@ async function getMySignIns(req, res) {
 }
 
 module.exports = {
-  register, registerStaff, sendStaffCode, checkPortalPath, login, googleLogin, getMe, updateProfile, changePassword, uploadAvatar,
+  registerStaff, sendStaffCode, checkPortalPath, login, googleLogin, getMe, updateProfile, changePassword, uploadAvatar,
   sendResetCode, resetPassword, getSignIns, getMySignIns,
   verifySignInCode, resendSignInCode, startCodeSetting, setCodeSetting,
 };

@@ -7,9 +7,10 @@ async function main() {
   console.log('Seeding database...');
 
   const adminPass = await bcrypt.hash('admin123', 12);
-  const citizenPass = await bcrypt.hash('citizen123', 12);
 
-  const admin = await prisma.user.upsert({
+  // Only administrators and staff have accounts. Citizens send reports without one,
+  // so the sample reports below belong to no account.
+  await prisma.user.upsert({
     where: { email: 'admin@civix.gov' },
     update: { password: adminPass },
     create: {
@@ -18,18 +19,6 @@ async function main() {
       email: 'admin@civix.gov',
       password: adminPass,
       role: 'ADMIN',
-    },
-  });
-
-  const citizen = await prisma.user.upsert({
-    where: { email: 'citizen@test.com' },
-    update: { password: citizenPass },
-    create: {
-      fullName: 'Juan dela Cruz',
-      citizenId: 'CIT-2025-001',
-      email: 'citizen@test.com',
-      password: citizenPass,
-      role: 'CITIZEN',
     },
   });
 
@@ -43,7 +32,6 @@ async function main() {
       citizenDepartment: 'INFRASTRUCTURE',
       department: 'INFRASTRUCTURE',
       sentiment: 'NEGATIVE',
-      userId: citizen.id,
       location: { create: { latitude: 14.5995, longitude: 120.9842 } },
     },
     {
@@ -55,7 +43,6 @@ async function main() {
       citizenDepartment: 'SANITATION',
       department: 'SANITATION',
       sentiment: 'POSITIVE',
-      userId: citizen.id,
       location: { create: { latitude: 14.6010, longitude: 120.9860 } },
     },
     {
@@ -67,7 +54,6 @@ async function main() {
       citizenDepartment: 'PUBLIC_SAFETY',
       department: 'PUBLIC_SAFETY',
       sentiment: 'POSITIVE',
-      userId: citizen.id,
     },
     {
       trackingId: 'CIVIX-20250517-JKL012',
@@ -78,7 +64,6 @@ async function main() {
       citizenDepartment: 'PUBLIC_SAFETY',
       department: 'PUBLIC_SAFETY',
       sentiment: 'NEGATIVE',
-      userId: citizen.id,
       location: { create: { latitude: 14.5975, longitude: 120.9825 } },
     },
   ];
@@ -91,18 +76,8 @@ async function main() {
     });
   }
 
-  await prisma.notification.createMany({
-    data: [
-      { userId: citizen.id, message: 'Your submission CIVIX-20250515-ABC123 is now in progress.', isRead: false },
-      { userId: citizen.id, message: 'Your submission CIVIX-20250516-DEF456 is now being reviewed.', isRead: true },
-      { userId: citizen.id, message: 'Your submission CIVIX-20250517-GHI789 has been resolved. Thank you!', isRead: false },
-    ],
-    skipDuplicates: true,
-  });
-
   console.log('Seed complete!');
   console.log('Admin: admin@civix.gov / admin123');
-  console.log('Citizen: citizen@test.com / citizen123');
 }
 
 main()

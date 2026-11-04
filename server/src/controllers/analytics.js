@@ -1,5 +1,8 @@
 const prisma = require('../utils/prisma');
 const { PRIORITY_LABELS } = require('../utils/urgency');
+const { satisfactionResults, satisfactionRange } = require('../utils/csmResults');
+const { CHANNELS, CHANNEL_LABELS } = require('../utils/channels');
+const { getDepartmentList } = require('./settings');
 
 // Reports staff marked as spam or invalid (status SPAM) are left out of every
 // figure, chart and alert here.
@@ -82,15 +85,14 @@ async function getSummary(req, res) {
 
     // Urgent reports: how many are still open, and how many of the resolved ones were
     // finished by their resolve-by date (the same rule as the deadline badges).
-    const [citizens, urgentOpen, urgentDone] = await Promise.all([
-      prisma.user.count({ where: { role: 'CITIZEN' } }),
+    const [urgentOpen, urgentDone] = await Promise.all([
       prisma.submission.count({ where: { ...cases, priority: 'URGENT', status: { notIn: CLOSED } } }),
       prisma.submission.findMany({ where: { ...cases, priority: 'URGENT', status: 'RESOLVED' }, select: { updatedAt: true, dueAt: true } }),
     ]);
     const urgentOnTime = urgentDone.filter(s => !s.dueAt || s.updatedAt <= s.dueAt).length;
 
     res.json({
-      total, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate, citizens,
+      total, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate,
       urgentOpen, urgentResolved: urgentDone.length, urgentOnTime,
     });
   } catch (err) {
@@ -201,13 +203,16 @@ async function getBreakdown(req, res) {
   try {
     const submissions = await prisma.submission.findMany({
       where: NOT_SPAM,
-      select: { department: true, priority: true, type: true, citizenDepartment: true, status: true },
+      select: { department: true, priority: true, type: true, citizenDepartment: true, status: true, channel: true },
     });
 
     const department = {};
     const priority = {};
     const type = {};
     const citizenDeptMap = {};
+    // How complaints and suggestions came in: online, or typed in by the office's
+    // staff (feedback is always the online satisfaction form).
+    const channel = {};
 
     const deptLabels = {
       PUBLIC_SAFETY: 'Public Safety',
@@ -223,6 +228,7 @@ async function getBreakdown(req, res) {
       department[s.department] = (department[s.department] || 0) + 1;
       // Feedback has no urgency.
       if (s.type !== 'FEEDBACK') priority[s.priority] = (priority[s.priority] || 0) + 1;
+      if (s.type !== 'FEEDBACK') channel[s.channel] = (channel[s.channel] || 0) + 1;
       type[s.type] = (type[s.type] || 0) + 1;
       citizenDeptMap[s.citizenDepartment] = (citizenDeptMap[s.citizenDepartment] || 0) + 1;
     }
@@ -250,6 +256,8 @@ async function getBreakdown(req, res) {
       department: toChart(department, deptLabels, deptColors),
       priority: toChart(priority, priorityLabels, priorityColors),
       type: toChart(type, typeLabels, typeColors),
+      // Always every way, in this order (Online first), with 0 when none came that way.
+      channel: CHANNELS.map(key => ({ key, name: CHANNEL_LABELS[key], value: channel[key] || 0 })),
       departmentSelections: Object.entries(citizenDeptMap)
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value)
@@ -261,20 +269,17 @@ async function getBreakdown(req, res) {
   }
 }
 
-async function getCitizens(req, res) {
+// GET /api/analytics/satisfaction?range=month|year|all — the satisfaction form's
+// results (ARTA CSM) for each office on the Settings list (and any other office
+// with answers), for all of them together, and for each service.
+async function getSatisfaction(req, res) {
   try {
-    const citizens = await prisma.user.findMany({
-      where: { role: 'CITIZEN' },
-      select: {
-        id: true, fullName: true, citizenId: true, email: true, gmail: true, mobileNumber: true, createdAt: true,
-        _count: { select: { submissions: { where: NOT_SPAM } } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json(citizens);
+    const { range, from, to, label } = satisfactionRange(req.query);
+    const results = await satisfactionResults(prisma, { offices: await getDepartmentList(), from, to });
+    res.json({ range, label, ...results });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to fetch citizens' });
+    res.status(500).json({ error: 'Failed to load the satisfaction results' });
   }
 }
 
@@ -286,5 +291,5 @@ module.exports = {
   getSentiment,
   getMonthly,
   getBreakdown,
-  getCitizens,
+  getSatisfaction,
 };

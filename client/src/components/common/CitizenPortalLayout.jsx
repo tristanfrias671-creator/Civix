@@ -9,7 +9,7 @@ import LanguageSwitcher from '../citizen/LanguageSwitcher';
 // The frame's wording in English, Filipino and Bisaya (official names stay as they are).
 const TEXT = {
   en: {
-    nav: ['Back to Home', 'Submit a Report', 'Track My Report', 'Guidelines'],
+    nav: ['Back to Home', 'Submit a Report', 'Track My Report', 'Guidelines', "Citizen's Charter"],
     tagline: ['A Cleaner, Safer, Stronger', 'Cantilan for Everyone'],
     about: 'About', help: 'Help', close: 'Close', developedBy: 'Developed by',
     helpText: 'For assistance, visit or call Cantilan Town Hall during office hours.',
@@ -17,7 +17,7 @@ const TEXT = {
     rights: 'All rights reserved.',
   },
   fil: {
-    nav: ['Bumalik sa Home', 'Magpadala ng Ulat', 'Subaybayan ang Ulat', 'Mga Gabay'],
+    nav: ['Bumalik sa Home', 'Magpadala ng Ulat', 'Subaybayan ang Ulat', 'Mga Gabay', "Citizen's Charter"],
     tagline: ['Mas Malinis, Mas Ligtas, Mas Matatag', 'na Cantilan para sa Lahat'],
     about: 'Tungkol', help: 'Tulong', close: 'Isara', developedBy: 'Binuo ng',
     helpText: 'Para sa tulong, bumisita o tumawag sa Munisipyo ng Cantilan sa oras ng opisina.',
@@ -25,7 +25,7 @@ const TEXT = {
     rights: 'Lahat ng karapatan ay nakalaan.',
   },
   ceb: {
-    nav: ['Balik sa Home', 'Ipadala ang Report', 'Sundan ang Report', 'Mga Giya'],
+    nav: ['Balik sa Home', 'Ipadala ang Report', 'Sundan ang Report', 'Mga Giya', "Citizen's Charter"],
     tagline: ['Mas Limpyo, Mas Luwas, Mas Lig-on', 'nga Cantilan alang sa Tanan'],
     about: 'Mahitungod', help: 'Tabang', close: 'Isira', developedBy: 'Gihimo sa',
     helpText: 'Para sa tabang, bisitaha o tawagi ang Munisipyo sa Cantilan sa oras sa opisina.',
@@ -118,6 +118,7 @@ const NAV_ITEMS = [
   { to: '/submit', label: 'Submit a Report', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
   { to: '/track', label: 'Track My Report', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
   { to: '/guidelines', label: 'Guidelines', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
+  { to: '/charter', label: "Citizen's Charter", icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
 ];
 
 export default function CitizenPortalLayout({ children }) {
@@ -158,16 +159,19 @@ export default function CitizenPortalLayout({ children }) {
         <LanguageSwitcher className="absolute top-2 right-2 sm:right-4 z-30" />
       </div>
 
-      {/* Phone tab bar (the sidebar below is hidden under md) */}
-      <nav className="md:hidden flex gap-1 px-2 py-2" style={{ background: '#0b2f66' }}>
+      {/* Phone tab bar (the sidebar below is hidden under md). Names may take two
+          lines, so none is cut short. With five tabs, the spacing between them goes
+          on the narrowest phones (under 360px) so the longest word ("Subaybayan")
+          still fits; a longer one would break rather than run into the next tab. */}
+      <nav className="md:hidden flex gap-0.5 max-[359px]:gap-0 px-1 py-2" style={{ background: '#0b2f66' }}>
         {NAV_ITEMS.map((item, i) => (
           <Link key={i} to={item.to}
-            className="flex-1 min-w-0 flex flex-col items-center gap-1 px-1 py-2 rounded-lg text-[11px] font-semibold transition-colors"
+            className="flex-1 min-w-0 flex flex-col items-center gap-1 px-0.5 max-[359px]:px-0 py-2 rounded-lg text-[11px] font-semibold transition-colors"
             style={isActive(item.to) ? { background: '#2563eb', color: '#fff' } : { color: 'rgba(255,255,255,0.75)' }}>
             <svg className="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d={item.icon} />
             </svg>
-            <span className="truncate max-w-full">{t.nav[i]}</span>
+            <span data-tab-label className="max-w-full text-center leading-tight [overflow-wrap:anywhere]">{t.nav[i]}</span>
           </Link>
         ))}
       </nav>

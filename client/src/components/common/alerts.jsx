@@ -104,6 +104,16 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // Pops up an alert for items the user hasn't been told about yet this browser
 // session; on the first check of a session it summarizes everything waiting.
 // `kinds` maps a group key to { noun, describe(item) } — only those groups alert.
+// Alert items the person caused themselves (a walk-in report they just typed in)
+// don't pop up as new. `keys` are "kind:id", as below. Before the first look of the
+// session nothing is marked: that look sums up everything anyway.
+export function markAlertsSeen(keys) {
+  try {
+    const seen = JSON.parse(sessionStorage.getItem(SEEN_ALERTS_KEY) || 'null');
+    if (seen) sessionStorage.setItem(SEEN_ALERTS_KEY, JSON.stringify([...new Set([...seen, ...keys])]));
+  } catch { /* storage unavailable */ }
+}
+
 export function announceNewAlerts(data, kinds, onView) {
   const keys = Object.keys(kinds).flatMap(k => (data[k] || []).map(item => `${k}:${item.id}`));
   let seen = null;

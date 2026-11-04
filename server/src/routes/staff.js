@@ -8,6 +8,8 @@ const {
   getMyStats, getMyAlerts, getMyActivity, getMySubmissions, getMySubmissionDetail, updateMySubmission,
   updateMyUrgency, assignSubmission, getMyMapReports,
 } = require('../controllers/staff');
+const { createQueueCode, getMyQueueCodes, getMySatisfaction } = require('../controllers/feedback');
+const { createWalkInReport } = require('../controllers/submissions');
 
 // ── Admin-only: manage staff accounts ────────────────────────────────────────
 router.get('/',       authenticate, requireAdmin, getStaff);
@@ -33,5 +35,15 @@ router.patch('/portal/urgency/:id',     authenticate, requireStaff, updateMyUrge
 // Staff only ever see their own office's reports (and, for the receiving office in
 // Settings, reports with no office yet); moving one to another office hands it over.
 router.patch('/portal/assign/:id',      authenticate, requireStaff, assignSubmission);
+
+// "Walk-in report": a complaint or suggestion a citizen gave in person, by phone, by
+// letter or by message, typed in by the staff member (a slip with its code follows).
+router.post('/portal/reports',          authenticate, requireStaff, createWalkInReport);
+
+// "New client": a queuing code for the client's slip, which opens the satisfaction form.
+router.post('/portal/queue-codes',      authenticate, requireStaff, createQueueCode);
+router.get('/portal/queue-codes',       authenticate, requireStaff, getMyQueueCodes);
+// How clients rated the office on that form (totals only).
+router.get('/portal/satisfaction',      authenticate, requireStaff, getMySatisfaction);
 
 module.exports = router;

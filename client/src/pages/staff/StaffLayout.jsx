@@ -9,7 +9,11 @@ import SignOutDialog from '../../components/common/SignOutDialog';
 import ProfileModal from '../../components/common/ProfileModal';
 import IdleSessionGuard from '../../components/common/IdleSessionGuard';
 import NotificationBell, { openAlerts } from '../../components/common/NotificationBell';
+import NewClientDialog from '../../components/staff/NewClientDialog';
+import WalkInDialog from '../../components/staff/WalkInDialog';
 import { announceNewAlerts } from '../../components/common/alerts';
+import Tour, { markTour, shouldAutoStart } from '../../components/common/Tour';
+import TOUR_TEXT from '../../i18n/tourText';
 import api from '../../utils/api';
 
 // Same layout as the admin portal (navy sidebar with the town seal, white top
@@ -49,6 +53,31 @@ const STAFF_ALERT_KINDS = {
   },
 };
 
+// The staff portal's guided tour (in English, like the rest of the portal). It opens
+// by itself the first time a staff member reaches the dashboard on this device, and
+// from "Take the tour" in the menu. Steps for parts that aren't on the screen (the
+// sidebar on a phone, the Walk-in button under 1024 px) are left out.
+const STAFF_TOUR = [
+  { welcome: true, title: 'Welcome to the CIVIX Staff Portal',
+    body: "This short tour shows where your office's reports and tools are. It takes about a minute. To see it again later, press Take the tour in the menu." },
+  { target: '[data-tour="staff-office"]', title: 'Your office',
+    body: 'Complaints, suggestions and feedback for your office come here. The card shows how many are open and overdue; press it to see them all in Our Reports.' },
+  { target: '[data-tour="staff-menu"]', title: 'The menu',
+    body: 'Press here for Our Reports, the Office Map, Notifications and Take the tour.' },
+  { target: '[data-tour="staff-todo"]', title: 'To do',
+    body: 'Start here each day: overdue, urgent and new reports, most serious first. Open a report to change its status, add a note for the citizen and attach proof photos.' },
+  { target: '[data-tour="staff-new-client"]', title: 'New client',
+    body: 'After serving a client, press New client and give them the slip. Its code and QR code open the satisfaction form (ARTA CSM): one code for one form, good for 7 days.' },
+  { target: '[data-tour="staff-walk-in"]', title: 'Walk-in report',
+    body: 'Type in a complaint or suggestion a citizen gave in person, by phone, by letter or by message. It gets a Transaction Code like any other report.' },
+  { target: '[data-tour="staff-bell"]', title: 'Notifications',
+    body: 'Overdue, urgent and new reports in your office show here. The red number is how many need attention.' },
+  { target: '[data-tour="staff-csm"]', title: 'How clients rate your office',
+    body: "Results of the satisfaction form for your office: the overall score, each part of the form, and how many codes were given and answered. Totals only, never one client's answers." },
+  { target: '[data-tour="staff-tour"]', title: 'See this tour again',
+    body: 'Press Take the tour at any time to see this tour again.' },
+];
+
 function ThemeIcon({ dark }) {
   return dark ? (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -71,7 +100,21 @@ export default function StaffLayout() {
   const [alerts, setAlerts] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+  // "New client": a code and slip for the satisfaction form (ARTA CSM).
+  const [newClientOpen, setNewClientOpen] = useState(false);
+  const closeNewClient = useCallback(() => setNewClientOpen(false), []);
+  // "Walk-in report": a complaint or suggestion a citizen gave in person, by phone,
+  // by letter or by message, typed in by the staff member.
+  const [walkInOpen, setWalkInOpen] = useState(false);
+  const closeWalkIn = useCallback(() => setWalkInOpen(false), []);
+  const openWalkIn = useCallback(() => setWalkInOpen(true), []);
   const [topSearch, setTopSearch] = useState('');
+  const [tourOpen, setTourOpen] = useState(false);
+  const tourId = user ? `staff:${user.id}` : null;
+  const closeTour = useCallback(how => {
+    setTourOpen(false);
+    if (tourId) markTour(tourId, how);
+  }, [tourId]);
   const alertCount = alerts?.total || 0;
   const openCount = alerts?.counts?.open ?? null;
   const overdueCount = alerts?.counts?.overdue || 0;
@@ -97,6 +140,21 @@ export default function StaffLayout() {
       window.removeEventListener('civix:alerts-changed', load);
     };
   }, [location.pathname]);
+
+  // The tour, the first time this staff member reaches the dashboard here.
+  const onDashboard = location.pathname.startsWith('/staff/dashboard');
+  useEffect(() => {
+    if (!tourId || !onDashboard || !shouldAutoStart(tourId)) return undefined;
+    const timer = setTimeout(() => setTourOpen(true), 800);
+    return () => clearTimeout(timer);
+  }, [tourId, onDashboard]);
+
+  // "Take the tour": it starts on the dashboard, where its last parts are.
+  function startTour() {
+    setSidebarOpen(false);
+    if (!onDashboard) navigate('/staff/dashboard');
+    setTourOpen(true);
+  }
 
   const isMapPage = location.pathname.startsWith('/staff/map');
   const pageTitle = (PAGE_TITLES.find(([path]) => location.pathname.startsWith(path)) || [null, 'Dashboard'])[1];
@@ -137,7 +195,7 @@ export default function StaffLayout() {
   }
 
   const bell = (
-    <NotificationBell alerts={alerts} dark={dark} showDepartment={false}
+    <NotificationBell alerts={alerts} dark={dark} showDepartment={false} tourId="staff-bell"
       emptyText="No urgent, overdue or new reports in your office."
       onSelect={item => navigate('/staff/submissions', { state: { openId: item.id } })}
       links={[
@@ -174,7 +232,7 @@ export default function StaffLayout() {
 
         {/* The staff member's office, with how many reports are open */}
         {user?.department && (
-          <NavLink to="/staff/submissions" onClick={() => setSidebarOpen(false)}
+          <NavLink to="/staff/submissions" onClick={() => setSidebarOpen(false)} data-tour="staff-office"
             className="mx-3 mt-4 px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition-colors hover:bg-white/10"
             style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
             <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)', color: '#bfdbfe' }}>
@@ -229,6 +287,10 @@ export default function StaffLayout() {
               <p className="text-xs text-white/70 group-hover:text-white/90">Staff · Edit Profile</p>
             </div>
           </button>
+          <button type="button" onClick={startTour} data-tour="staff-tour"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/75 hover:text-white hover:bg-white/5 rounded-lg transition-colors">
+            <Icon name="tour" className="w-5 h-5" /> Take the tour
+          </button>
           <button onClick={() => setConfirmSignOut(true)}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/75 hover:text-red-200 hover:bg-white/5 rounded-lg transition-colors">
             <Icon name="logout" className="w-5 h-5" /> Sign Out
@@ -240,7 +302,7 @@ export default function StaffLayout() {
         {/* Mobile header */}
         <header className="bg-white border-b border-gray-200 flex items-center px-4 py-3 md:hidden"
           style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu"
+          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" data-tour="staff-menu"
             className="p-2 text-gray-600 hover:text-gray-800 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -252,6 +314,12 @@ export default function StaffLayout() {
             <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">Staff</span>
           </div>
           <div className="ml-auto flex items-center gap-0.5">
+            {user?.department && (
+              <button onClick={() => setNewClientOpen(true)} aria-label="New client: make a slip for the satisfaction form" data-tour="staff-new-client"
+                className="mr-1 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-700 text-white text-xs font-semibold hover:bg-blue-800 transition-colors">
+                <Icon name="qr" className="w-4 h-4" /> New client
+              </button>
+            )}
             <button onClick={toggleDark} aria-label={dark ? 'Light mode' : 'Dark mode'}
               className="p-2 rounded-lg transition-colors" style={{ color: topBarMuted }}>
               <ThemeIcon dark={dark} />
@@ -286,6 +354,22 @@ export default function StaffLayout() {
           </form>
 
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+            {/* From 1024 px; narrower, the page title needs the room and Our Reports has the same button */}
+            {user?.department && (
+              <button onClick={openWalkIn} data-tour="staff-walk-in" title="Type in a complaint or suggestion a citizen gave in person, by phone, by letter or by message"
+                className="mr-1 hidden lg:inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                style={{ borderColor: dark ? 'rgba(147,197,253,0.4)' : '#bfdbfe', color: dark ? '#bfdbfe' : '#1d4ed8', background: dark ? 'transparent' : '#ffffff' }}
+                onMouseEnter={e => { e.currentTarget.style.background = dark ? 'rgba(37,99,235,0.15)' : '#eff6ff'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = dark ? 'transparent' : '#ffffff'; }}>
+                <Icon name="write" className="w-4 h-4" /> Walk-in report
+              </button>
+            )}
+            {user?.department && (
+              <button onClick={() => setNewClientOpen(true)} data-tour="staff-new-client" title="Make a slip for the satisfaction form (ARTA CSM)"
+                className="mr-1 inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+                <Icon name="qr" className="w-4 h-4" /> New client
+              </button>
+            )}
             {bell}
             <button onClick={toggleDark}
               className="p-2 rounded-lg transition-colors"
@@ -302,9 +386,12 @@ export default function StaffLayout() {
           </div>
         </header>
 
-        {/* The map page fills the height; it still scrolls if the screen is too short. */}
-        <main className={`flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
-          <Outlet key={location.key} context={{ alerts }} />
+        {/* The map page fills the height; it still scrolls if the screen is too short.
+            "relative" keeps anything a page places absolutely (e.g. a hidden note for
+            screen readers) inside this scrolling panel; outside it, such an element
+            made the whole window scroll, with a second scroll bar. */}
+        <main className={`relative flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
+          <Outlet key={location.key} context={{ alerts, openNewClient: () => setNewClientOpen(true), openWalkIn: user?.department ? openWalkIn : null }} />
         </main>
       </div>
 
@@ -313,7 +400,10 @@ export default function StaffLayout() {
         roleLabel={`Staff${user?.department ? ` · ${user.department}` : ''}`}
         message="You'll need to sign in again to see your office's reports."
         onCancel={closeSignOut} onConfirm={handleLogout} />
+      <NewClientDialog open={newClientOpen} onClose={closeNewClient} />
+      <WalkInDialog open={walkInOpen} onClose={closeWalkIn} />
       <IdleSessionGuard loginPath="/staff-login" />
+      <Tour open={tourOpen} steps={STAFF_TOUR} labels={TOUR_TEXT.en.ui} dark={dark} onClose={closeTour} />
     </div>
   );
 }

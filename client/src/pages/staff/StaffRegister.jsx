@@ -5,6 +5,7 @@ import { BrandImg } from '../../context/BrandingContext';
 import { Skel, useSkeletonGate } from '../../components/common/Skeleton';
 import { signInCss } from '../../components/common/signInButtonCss';
 import api from '../../utils/api';
+import { RequiredNote, Starred } from '../../components/common/RequiredMark';
 
 const MIN_SPIN_MS = 800;
 const SUCCESS_MS = 700;
@@ -112,7 +113,7 @@ function Field({ label, htmlFor, icon: FieldIcon, hint, delay, children, trailin
   return (
     <div className="rg-field rg-rise" style={{ animationDelay: `${delay}s` }}>
       <label htmlFor={htmlFor} className="flex items-center gap-1.5 text-xs font-bold text-gray-600 mb-1.5">
-        <FieldIcon className="w-3.5 h-3.5" /> {label}
+        <FieldIcon className="w-3.5 h-3.5" /> <Starred>{label}</Starred>
       </label>
       <div className="relative">
         <FieldIcon className="rg-icon w-4 h-4 absolute left-3.5 top-3 text-gray-400 pointer-events-none" />
@@ -463,6 +464,7 @@ export default function StaffRegister() {
               </div>
 
               <form onSubmit={submit} className="space-y-4" noValidate>
+                <RequiredNote />
                 <Field label="Full Name *" htmlFor="rg-name" icon={UserIcon} delay={0.12}>
                   <input id="rg-name" className="rg-input" value={form.fullName} onChange={set('fullName')} required autoComplete="name" placeholder="Juan Dela Cruz" />
                 </Field>
@@ -513,7 +515,7 @@ export default function StaffRegister() {
 
                 <Field label="Note for the administrator" htmlFor="rg-note" icon={NoteIcon} delay={0.32}
                   hint={
-                    <div className="flex justify-between gap-3 text-[11px] text-gray-400 mt-1">
+                    <div className="flex justify-between gap-3 text-[11px] text-gray-500 mt-1">
                       <span>Your position or who can vouch for you, so the administrator can verify you.</span>
                       <span className="flex-shrink-0 tabular-nums">{form.reason.length} / {NOTE_MAX}</span>
                     </div>

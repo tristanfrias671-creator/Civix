@@ -5,6 +5,9 @@ import DeadlineBadge, { deadlineInfo } from '../../components/common/DeadlineBad
 import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../components/common/Skeleton';
 import Icon from '../../components/common/Icons';
 import StatCard from '../../components/common/StatCard';
+import CsmResultsDetails, {
+  RangeSwitch, ScoreHeadline, CodeFacts, useSatisfaction, SCORE_NOTE, RATING_NOTE, RANGE_WORDS,
+} from '../../components/common/CsmResults';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { formatDate, plural, timeAgo } from '../../utils/format';
@@ -53,7 +56,7 @@ function TodoList({ alerts, onOpen, dark }) {
   return (
     <section className="rounded-2xl border mb-6" aria-labelledby="todo-title"
       style={{ background: dark ? '#1e293b' : 'white', borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
-      <div className="flex items-start justify-between gap-3 px-5 sm:px-6 py-4 border-b" style={{ borderColor: line }}>
+      <div className="flex items-start justify-between gap-3 px-5 sm:px-6 py-4 border-b" style={{ borderColor: line }} data-tour="staff-todo">
         <div className="min-w-0">
           <h2 id="todo-title" className="font-bold text-lg" style={{ color: strong }}>To do</h2>
           <p className="text-sm mt-0.5" style={{ color: muted }}>Reports that need action now, most serious first.</p>
@@ -126,11 +129,76 @@ function TodoList({ alerts, onOpen, dark }) {
   );
 }
 
+// How clients rated the office on the satisfaction form (ARTA CSM): the totals for
+// this month, this year or so far, never one client's answers.
+function Satisfaction({ dark, onNewClient }) {
+  const { range, setRange, data, failed, loading } = useSatisfaction('/staff/portal/satisfaction');
+  const muted = dark ? '#94a3b8' : '#4b5563';
+  const strong = dark ? '#f1f5f9' : '#111827';
+  const line = dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6';
+
+  return (
+    <section className="rounded-2xl border mt-7" aria-labelledby="csm-title" data-csm-section
+      style={{ background: dark ? '#1e293b' : 'white', borderColor: dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
+      <div className="flex flex-wrap items-start justify-between gap-3 px-5 sm:px-6 py-4 border-b" style={{ borderColor: line }} data-tour="staff-csm">
+        <div className="min-w-0">
+          <h2 id="csm-title" className="font-bold text-lg" style={{ color: strong }}>How clients rate your office</h2>
+          <p className="text-sm mt-0.5" style={{ color: muted }}>
+            From the satisfaction form (ARTA CSM){data && !failed ? `: ${data.label}` : ''}. Totals only, never one client's answers.
+          </p>
+        </div>
+        <RangeSwitch value={range} onChange={setRange} />
+      </div>
+
+      <div className="px-5 sm:px-6 py-5 transition-opacity" aria-busy={loading} style={{ opacity: loading && data ? 0.55 : 1 }}>
+        {failed ? (
+          <p className="text-sm py-6 text-center" style={{ color: muted }}>Could not load the results. Please reload the page.</p>
+        ) : !data ? (
+          <div className="space-y-4">
+            <Skel className="h-12 w-64" />
+            {[0, 1, 2, 3].map(i => <Skel key={i} className="h-3 w-full" />)}
+          </div>
+        ) : data.responses === 0 ? (
+          <>
+          {data.codes?.given > 0 && <CodeFacts codes={data.codes} />}
+          <div className="flex flex-col items-center text-center py-6" data-csm-empty>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{ background: dark ? 'rgba(255,255,255,0.05)' : '#f3f4f6' }}>
+              <span style={{ color: muted }}><Icon name="feedback" className="w-7 h-7" /></span>
+            </div>
+            <p className="font-semibold" style={{ color: strong }}>No answers{RANGE_WORDS[range]} yet</p>
+            <p className="text-sm mt-1 max-w-md" style={{ color: muted }}>
+              Give each client a slip with New client. The client scans the QR code on it and rates your office's service.
+            </p>
+            {onNewClient && (
+              <button type="button" onClick={onNewClient}
+                className="mt-4 inline-flex items-center gap-2 px-4 min-h-[44px] rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg,#1d4ed8,#2563eb)', boxShadow: '0 4px 14px rgba(37,99,235,0.3)' }}>
+                <Icon name="qr" className="w-4 h-4" />
+                New client
+              </button>
+            )}
+          </div>
+          </>
+        ) : (
+          <>
+            <ScoreHeadline result={data} />
+            <div className="mt-6"><CodeFacts codes={data.codes} /></div>
+            <div className="mt-6 pt-6 border-t" style={{ borderColor: line }}>
+              <CsmResultsDetails result={data} services={data.services} />
+            </div>
+            <p className="text-xs mt-6" style={{ color: muted }}>{SCORE_NOTE} {RATING_NOTE}</p>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function StaffDashboard() {
   const { user } = useAuth();
   const { dark } = useTheme();
   const navigate = useNavigate();
-  const { alerts } = useOutletContext() || {};
+  const { alerts, openNewClient } = useOutletContext() || {};
   const [stats,   setStats]   = useState(null);
   const [recent,  setRecent]  = useState([]);
   const [loading, setLoading] = useState(true);
@@ -267,6 +335,8 @@ export default function StaffDashboard() {
           {plural(stats.total, 'report')} in {stats.department} so far · {plural(stats.resolved, 'resolved report')}
         </p>
       )}
+
+      <Satisfaction dark={dark} onNewClient={openNewClient} />
     </div>
   );
 }

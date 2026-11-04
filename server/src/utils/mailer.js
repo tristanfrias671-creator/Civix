@@ -3,6 +3,9 @@ const { Resend } = require('resend');
 const { ensureSettings } = require('../controllers/settings');
 const { officeLabel } = require('./officeNames');
 const { PRIORITY_LABELS, URGENCY_REASONS } = require('./urgency');
+const { SQD, SQD_STATEMENTS, answerLabel } = require('./csm');
+const { SQD_ACTIONS, lowAnswers } = require('./csmActions');
+const { CHANNEL_LABELS, CHANNEL_HOW } = require('./channels');
 
 const { EMAIL_USER, EMAIL_APP_PASSWORD, EMAIL_HOST, EMAIL_PORT, RESEND_API_KEY, RESEND_FROM_EMAIL, CLIENT_URL } = process.env;
 
@@ -182,6 +185,21 @@ function noteBlock(heading, note) {
     </td></tr></table>`;
 }
 
+// What the office can do about the parts a client rated lowest (utils/csmActions.js),
+// in the style of noteBlock.
+function actionsBlock(keys) {
+  if (!keys.length) return '';
+  const parts = keys.map(key => `
+      <div style="margin-top:8px; font-size:14px; font-weight:700; color:#1e293b;">${escapeHtml(key === 'sqd0' ? 'Overall satisfaction' : SQD_STATEMENTS[key].dimension)}</div>
+      <ul style="margin:4px 0 0; padding-left:20px; font-size:14px; line-height:1.55; color:#334155;">
+        ${SQD_ACTIONS[key].map(action => `<li style="margin:0 0 2px;">${escapeHtml(action)}</li>`).join('')}
+      </ul>`).join('');
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;"><tr>
+    <td bgcolor="#fffbeb" style="background:#fffbeb; border-left:4px solid #d97706; border-radius:0 10px 10px 0; padding:12px 16px;">
+      <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#92400e;">What your office can do</div>${parts}
+    </td></tr></table>`;
+}
+
 function button(href, label) {
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 18px;"><tr>
     <td bgcolor="${BRAND}" style="background:${BRAND}; border-radius:10px;">
@@ -332,12 +350,14 @@ function urgencyPill(priority) {
 
 // The start of the report's text, quoted in the email. Anyone can type any text and
 // any email address, so web links and site names are taken out: CIVIX's mailbox
-// must not carry someone's scam link to another person.
+// must not carry someone's scam link to another person. A blank line (as after the
+// "Service: ..." line of a complaint from the Citizen's Charter page) becomes a dash.
 function excerpt(text, max = 220) {
   const clean = String(text || '')
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, '[link removed]')
     .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|info|xyz|top|site|online|ph|io|ly|me|co|app|link|click|shop)\b\S*/gi, '[link removed]')
     .trim()
+    .replace(/\s*\n\s*\n\s*/g, ' — ')
     .replace(/\s+/g, ' ');
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
@@ -365,34 +385,48 @@ function feedbackTagList(raw) {
   }
 }
 
-// Feedback rates the municipality's service as a whole or one office's service, so
-// its email is a thank-you note: no tracking ID to keep and no status updates to wait for.
+// The same note for answers to the satisfaction form, by its label.
+const CSM_REPLY = { POSITIVE: 5, NEUTRAL: 3, NEGATIVE: 1 };
+
+// Feedback rates one office's service, so its email is a thank-you note with its
+// Transaction Code: no status updates come, but the Track page shows when the office
+// has read it. Feedback sent from Oct 30, 2026 is the satisfaction form (csm), and
+// the note gives the client's overall answer; older feedback had stars.
 async function buildFeedbackThanksEmail(submission) {
-  const rating = Number(submission.rating) || 0;
+  const { csm } = submission;
+  const rating = csm ? CSM_REPLY[submission.sentiment] || 3 : Number(submission.rating) || 0;
   const tags = feedbackTagList(submission.feedbackTags);
-  // The office it is about, or null for feedback on the municipality as a whole.
+  // The office it is about, or null for feedback on the municipality as a whole
+  // (sent before Oct 29, 2026).
   const office = submission.department && !['General', 'UNASSIGNED'].includes(submission.department)
     ? officeLabel(submission.department) : null;
   const html = layout({
     seal: await sealImageUrl(),
-    preheader: `Thank you for rating our services${rating ? ` ${rating} out of 5` : ''}.`,
+    preheader: csm
+      ? `Thank you for answering the satisfaction form. Your transaction code is ${submission.trackingId}.`
+      : `Thank you for rating our services${rating ? ` ${rating} out of 5` : ''}. Your transaction code is ${submission.trackingId}.`,
     icon: '&#9733;', tone: 'green', title: 'Thank you for your feedback!',
-    intro: 'Thank you for taking the time to rate the services of the Municipality of Cantilan.',
+    intro: csm && office
+      ? `Thank you for taking the time to rate the service of the ${escapeHtml(office)}.`
+      : 'Thank you for taking the time to rate the services of the Municipality of Cantilan.',
     body: `
+      ${trackingBox(submission.trackingId, 'Keep this code. With it you can see when the office has read your feedback.')}
       ${detailRows([
         office && ['Office', escapeHtml(office)],
-        rating && ['Your rating', stars(rating)],
+        csm?.service && ['Service', escapeHtml(csm.service)],
+        csm && ['Overall', `${escapeHtml(answerLabel(csm.sqd0))}<br><span style="font-size:12px; font-weight:400; color:#64748b;">"${escapeHtml(SQD_STATEMENTS.sqd0.text)}"</span>`],
+        !csm && rating && ['Your rating', stars(rating)],
         submission.reaction && ['How you felt', escapeHtml(REACTION_LABELS[submission.reaction] || submission.reaction)],
         tags.length && ['You mentioned', escapeHtml(tags.join(', '))],
         ['Sent', formatPhDateTime(submission.createdAt || new Date())],
       ])}
-      ${submission.description ? quote('Your feedback', escapeHtml(excerpt(submission.description))) : ''}
+      ${submission.description ? quote(csm ? 'Your suggestions' : 'Your feedback', escapeHtml(excerpt(submission.description))) : ''}
       ${paragraph(`${escapeHtml(feedbackReply(rating))} Your feedback goes to ${office ? `the ${escapeHtml(office)} and ` : ''}the municipal administrators, who use it to improve services for everyone in Cantilan.`)}
+      ${button(trackUrl(submission.trackingId), 'Track my feedback')}
       ${small(`You don't need to do anything else. If you have a problem that needs action, you can <a href="${SITE_URL}/submit" style="color:${BRAND}; font-weight:600;">send a complaint or suggestion</a> anytime.`)}
-      ${small(`Reference no. <span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`)}
     `,
   });
-  return { to: submission.email, subject: 'CIVIX — Thank you for your feedback', html };
+  return { to: submission.email, subject: `CIVIX — Thank you for your feedback (${submission.trackingId})`, html };
 }
 
 async function buildSubmissionReceivedEmail(submission) {
@@ -441,7 +475,7 @@ async function buildStatusUpdateEmail(submission, newStatus, note) {
       ])}
       ${noteBlock('Note from the office', note)}
       ${button(trackUrl(submission.trackingId), 'View my report')}
-      ${resolved ? small(`Was your concern handled well? <a href="${SITE_URL}/submit" style="color:${BRAND}; font-weight:600;">Tell us how we did</a>. Your feedback helps us improve.`) : ''}
+      ${resolved ? small(`Was your concern handled well? <a href="${SITE_URL}/rate/${encodeURIComponent(submission.trackingId)}" style="color:${BRAND}; font-weight:600;">Rate the service</a> with the short satisfaction form. Your answers help the office improve.`) : ''}
     `,
   });
   return { to: submission.email, subject: `CIVIX — Status Update: ${meta.label} (${submission.trackingId})`, html };
@@ -492,6 +526,8 @@ async function buildNewReportStaffEmail({ email, fullName }, submission, { offic
   const noOffice = !submission.department || submission.department === 'UNASSIGNED';
   const photos = submission.media?.length || 0;
   const hi = `Hi ${escapeHtml(fullName || 'there')},`;
+  // Typed in by staff for a citizen who came, called, wrote or sent a message.
+  const walkIn = CHANNEL_HOW[submission.channel];
   let title;
   let intro;
   if (move) {
@@ -501,6 +537,9 @@ async function buildNewReportStaffEmail({ email, fullName }, submission, { offic
   } else if (noOffice) {
     title = `New ${kind} with no office yet`;
     intro = `${hi} CIVIX couldn't tell which office this ${kind} is for. Your office receives reports like this: please open it and move it to the right office.`;
+  } else if (walkIn) {
+    title = `New ${urgent ? 'urgent ' : ''}${kind} for your office`;
+    intro = `${hi} ${escapeHtml(submission.encodedByName || 'a staff member')} typed in this ${kind} for the ${escapeHtml(officeLabel(submission.department))}. The citizen gave it ${walkIn}.`;
   } else {
     title = `New ${urgent ? 'urgent ' : ''}${kind} for your office`;
     intro = `${hi} a citizen sent this ${kind} to the ${escapeHtml(officeLabel(submission.department))}.`;
@@ -515,19 +554,51 @@ async function buildNewReportStaffEmail({ email, fullName }, submission, { offic
         ['Type', escapeHtml(TYPE_LABELS[submission.type] || submission.type)],
         submission.type === 'COMPLAINT' && submission.priority && ['How urgent', urgencyPill(submission.priority)],
         ['Office', noOffice ? 'No office yet' : escapeHtml(officeLabel(submission.department))],
+        walkIn && ['How it came in', escapeHtml(CHANNEL_LABELS[submission.channel])],
         submission.address && ['Location', escapeHtml(excerpt(submission.address, 120))],
         photos && ['Photos', `${photos} photo${photos === 1 ? '' : 's'}`],
         ['Received', formatPhDateTime(submission.createdAt || new Date())],
         submission.dueAt && ['Due', formatPhDate(submission.dueAt)],
       ])}
       ${noteBlock('Why it was moved', move?.reason)}
-      ${submission.description ? quote('What the citizen wrote', escapeHtml(excerpt(submission.description))) : ''}
+      ${submission.description ? quote(walkIn ? 'What the citizen said' : 'What the citizen wrote', escapeHtml(excerpt(submission.description))) : ''}
       ${button(staffReportUrl(submission), 'Open this report')}
       ${small("For the citizen's privacy, their phone number and email are not in this email. You can see them in the report in the staff portal.")}
       ${office ? small(`You get these emails as staff of the ${escapeHtml(officeLabel(office))} in CIVIX.`) : ''}
     `,
   });
   return { to: email, subject: `CIVIX — ${title} (${submission.trackingId})`, html };
+}
+
+// A client answered the satisfaction form for the staff member's office and was not
+// satisfied (Negative; utils/staffEmails.js): their overall answer, the statements
+// they disagreed with, and their suggestions. Nothing says who the client is.
+async function buildNegativeFeedbackStaffEmail({ email, fullName }, submission, { office } = {}) {
+  const csm = submission.csm || {};
+  const officeName = officeLabel(office || submission.department);
+  const fellShort = SQD.slice(1).filter(key => csm[key] != null && csm[key] <= 2);
+  const html = layout({
+    seal: await sealImageUrl(),
+    preheader: `${submission.trackingId}: a client was not satisfied with the service.`,
+    icon: '!', tone: 'red',
+    title: "A client was not satisfied with your office's service",
+    intro: `Hi ${escapeHtml(fullName || 'there')}, a client answered the satisfaction form for the ${escapeHtml(officeName)} and was not satisfied.`,
+    body: `
+      ${detailRows([
+        ['Transaction Code', `<span style="font-family:${MONO};">${escapeHtml(submission.trackingId)}</span>`],
+        csm.service && ['Service', escapeHtml(csm.service)],
+        ['Overall', `${escapeHtml(answerLabel(csm.sqd0))}<br><span style="font-size:12px; font-weight:400; color:#64748b;">"${escapeHtml(SQD_STATEMENTS.sqd0.text)}"</span>`],
+        fellShort.length && ['Disagreed with', fellShort.map(key => `${escapeHtml(SQD_STATEMENTS[key].dimension)}: ${escapeHtml(answerLabel(csm[key]))}`).join('<br>')],
+        ['Received', formatPhDateTime(submission.createdAt || new Date())],
+      ])}
+      ${submission.description ? quote("The client's suggestions", escapeHtml(excerpt(submission.description))) : ''}
+      ${actionsBlock(lowAnswers(csm).slice(0, 2))}
+      ${button(staffReportUrl(submission), 'Open this feedback')}
+      ${small('The client is anonymous: CIVIX does not show who answered or which slip they used.')}
+      ${small(`You get these emails as staff of the ${escapeHtml(officeName)} in CIVIX.`)}
+    `,
+  });
+  return { to: email, subject: `CIVIX — A client was not satisfied (${submission.trackingId})`, html };
 }
 
 const REQUEST_LABELS = { STAFF_ACCOUNT: 'a staff account', ADMIN_ACCESS: 'administrator access' };
@@ -716,6 +787,7 @@ const sendSubmissionReceivedEmail = submission => deliver(buildSubmissionReceive
 const sendStatusUpdateEmail = (submission, newStatus, note) => deliver(buildStatusUpdateEmail(submission, newStatus, note));
 const sendUrgencyChangeEmail = (submission, change) => deliver(buildUrgencyChangeEmail(submission, change));
 const sendNewReportStaffEmail = (person, submission, info) => deliver(buildNewReportStaffEmail(person, submission, info));
+const sendNegativeFeedbackStaffEmail = (person, submission, info) => deliver(buildNegativeFeedbackStaffEmail(person, submission, info));
 const sendAccessRequestAlertEmail = (to, request) => deliver(buildAccessRequestAlertEmail(to, request));
 const sendAdminAccessDecisionEmail = (user, approved, note, adminUrl) => deliver(buildAdminAccessDecisionEmail(user, approved, note, adminUrl));
 const sendStaffAccountDecisionEmail = (user, approved, note) => deliver(buildStaffAccountDecisionEmail(user, approved, note));
@@ -756,10 +828,11 @@ async function sendSignInCodeEmail(person, code, minutes, purpose) {
 module.exports = {
   sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail, sendUrgencyChangeEmail, sendVerificationCodeEmail,
   sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail, sendNewReportStaffEmail,
+  sendNegativeFeedbackStaffEmail,
   sendPasswordResetCodeEmail, sendPasswordChangedEmail, sendNewDeviceSignInEmail, sendSignInCodeEmail,
   // For previews and tests.
   buildSubmissionReceivedEmail, buildFeedbackThanksEmail, buildStatusUpdateEmail, buildUrgencyChangeEmail, buildAccessRequestAlertEmail,
-  buildNewReportStaffEmail,
+  buildNewReportStaffEmail, buildNegativeFeedbackStaffEmail,
   buildAdminAccessDecisionEmail, buildStaffAccountDecisionEmail, buildVerificationCodeEmail, toPlainText,
   buildPasswordResetCodeEmail, buildPasswordChangedEmail, buildNewDeviceSignInEmail, buildSignInCodeEmail,
 };

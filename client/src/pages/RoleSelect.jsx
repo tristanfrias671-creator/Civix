@@ -1,14 +1,16 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { BrandImg } from '../context/BrandingContext';
 import { useLang, useText } from '../i18n/LanguageContext';
 import LanguageSwitcher from '../components/citizen/LanguageSwitcher';
+import Tour, { markTour, shouldAutoStart } from '../components/common/Tour';
+import TOUR_TEXT, { tourSteps } from '../i18n/tourText';
 
 // The page's wording in English, Filipino and Bisaya (official names stay as they are).
 const TEXT = {
   en: {
-    home: 'Home', submit: 'Submit a Report', track: 'Track My Report', guidelines: 'Guidelines',
+    home: 'Home', submit: 'Submit a Report', track: 'Track My Report', guidelines: 'Guidelines', charter: "Citizen's Charter",
     welcome: 'Welcome to',
     intro: 'Your voice matters! Report your concerns, track your submissions, and help make Cantilan a cleaner, safer, and more progressive community.',
     tagline: 'A Cleaner, Safer, Stronger Cantilan for Everyone',
@@ -17,6 +19,7 @@ const TEXT = {
       track: ['Track Your Report', 'Check the status of your submitted concern.'],
       guidelines: ['View Guidelines', 'Learn about our policies and what to include in your report.'],
       help: ['Need Help?', 'Get assistance from our support team.'],
+      charter: ["Citizen's Charter", "See each office's services and how long they may take, then rate a service or file a complaint."],
     },
     benefits: [
       ['Transparent Process', 'Your report is handled with care and transparency.'],
@@ -29,7 +32,7 @@ const TEXT = {
     developedBy: 'Developed by BS Information Technology 4D students, North Eastern Mindanao State University – Cantilan Campus',
   },
   fil: {
-    home: 'Home', submit: 'Magpadala ng Ulat', track: 'Subaybayan ang Ulat', guidelines: 'Mga Gabay',
+    home: 'Home', submit: 'Magpadala ng Ulat', track: 'Subaybayan ang Ulat', guidelines: 'Mga Gabay', charter: "Citizen's Charter",
     welcome: 'Maligayang pagdating sa',
     intro: 'Mahalaga ang boses mo! Iulat ang iyong mga hinaing, subaybayan ang iyong mga ipinadala, at tumulong na gawing mas malinis, mas ligtas, at mas maunlad na komunidad ang Cantilan.',
     tagline: 'Mas Malinis, Mas Ligtas, Mas Matatag na Cantilan para sa Lahat',
@@ -38,6 +41,7 @@ const TEXT = {
       track: ['Subaybayan ang Iyong Ulat', 'Tingnan ang kalagayan ng iyong ipinadalang ulat.'],
       guidelines: ['Tingnan ang mga Gabay', 'Alamin ang aming mga patakaran at kung ano ang dapat isama sa iyong ulat.'],
       help: ['Kailangan ng Tulong?', 'Humingi ng tulong sa aming mga kawani.'],
+      charter: ["Citizen's Charter", 'Tingnan ang mga serbisyo ng bawat opisina at gaano katagal ang mga ito, saka i-rate ang serbisyo o magreklamo.'],
     },
     benefits: [
       ['Malinaw na Proseso', 'Inaasikaso ang iyong ulat nang may malasakit at katapatan.'],
@@ -50,7 +54,7 @@ const TEXT = {
     developedBy: 'Binuo ng mga mag-aaral ng BS Information Technology 4D, North Eastern Mindanao State University – Cantilan Campus',
   },
   ceb: {
-    home: 'Home', submit: 'Ipadala ang Report', track: 'Sundan ang Report', guidelines: 'Mga Giya',
+    home: 'Home', submit: 'Ipadala ang Report', track: 'Sundan ang Report', guidelines: 'Mga Giya', charter: "Citizen's Charter",
     welcome: 'Malipayong pag-abot sa',
     intro: 'Importante ang imong tingog! I-report ang imong mga reklamo, sundan ang imong mga gipadala, ug tabangi nga mahimong mas limpyo, mas luwas, ug mas uswag nga komunidad ang Cantilan.',
     tagline: 'Mas Limpyo, Mas Luwas, Mas Lig-on nga Cantilan alang sa Tanan',
@@ -59,6 +63,7 @@ const TEXT = {
       track: ['Sundan ang Imong Report', 'Tan-awa ang kahimtang sa imong gipadala nga report.'],
       guidelines: ['Tan-awa ang mga Giya', 'Hibal-i ang among mga lagda ug unsa ang ilakip sa imong report.'],
       help: ['Nanginahanglan og Tabang?', 'Pangayo og tabang sa among mga kawani.'],
+      charter: ["Citizen's Charter", 'Tan-awa ang mga serbisyo sa matag opisina ug unsa kini kadugay, dayon i-rate ang serbisyo o pagreklamo.'],
     },
     benefits: [
       ['Klaro nga Proseso', 'Ang imong report atimanon pag-ayo ug klaro ang matag lakang.'],
@@ -110,6 +115,18 @@ const FEATURE_CARDS = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10" /><path d="M12 16v-4m0-4h.01" />
+      </svg>
+    ),
+  },
+  // The whole row under the other four.
+  {
+    key: 'charter',
+    color: '#0891b2',
+    wide: true,
+    action: (nav) => nav('/charter'),
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
       </svg>
     ),
   },
@@ -225,6 +242,21 @@ export default function RoleSelect() {
   const pageRef = useRef(null);
   useScrollPop(pageRef);
 
+  // The guided tour: by itself on the first visit (after the page has faded in), and
+  // from the link under the two buttons.
+  const tt = useText(TOUR_TEXT);
+  const tourStepsHome = useMemo(() => tourSteps('home', tt), [tt]);
+  const [tourOpen, setTourOpen] = useState(false);
+  const closeTour = useCallback(how => {
+    setTourOpen(false);
+    markTour('home', how);
+  }, []);
+  useEffect(() => {
+    if (!shouldAutoStart('home')) return undefined;
+    const timer = setTimeout(() => setTourOpen(true), 900);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div ref={pageRef} className="min-h-screen relative" style={{ background: '#eef2f9' }} lang={lang}>
       <style>{popCss}</style>
@@ -254,7 +286,10 @@ export default function RoleSelect() {
             <h1 className="text-white text-sm sm:text-base font-extrabold leading-tight sm:truncate">Surigao Del Sur - Philippines</h1>
           </div>
 
-          <nav className="hidden md:flex items-center gap-1 ml-8">
+          {/* The five links fit on one line from 1280px (Filipino and Bisaya are the
+              longest); narrower screens reach the same pages through the buttons and
+              cards below, as on phones. */}
+          <nav className="hidden xl:flex items-center gap-1 ml-8">
             <span className="flex items-center gap-1.5 px-3 py-2 text-[15px] font-semibold text-white border-b-2 border-blue-400">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4a1 1 0 001-1v-5h2v5a1 1 0 001 1h4a1 1 0 001-1V10" />
@@ -281,6 +316,13 @@ export default function RoleSelect() {
                 <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
               {t.guidelines}
+            </button>
+            <button onClick={() => navigate('/charter')}
+              className="rs-navlink flex items-center gap-1.5 px-3 py-2 text-[15px] font-semibold text-white/90 hover:text-white transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+              {t.charter}
             </button>
           </nav>
           <LanguageSwitcher className="ml-auto flex-shrink-0" />
@@ -312,7 +354,7 @@ export default function RoleSelect() {
             </p>
             {/* Phones: the two buttons stack at the same full width */}
             <div className="rs-fade-3 flex flex-col sm:flex-row sm:flex-wrap gap-3">
-              <button onClick={() => navigate('/submit')}
+              <button onClick={() => navigate('/submit')} data-tour="home-submit"
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base text-white transition-transform hover:-translate-y-0.5"
                 style={{ background: '#2563eb', boxShadow: '0 8px 24px rgba(37,99,235,0.4)' }}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -321,7 +363,7 @@ export default function RoleSelect() {
                 {t.submit}
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
               </button>
-              <button onClick={() => navigate('/track')}
+              <button onClick={() => navigate('/track')} data-tour="home-track"
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base text-white border transition-colors"
                 style={{ background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.35)' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.16)'}
@@ -333,6 +375,13 @@ export default function RoleSelect() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
               </button>
             </div>
+            <button type="button" onClick={() => setTourOpen(true)} data-tour-replay
+              className="rs-fade-3 mt-4 inline-flex items-center gap-2 min-h-[44px] text-[15px] font-semibold text-white underline underline-offset-4 decoration-white/60 hover:decoration-white rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" /><path d="M10 8.5v7l5.5-3.5z" />
+              </svg>
+              {tt.ui.takeTour}
+            </button>
           </div>
 
           <p className="hidden xl:block ml-auto text-white italic font-medium text-xl leading-snug text-right" style={{ fontFamily: 'Georgia, serif', maxWidth: 280, textShadow: '0 2px 8px rgba(0,0,0,0.75), 0 1px 2px rgba(0,0,0,0.6)' }}>
@@ -346,8 +395,8 @@ export default function RoleSelect() {
       <div className="rs-fade-3 max-w-7xl mx-auto px-6 md:-mt-8 relative z-10">
         <div className="rounded-2xl sm:p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {FEATURE_CARDS.map(card => (
-            <button key={card.key} onClick={() => card.action(navigate, t)}
-              className="rs-feature-card rs-pop group flex items-start gap-3 text-left rounded-xl p-4"
+            <button key={card.key} onClick={() => card.action(navigate, t)} data-tour={`home-${card.key}`}
+              className={`rs-feature-card rs-pop group flex items-start gap-3 text-left rounded-xl p-4 ${card.wide ? 'sm:col-span-2 lg:col-span-4' : ''}`}
               style={{ background: CARD_GLASS, boxShadow: CARD_SHADOW, backdropFilter: CARD_BLUR, WebkitBackdropFilter: CARD_BLUR }}>
               <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white transition-transform duration-300 group-hover:scale-110"
                 style={{ background: card.color }}>
@@ -393,6 +442,8 @@ export default function RoleSelect() {
           {t.developedBy}
         </div>
       </div>
+
+      <Tour open={tourOpen} steps={tourStepsHome} labels={tt.ui} lang={lang} onClose={closeTour} />
     </div>
   );
 }

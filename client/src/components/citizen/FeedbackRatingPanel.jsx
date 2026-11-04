@@ -145,7 +145,7 @@ function loadLottie() {
 
 // An animated emoji that plays while `playing` is true and rests on frame `rest`
 // otherwise. Shows the regular emoji until the animation loads, or if it can't.
-function AnimatedEmoji({ code, rest = 0, fallback, playing, className }) {
+export function AnimatedEmoji({ code, rest = 0, fallback, playing, className }) {
   const box = useRef(null);
   const anim = useRef(null);
   const [ready, setReady] = useState(false);

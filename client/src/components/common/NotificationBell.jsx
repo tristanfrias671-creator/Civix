@@ -10,7 +10,7 @@ export function openAlerts() {
 // The bell in the admin and staff top bars, with a drop-down of what needs
 // attention. Each portal says where an item leads (`onSelect(item, sectionKey)`),
 // what to say when nothing is waiting, and which links sit at the bottom.
-export default function NotificationBell({ alerts, dark, onSelect, links = [], emptyText, showDepartment = true }) {
+export default function NotificationBell({ alerts, dark, onSelect, links = [], emptyText, showDepartment = true, tourId }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef(null);
   const count = alerts?.total || 0;
@@ -44,7 +44,7 @@ export default function NotificationBell({ alerts, dark, onSelect, links = [], e
   const border = dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb';
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className="relative" data-tour={tourId}>
       <button type="button" onClick={() => setOpen(o => !o)}
         className="relative p-2 rounded-lg transition-colors"
         style={{ color: muted, background: open ? (dark ? 'rgba(255,255,255,0.06)' : '#f3f4f6') : 'transparent' }}

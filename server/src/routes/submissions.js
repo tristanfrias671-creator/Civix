@@ -6,7 +6,7 @@ const { guardReportForm } = require('../utils/formGuard');
 const { requireRealPhotos, refuseLargeBodies } = require('../utils/uploadSafety');
 const {
   createSubmission, getFormTicket, getSubmissions, getSubmission,
-  trackSubmission, getSubmissionsByUser, setFeedbackSpam, deleteSpamReport, getDeletedReports, getUrgencyChanges,
+  trackSubmission, setFeedbackSpam, deleteSpamReport, getDeletedReports, getUrgencyChanges,
 } = require('../controllers/submissions');
 
 const MINUTE = 60 * 1000;
@@ -50,7 +50,6 @@ router.use(authenticate);
 router.get('/', getSubmissions);
 router.get('/deleted', requireAdmin, getDeletedReports);
 router.get('/urgency-changes', requireAdmin, getUrgencyChanges);
-router.get('/user/:userId', requireAdmin, getSubmissionsByUser);
 router.get('/:id', getSubmission);
 // Admins only view complaints and suggestions (staff update them through
 // /api/staff/portal). They may mark feedback as spam (it has no office) and delete

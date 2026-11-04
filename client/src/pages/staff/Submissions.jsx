@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useOutletContext } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { TypeBadge, PriorityBadge, StatusBadge } from '../../components/common/StatusBadge';
+import { TypeBadge, PriorityBadge, StatusBadge, ChannelBadge } from '../../components/common/StatusBadge';
+import Icon from '../../components/common/Icons';
+import { CHANNEL_LABELS, typedIn } from '../../data/channels';
 import { SkeletonTable, Skel, useSkeletonGate } from '../../components/common/Skeleton';
 import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
 import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
+import CsmAnswers, { OverallAnswer } from '../../components/common/CsmAnswers';
+import RemarkRule, { RemarkBadge } from '../../components/common/RemarkRule';
 import ReportMiniMap from '../../components/common/ReportMiniMap';
 import PhotoViewer from '../../components/common/PhotoViewer';
 import { useTheme } from '../../context/ThemeContext';
@@ -487,14 +491,18 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 <div className="flex items-center gap-2 flex-wrap mb-1.5">
                   <span className="font-mono text-xs font-semibold text-gray-600">{detail.trackingId}</span>
                   <TypeBadge type={detail.type} />
+                  <ChannelBadge channel={detail.channel} />
                   {detail.priority !== 'STANDARD' && <PriorityBadge priority={detail.priority} />}
-                  <DeadlineBadge submission={detail} />
+                  {/* Feedback has no deadline (the badge would only show a dash) */}
+                  {detail.type !== 'FEEDBACK' && <DeadlineBadge submission={detail} />}
                 </div>
                 <h2 id="report-window-title" className="text-lg font-bold text-gray-900 line-clamp-2">
-                  {TYPE_LABEL[detail.type] || 'Report'}{detail.address ? ` · ${detail.address}` : ''}
+                  {TYPE_LABEL[detail.type] || 'Report'}{detail.csm?.service ? ` · ${detail.csm.service}` : detail.address ? ` · ${detail.address}` : ''}
                 </h2>
                 <p className="text-xs text-gray-600 mt-0.5">
-                  Received {formatDate(detail.createdAt)}{detail.dueAt ? ` · Resolve by ${formatDueDate(detail.dueAt, true)}` : ''}
+                  Received {formatDate(detail.createdAt)}
+                  {typedIn(detail) ? ` · ${CHANNEL_LABELS[detail.channel]}, typed in by ${detail.encodedByName || 'staff'}` : ''}
+                  {detail.dueAt ? ` · Resolve by ${formatDueDate(detail.dueAt, true)}` : ''}
                 </p>
               </div>
               <button type="button" onClick={onClose} aria-label="Close"
@@ -507,8 +515,15 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
               {/* No office yet: sending it on is the first job */}
               {noOffice && <section>{moveForm({ heading: 'Send to the right office' })}</section>}
 
-              {/* Who sent it */}
-              <section>
+              {/* Who sent it (feedback is anonymous) */}
+              {detail.type === 'FEEDBACK' ? (
+                <section>
+                  <h3 className={SECTION}>Client</h3>
+                  <p className="text-sm text-gray-700">
+                    <span className="font-semibold text-gray-800">Anonymous.</span> Feedback never shows who answered, so clients can be honest.
+                  </p>
+                </section>
+              ) : <section>
                 <h3 className={SECTION}>Citizen</h3>
                 <div className="flex items-center gap-3">
                   <CitizenAvatar name={citizenName} />
@@ -521,21 +536,37 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                     </p>
                   </div>
                 </div>
-              </section>
+              </section>}
 
-              {/* What they reported */}
+              {/* Feedback: the client's answers to the satisfaction form (ARTA CSM) */}
+              {detail.csm && (
+                <section>
+                  <h3 className={SECTION}>Satisfaction form (ARTA CSM)</h3>
+                  <CsmAnswers csm={detail.csm} />
+                </section>
+              )}
+
+              {/* What they reported (feedback: the client's suggestions) */}
               <section>
-                <h3 className={SECTION}>What they reported</h3>
-                <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
-                {detail.type === 'FEEDBACK' && (
+                <h3 className={SECTION}>{detail.csm ? "Client's suggestions" : 'What they reported'}</h3>
+                {detail.description
+                  ? <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
+                  : <p className="text-sm text-gray-600">No suggestions were written.</p>}
+                {detail.type === 'FEEDBACK' && detail.remark && (
+                  <div className="mt-3 space-y-2" data-remark>
+                    <RemarkBadge remark={detail.remark} />
+                    <RemarkRule />
+                  </div>
+                )}
+                {detail.type === 'FEEDBACK' && !detail.csm && (
                   <div className="mt-3">
                     <FeedbackRatingDisplay rating={detail.rating} reaction={detail.reaction} feedbackTags={detail.feedbackTags} />
                   </div>
                 )}
               </section>
 
-              {/* Photos */}
-              <section>
+              {/* Photos (feedback has none) */}
+              {detail.type !== 'FEEDBACK' && <section>
                 <h3 className={SECTION}>Photos {detail.media?.length > 0 && `(${detail.media.length})`}</h3>
                 {detail.media?.length > 0 ? (
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -549,7 +580,7 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 ) : (
                   <p className="text-sm text-gray-600">No photos were attached.</p>
                 )}
-              </section>
+              </section>}
 
               {/* Where */}
               {(detail.address || detail.location) && (
@@ -673,8 +704,9 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 <section className="rounded-2xl border border-green-200 dark:border-green-500/40 bg-green-50 p-4 sm:p-5">
                   <h3 className="text-base font-bold text-gray-900">Feedback for your office</h3>
                   <p className="text-sm text-gray-700 mt-1">
-                    A citizen rated your office's service. Feedback has no status steps or deadline: read it and use it to
-                    serve better. If it is meant for another office, move it below.
+                    {detail.csm
+                      ? 'A client answered the satisfaction form about your office\'s service. Feedback has no status steps or deadline: read it and use it to serve better.'
+                      : 'A citizen rated your office\'s service. Feedback has no status steps or deadline: read it and use it to serve better. If it is meant for another office, move it below.'}
                   </p>
                 </section>
               )}
@@ -813,14 +845,19 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                   )))}
                   <li className="relative pl-5">
                     <span className="absolute -left-[7px] top-1 w-3 h-3 rounded-full ring-2 ring-white dark:ring-slate-800 bg-gray-400" aria-hidden="true" />
-                    <p className="text-sm text-gray-800">Report received</p>
+                    <p className="text-sm text-gray-800">
+                      {typedIn(detail)
+                        ? <><span className="font-semibold">{detail.encodedByName || 'Staff'}</span> typed in the report ({CHANNEL_LABELS[detail.channel]})</>
+                        : 'Report received'}
+                    </p>
                     <p className="text-xs text-gray-600">{formatDateTime(detail.createdAt)}</p>
                   </li>
                 </ol>
               </section>
 
-              {/* Move to another office */}
-              {!noOffice && (
+              {/* Move to another office (not the answers to the satisfaction form: they
+                  are about this office's own service) */}
+              {!noOffice && !detail.csm && (
               <section>
                 {!moveOpen ? (
                   <button type="button" onClick={() => setMoveOpen(true)}
@@ -900,7 +937,14 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
 }
 
 function citizenLine(s) {
-  return s.user?.fullName || 'Anonymous';
+  return s.type === 'FEEDBACK' ? 'Anonymous client' : s.user?.fullName || 'Anonymous';
+}
+
+// The line of text in the list: the report itself, or for feedback the client's
+// suggestions (the service when none were written).
+function reportLine(s) {
+  if (s.description || !s.csm) return s.description;
+  return `Satisfaction form${s.csm.service ? ` · ${s.csm.service}` : ''} (no suggestions written)`;
 }
 
 // Feedback has no status steps, so its row shows the citizen's rating instead.
@@ -916,11 +960,15 @@ function FeedbackStars({ rating }) {
     </span>
   );
 }
-// The status badge, or the rating for feedback (a spam mark still shows as such).
-const statusCell = s => (s.type === 'FEEDBACK' && s.status !== 'SPAM' ? <FeedbackStars rating={s.rating} /> : <StatusBadge status={s.status} />);
+// The status badge, or for feedback the overall answer (older feedback: its stars).
+// A spam mark still shows as such.
+const statusCell = s => (s.type === 'FEEDBACK' && s.status !== 'SPAM'
+  ? (s.csm ? <OverallAnswer csm={s.csm} /> : <FeedbackStars rating={s.rating} />)
+  : <StatusBadge status={s.status} />);
 
 export default function StaffSubmissions() {
   const location = useLocation();
+  const { openWalkIn } = useOutletContext() || {};
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading]         = useState(true);
   const [tab, setTab]                 = useState('');
@@ -1013,6 +1061,13 @@ export default function StaffSubmissions() {
     return () => clearInterval(timer);
   }, [fetchList]);
 
+  // A walk-in report just typed in shows at once (highlighted like other new reports).
+  useEffect(() => {
+    const refresh = () => fetchList(pageRef.current, { quiet: true });
+    window.addEventListener('civix:report-added', refresh);
+    return () => window.removeEventListener('civix:report-added', refresh);
+  }, [fetchList]);
+
   useEffect(() => {
     if (!freshIds.size) return undefined;
     const t = setTimeout(() => setFreshIds(new Set()), 4500);
@@ -1047,11 +1102,20 @@ export default function StaffSubmissions() {
       <style>{pageCss}</style>
 
       {/* Header */}
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-gray-900">Our Reports</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          Reports sent to <strong className="text-gray-800">{department || 'your office'}</strong>. Open one to read it and update its status.
-        </p>
+      <div className="mb-5 flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-900">Our Reports</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Reports sent to <strong className="text-gray-800">{department || 'your office'}</strong>. Open one to read it and update its status.
+          </p>
+        </div>
+        {/* Below 1024 px; wider, the top bar has the same button */}
+        {openWalkIn && (
+          <button type="button" onClick={openWalkIn}
+            className="inline-flex lg:hidden items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+            <Icon name="write" className="w-4 h-4" /> Walk-in report
+          </button>
+        )}
       </div>
 
       {/* Status tabs with counts */}
@@ -1140,15 +1204,16 @@ export default function StaffSubmissions() {
                           {s.trackingId}
                         </button>
                         <TypeBadge type={s.type} />
+                        <ChannelBadge channel={s.channel} />
                         {s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
                         {s.department === 'UNASSIGNED' && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 dark:text-amber-200">No office yet</span>}
                         {freshIds.has(s.id) && <span className="text-xs font-bold text-blue-700">New</span>}
                       </div>
-                      <p className="text-sm text-gray-800 mt-1 truncate">{s.description}</p>
+                      <p className="text-sm text-gray-800 mt-1 truncate">{reportLine(s)}</p>
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">
                       <p className={`text-sm font-semibold ${s.user?.fullName ? 'text-gray-800' : 'text-gray-600 italic'}`}>{citizenLine(s)}</p>
-                      <p className="text-xs text-gray-600">{s.user?.email || s.contactNumber || 'No contact'}</p>
+                      <p className="text-xs text-gray-600">{s.type === 'FEEDBACK' ? 'Not shown' : s.user?.email || s.contactNumber || 'No contact'}</p>
                     </td>
                     <td className="px-4 py-3.5"><DeadlineBadge submission={s} showDate /></td>
                     <td className="px-4 py-3.5 whitespace-nowrap">{statusCell(s)}</td>
@@ -1172,10 +1237,11 @@ export default function StaffSubmissions() {
                     </span>
                     <span className="flex items-center gap-2 flex-wrap mt-2">
                       <TypeBadge type={s.type} />
+                      <ChannelBadge channel={s.channel} />
                       {s.priority !== 'STANDARD' && <PriorityBadge priority={s.priority} />}
                       <DeadlineBadge submission={s} />
                     </span>
-                    <span className="block text-[15px] text-gray-800 mt-2 line-clamp-2">{s.description}</span>
+                    <span className="block text-[15px] text-gray-800 mt-2 line-clamp-2">{reportLine(s)}</span>
                     <span className="block text-xs text-gray-600 mt-1.5">{citizenLine(s)} · Received {formatDate(s.createdAt)}</span>
                   </button>
                 </li>

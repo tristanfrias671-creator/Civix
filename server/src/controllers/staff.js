@@ -11,6 +11,7 @@ const { logSignIn } = require('../utils/signInLog');
 const { forgetPasswordChange } = require('../middleware/auth');
 const { savedPhotoPath } = require('../middleware/upload');
 const { discardUploads } = require('../utils/uploadSafety');
+const { CSM_ANSWERS, officeView } = require('../utils/csm');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STATUSES = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
@@ -48,6 +49,8 @@ const REPORT_DETAIL = {
   media: true,
   statusLogs: LOGS_WITH_PHOTOS,
   aiClassification: { select: { predictedPriority: true, urgencyKeywords: true } },
+  // Feedback: the client's answers to the satisfaction form (never which code it came from).
+  csm: { select: CSM_ANSWERS },
 };
 // Changes to how urgent a report is, newest first (they are kept apart from the
 // report, like office moves).
@@ -347,7 +350,7 @@ async function getMySubmissions(req, res) {
       ];
     }
 
-    const include = { user: { select: { fullName: true, email: true } }, location: true };
+    const include = { user: { select: { fullName: true, email: true } }, location: true, csm: { select: { service: true, sqd0: true } } };
     let submissions;
     let total;
 
@@ -382,7 +385,7 @@ async function getMySubmissions(req, res) {
       ]);
     }
 
-    res.json({ submissions, total, page, pages: Math.max(1, Math.ceil(total / limit)), department: dept });
+    res.json({ submissions: submissions.map(officeView), total, page, pages: Math.max(1, Math.ceil(total / limit)), department: dept });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch submissions' });
@@ -399,7 +402,15 @@ async function getMySubmissionDetail(req, res) {
     if (!submission) return res.status(404).json({ error: 'Report not found' });
     if (!inScope(scope, submission.department)) return res.status(403).json({ error: OTHER_OFFICE });
 
-    res.json({ ...submission, urgencyChanges: await urgencyChangesOf(submission.id) });
+    // The office opened it for the first time: the citizen's Track page now shows it
+    // as read. The report's "last updated" time stays as it was (setting updatedAt to
+    // itself also stops MySQL's ON UPDATE from changing it).
+    if (!submission.readAt && submission.department === scope.department) {
+      submission.readAt = new Date();
+      await prisma.$executeRaw`UPDATE Submission SET readAt = ${submission.readAt}, updatedAt = updatedAt WHERE id = ${submission.id} AND readAt IS NULL`;
+    }
+
+    res.json({ ...officeView(submission), urgencyChanges: await urgencyChangesOf(submission.id) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch submission' });
@@ -474,7 +485,7 @@ async function updateMySubmission(req, res) {
       sendStatusUpdateSms(updated, status);
     }
 
-    res.json({ ...updated, urgencyChanges: await urgencyChangesOf(updated.id) });
+    res.json({ ...officeView(updated), urgencyChanges: await urgencyChangesOf(updated.id) });
   } catch (err) {
     console.error(err);
     discardUploads(req);
@@ -548,7 +559,7 @@ async function getMyActivity(req, res) {
     const mine = { in: scope.departments };
     const now = new Date();
     const since = new Date(now.getTime() - 30 * DAY_MS);
-    const report = { id: true, trackingId: true, type: true, priority: true, reaction: true, department: true, createdAt: true, dueAt: true };
+    const report = { id: true, trackingId: true, type: true, priority: true, reaction: true, sentiment: true, department: true, createdAt: true, dueAt: true };
 
     const [arrived, moves, updates, lapsed, urgencyLogs] = await Promise.all([
       prisma.submission.findMany({ where: { department: mine, ...NOT_SPAM, createdAt: { gte: since } }, select: report, orderBy: { createdAt: 'desc' }, take: 60 }),
@@ -578,7 +589,7 @@ async function getMyActivity(req, res) {
     const events = [
       ...arrived.filter(s => !movedIn.has(s.id)).map(s => ({
         id: `new:${s.id}`, kind: 'new', at: s.createdAt, submissionId: s.id, trackingId: s.trackingId,
-        type: s.type, priority: s.priority, reaction: s.reaction, noOffice: s.department === 'UNASSIGNED',
+        type: s.type, priority: s.priority, reaction: s.reaction, sentiment: s.sentiment, noOffice: s.department === 'UNASSIGNED',
       })),
       ...moves.map(m => ({
         id: `move:${m.id}`, kind: inScope(scope, m.toDepartment) ? 'movedIn' : 'movedOut', at: m.createdAt,
@@ -641,7 +652,7 @@ async function assignSubmission(req, res) {
     const { id } = req.params;
     const { department, status, note, reason } = req.body;
 
-    const existing = await prisma.submission.findUnique({ where: { id } });
+    const existing = await prisma.submission.findUnique({ where: { id }, include: { csm: { select: { id: true } } } });
     if (!existing) return res.status(404).json({ error: 'Report not found' });
 
     const scope = await officeScope(req.user.id);
@@ -651,10 +662,15 @@ async function assignSubmission(req, res) {
     const data = {};
     const target = String(department || '').trim();
     if (target && target !== existing.department) {
+      // The client rated this office's service (the code came from this office), so
+      // the rating counts for this office only.
+      if (existing.csm) return res.status(400).json({ error: "This rating is about your office's service, so it stays with your office." });
       if (!(await getDepartmentList()).includes(target)) {
         return res.status(400).json({ error: 'Please choose an office from the list' });
       }
       data.department = target;
+      // The new office hasn't read it yet (Track page: "Read by the office").
+      data.readAt = null;
     }
     if (status) {
       if (![...STATUSES, SPAM].includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -724,7 +740,7 @@ async function assignSubmission(req, res) {
       }
     }
 
-    res.json(updated);
+    res.json(officeView(updated));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to assign submission' });
@@ -732,6 +748,7 @@ async function assignSubmission(req, res) {
 }
 
 module.exports = {
+  officeScope,
   getMyAlerts, getMyActivity, getMyMapReports,
   getStaff, createStaff, updateStaff, deleteStaff,
   getMyStats, getMySubmissions, getMySubmissionDetail, updateMySubmission, updateMyUrgency,
