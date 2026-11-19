@@ -6,7 +6,8 @@ import CsmFace from '../common/CsmFace';
 import { Req, RequiredNote, Starred } from '../common/RequiredMark';
 import { BrandImg } from '../../context/BrandingContext';
 
-const formCss = `
+// Shared with the staff's copy of a filled-in form (components/staff/FilledForm.jsx).
+export const formCss = `
 .csm-radio { width: 1.15rem; height: 1.15rem; accent-color: #1d4ed8; flex-shrink: 0; cursor: pointer; }
 .dark .csm-radio { accent-color: #60a5fa; color-scheme: dark; }
 .csm-band { background: #f1f5f9; border-left: 4px solid #1d4ed8; }
@@ -19,7 +20,7 @@ const formCss = `
 
 // The heading of the Municipality's printed forms (official names, the same in
 // every language).
-const LETTERHEAD = ['Republic of the Philippines', 'Province of Surigao del Sur', 'Municipality of Cantilan'];
+export const LETTERHEAD = ['Republic of the Philippines', 'Province of Surigao del Sur', 'Municipality of Cantilan'];
 
 // From this width (px) the statements and their answers sit in a table, as on the
 // printed form; narrower (phones), the faces head the box and each statement has its
@@ -34,7 +35,7 @@ const today = () => new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Man
 
 // True while the element is at least `min` pixels wide. The check waits for the
 // next frame, so changing the layout can't set off the observer again in the same one.
-function useWiderThan(ref, min) {
+export function useWiderThan(ref, min) {
   const [wide, setWide] = useState(false);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -63,7 +64,7 @@ function useWiderThan(ref, min) {
   return wide;
 }
 
-function SectionTitle({ n, children }) {
+export function SectionTitle({ n, children }) {
   return (
     <h3 className="csm-band rounded-r-md px-3 py-2 text-sm font-bold uppercase tracking-wide text-gray-800">
       {n}. {children}
@@ -71,8 +72,9 @@ function SectionTitle({ n, children }) {
   );
 }
 
-// What to do in a section, after "Instructions:", as on the printed form.
-function Instructions({ t, children }) {
+// What to do in a section, after "Instructions:", as on the printed form. Also used by
+// the staff's copy of the form (components/staff/FilledForm.jsx).
+export function Instructions({ t, children }) {
   return (
     <p className="text-sm text-gray-700 leading-relaxed">
       <strong className="font-bold uppercase text-gray-900">{t.instructions}</strong> {children}
@@ -250,9 +252,10 @@ function ScaleRow({ id, n, statement, hint, value, onPick, missing, wide, first,
 // out in red. `office` is the office being rated, for the heading. `lockedService`
 // is the service named on the client's slip (or the report being rated), shown
 // instead of the box to type it in; otherwise the box suggests `serviceOptions`
-// (the office's services in the Citizen's Charter). The form ends with the client's
-// suggestions and email, both optional.
-export default function CsmForm({ value, onChange, missing = [], office, lockedService, serviceOptions = [], suggestions, onSuggestions, email, onEmail }) {
+// (the office's services in the Citizen's Charter). The form ends with part 4,
+// "Comments, complaints or suggestions": the page's own box (`children`; since
+// Nov 10, 2026 the one form for feedback, complaints and suggestions).
+export default function CsmForm({ value, onChange, missing = [], office, lockedService, serviceOptions = [], children }) {
   const t = useText(CSM_TEXT);
   const rootRef = useRef(null);
   const wide = useWiderThan(rootRef, TABLE_MIN);
@@ -263,8 +266,8 @@ export default function CsmForm({ value, onChange, missing = [], office, lockedS
     <div ref={rootRef} className="space-y-6">
       <style>{formCss}</style>
 
-      {/* The heading, as on the printed form */}
-      <header className="text-center">
+      {/* The heading, as on the printed form (step 2 of the form's tour lights it up) */}
+      <header className="text-center" data-tour="form-csm">
         <div className="flex items-center justify-center gap-3 sm:gap-4">
           <BrandImg kind="seal" className="w-12 h-12 sm:w-16 sm:h-16 object-contain flex-shrink-0" />
           <div className="min-w-0 leading-snug">
@@ -420,26 +423,10 @@ export default function CsmForm({ value, onChange, missing = [], office, lockedS
         </div>
       </section>
 
-      {/* 4. Suggestions and email (both optional) */}
-      <section className="space-y-4">
+      {/* 4. Comments, complaints or suggestions (the page's box, contact details and email) */}
+      <section className="space-y-4" data-csm-part="remark">
         <SectionTitle n={4}>{t.suggestionsTitle}</SectionTitle>
-        <div>
-          <label htmlFor="csm-suggestions" className="block text-sm font-semibold text-gray-800 mb-1">{t.suggestions}</label>
-          <textarea id="csm-suggestions" value={suggestions} onChange={e => onSuggestions(e.target.value)} rows={4} maxLength={2000}
-            placeholder={t.suggestionsPlaceholder}
-            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
-          {suggestions.length > 1500 && (
-            <p className="text-xs text-gray-500 mt-1 text-right">{suggestions.length.toLocaleString('en-US')} / 2,000</p>
-          )}
-        </div>
-        <div>
-          <label htmlFor="csm-email" className="block text-sm font-semibold text-gray-800 mb-1">{t.email}</label>
-          <input id="csm-email" type="email" value={email} maxLength={191} autoComplete="email"
-            onChange={e => onEmail(e.target.value)}
-            placeholder={t.emailPlaceholder}
-            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-          <p className="text-xs text-gray-500 mt-1">{t.emailHint}</p>
-        </div>
+        {children}
       </section>
     </div>
   );

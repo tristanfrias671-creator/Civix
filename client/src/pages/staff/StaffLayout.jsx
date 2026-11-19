@@ -24,7 +24,6 @@ const NAV_SECTIONS = [
     label: 'Reports',
     items: [
       { to: '/staff/submissions', label: 'Our Reports', icon: 'inbox', badge: 'open' },
-      { to: '/staff/map',         label: 'Office Map',  icon: 'map' },
     ],
   },
   { label: 'Updates', items: [{ to: '/staff/notifications', label: 'Notifications', icon: 'bell', badge: 'alerts' }] },
@@ -32,7 +31,6 @@ const NAV_SECTIONS = [
 const PAGE_TITLES = [
   ['/staff/dashboard', 'Dashboard'],
   ['/staff/submissions', 'Our Reports'],
-  ['/staff/map', 'Office Map'],
   ['/staff/notifications', 'Notifications'],
   ['/staff/admin-access', 'Administrator Access'],
 ];
@@ -63,11 +61,11 @@ const STAFF_TOUR = [
   { target: '[data-tour="staff-office"]', title: 'Your office',
     body: 'Complaints, suggestions and feedback for your office come here. The card shows how many are open and overdue; press it to see them all in Our Reports.' },
   { target: '[data-tour="staff-menu"]', title: 'The menu',
-    body: 'Press here for Our Reports, the Office Map, Notifications and Take the tour.' },
+    body: 'Press here for Our Reports, Notifications and Take the tour.' },
   { target: '[data-tour="staff-todo"]', title: 'To do',
     body: 'Start here each day: overdue, urgent and new reports, most serious first. Open a report to change its status, add a note for the citizen and attach proof photos.' },
   { target: '[data-tour="staff-new-client"]', title: 'New client',
-    body: 'After serving a client, press New client and give them the slip. Its code and QR code open the satisfaction form (ARTA CSM): one code for one form, good for 7 days.' },
+    body: "After serving a client, press New client and give them the slip. Its code and QR code open your office's form: the satisfaction questions (ARTA CSM), then one box for a comment, complaint or suggestion. One code for one form, good for 7 days." },
   { target: '[data-tour="staff-walk-in"]', title: 'Walk-in report',
     body: 'Type in a complaint or suggestion a citizen gave in person, by phone, by letter or by message. It gets a Transaction Code like any other report.' },
   { target: '[data-tour="staff-bell"]', title: 'Notifications',
@@ -100,7 +98,8 @@ export default function StaffLayout() {
   const [alerts, setAlerts] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
-  // "New client": a code and slip for the satisfaction form (ARTA CSM).
+  // "New client": a code and slip for the one form (ARTA CSM questions, then a comment,
+  // complaint or suggestion).
   const [newClientOpen, setNewClientOpen] = useState(false);
   const closeNewClient = useCallback(() => setNewClientOpen(false), []);
   // "Walk-in report": a complaint or suggestion a citizen gave in person, by phone,
@@ -156,7 +155,6 @@ export default function StaffLayout() {
     setTourOpen(true);
   }
 
-  const isMapPage = location.pathname.startsWith('/staff/map');
   const pageTitle = (PAGE_TITLES.find(([path]) => location.pathname.startsWith(path)) || [null, 'Dashboard'])[1];
 
   function handleLogout() { setConfirmSignOut(false); logout(); navigate('/staff-login'); }
@@ -315,7 +313,7 @@ export default function StaffLayout() {
           </div>
           <div className="ml-auto flex items-center gap-0.5">
             {user?.department && (
-              <button onClick={() => setNewClientOpen(true)} aria-label="New client: make a slip for the satisfaction form" data-tour="staff-new-client"
+              <button onClick={() => setNewClientOpen(true)} aria-label="New client: make a slip for the client's form" data-tour="staff-new-client"
                 className="mr-1 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-700 text-white text-xs font-semibold hover:bg-blue-800 transition-colors">
                 <Icon name="qr" className="w-4 h-4" /> New client
               </button>
@@ -365,7 +363,7 @@ export default function StaffLayout() {
               </button>
             )}
             {user?.department && (
-              <button onClick={() => setNewClientOpen(true)} data-tour="staff-new-client" title="Make a slip for the satisfaction form (ARTA CSM)"
+              <button onClick={() => setNewClientOpen(true)} data-tour="staff-new-client" title="Make a slip for the client's form: satisfaction questions, then a comment, complaint or suggestion"
                 className="mr-1 inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                 <Icon name="qr" className="w-4 h-4" /> New client
               </button>
@@ -386,11 +384,10 @@ export default function StaffLayout() {
           </div>
         </header>
 
-        {/* The map page fills the height; it still scrolls if the screen is too short.
-            "relative" keeps anything a page places absolutely (e.g. a hidden note for
+        {/* "relative" keeps anything a page places absolutely (e.g. a hidden note for
             screen readers) inside this scrolling panel; outside it, such an element
             made the whole window scroll, with a second scroll bar. */}
-        <main className={`relative flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
+        <main className="relative flex-1 min-h-0 overflow-y-auto">
           <Outlet key={location.key} context={{ alerts, openNewClient: () => setNewClientOpen(true), openWalkIn: user?.department ? openWalkIn : null }} />
         </main>
       </div>

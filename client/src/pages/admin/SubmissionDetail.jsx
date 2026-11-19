@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { StatusBadge, TypeBadge, PriorityBadge, SentimentBadge, ChannelBadge } from '../../components/common/StatusBadge';
@@ -128,8 +128,6 @@ export default function SubmissionDetail() {
   const [loading,     setLoading]     = useState(true);
   const [changeLogs,  setChangeLogs]  = useState([]);
   const [viewer,      setViewer]      = useState(null); // { photos, index, caption }
-  const mapRef         = useRef(null);
-  const mapInstanceRef = useRef(null);
 
   useEffect(() => {
     Promise.all([
@@ -143,35 +141,6 @@ export default function SubmissionDetail() {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [id]);
-
-  useEffect(() => {
-    if (!submission?.location || !mapRef.current) return;
-    let cancelled = false;
-    const { latitude, longitude } = submission.location;
-
-    import('leaflet').then(L => {
-      if (cancelled || !mapRef.current) return;
-      if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
-      if (mapRef.current._leaflet_id) mapRef.current._leaflet_id = null;
-      delete L.default.Icon.Default.prototype._getIconUrl;
-      L.default.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-      });
-      const map = L.default.map(mapRef.current).setView([latitude, longitude], 15);
-      L.default.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
-      L.default.marker([latitude, longitude]).addTo(map)
-        .bindPopup(`<b>${submission.trackingId}</b><br>${submission.department}`).openPopup();
-      mapInstanceRef.current = map;
-      setTimeout(() => map.invalidateSize(), 100);
-    });
-
-    return () => {
-      cancelled = true;
-      if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
-    };
-  }, [submission]);
 
   if (loading) return <div className="p-6 max-w-5xl mx-auto"><SkeletonDetail /></div>;
   if (!submission) return <div className="p-6 text-gray-500 dark:text-slate-400">Submission not found.</div>;
@@ -388,17 +357,8 @@ export default function SubmissionDetail() {
               </div>
             </div>
           )}
-
-          {submission.location && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-6">
-              <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-3">Location</h3>
-              <p className="text-xs text-gray-500 dark:text-slate-400 mb-3 flex items-center gap-1">
-                <Icon name="location" className="w-3.5 h-3.5 flex-shrink-0" />
-                {submission.location.latitude.toFixed(5)}, {submission.location.longitude.toFixed(5)}
-              </p>
-              <div ref={mapRef} className="h-56 rounded-xl border border-gray-200 dark:border-slate-600 overflow-hidden" />
-            </div>
-          )}
+          {/* (The map of a report's pin was removed on Nov 17, 2026: maps are no longer
+              used. An older report's place still shows with the description.) */}
         </div>
 
         {/* ── Right column ── */}
@@ -407,36 +367,27 @@ export default function SubmissionDetail() {
             <h3 className="font-semibold text-gray-800 dark:text-slate-100 mb-4">{isFeedback ? 'Client' : 'Citizen Information'}</h3>
             {isFeedback ? (
               <p className="text-sm text-gray-600 dark:text-slate-400">
-                <span className="font-semibold text-gray-800 dark:text-slate-100">Anonymous.</span> Feedback never shows who answered;
-                an email the client gave is only used for the thank-you note.
+                <span className="font-semibold text-gray-800 dark:text-slate-100">Anonymous.</span> Feedback never shows who answered.
               </p>
-            ) : submission.user ? (
-              <div className="space-y-3 text-sm">
-                <div>
-                  <p className="text-gray-500 dark:text-slate-400 text-xs">Full Name</p>
-                  <p className="font-medium mt-0.5">{submission.user.fullName}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-slate-400 text-xs">Citizen ID</p>
-                  <p className="font-mono font-medium mt-0.5">{submission.user.citizenId}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-slate-400 text-xs">Email</p>
-                  <p className="font-medium mt-0.5">{submission.user.email}</p>
-                </div>
-              </div>
             ) : (
+              // Since Nov 17, 2026 CIVIX asks for no mobile number or email, and older
+              // reports' ones are not shown either.
               <div className="space-y-3 text-sm">
                 <div>
                   <p className="text-gray-500 dark:text-slate-400 text-xs">Full Name</p>
-                  <p className="font-medium mt-0.5 italic text-gray-500 dark:text-slate-400">Anonymous submission</p>
+                  {submission.user?.fullName
+                    ? <p className="font-medium mt-0.5">{submission.user.fullName}</p>
+                    : <p className="font-medium mt-0.5 italic text-gray-500 dark:text-slate-400">Anonymous submission</p>}
                 </div>
-                {(submission.contactNumber || submission.email) && (
+                {submission.user?.citizenId && (
                   <div>
-                    <p className="text-gray-500 dark:text-slate-400 text-xs">Contact Provided</p>
-                    <p className="font-medium mt-0.5">{submission.contactNumber || submission.email}</p>
+                    <p className="text-gray-500 dark:text-slate-400 text-xs">Citizen ID</p>
+                    <p className="font-mono font-medium mt-0.5">{submission.user.citizenId}</p>
                   </div>
                 )}
+                <p className="text-gray-600 dark:text-slate-400">
+                  The citizen follows this report with its Transaction Code (CIVIX does not ask for a mobile number or email).
+                </p>
               </div>
             )}
           </div>

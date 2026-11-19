@@ -19,14 +19,12 @@ import AdminLayout    from './pages/admin/AdminLayout';
 import StaffLayout    from './pages/staff/StaffLayout';
 import StaffDashboard       from './pages/staff/Dashboard';
 import StaffSubmissions     from './pages/staff/Submissions';
-import StaffOfficeMap       from './pages/staff/OfficeMap';
 import StaffNotifications   from './pages/staff/Notifications';
 import StaffAdminAccess     from './pages/staff/AdminAccess';
 import StaffRegister        from './pages/staff/StaffRegister';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminSubmissions from './pages/admin/Submissions';
 import SubmissionDetail from './pages/admin/SubmissionDetail';
-import MapView from './pages/admin/MapView';
 import Analytics from './pages/admin/Analytics';
 import Staff    from './pages/admin/Staff';
 import Settings from './pages/admin/Settings';
@@ -104,7 +102,8 @@ function AppRoutes() {
         <Route path="complaints"       element={<AdminSubmissions type="COMPLAINT" />} />
         <Route path="suggestions"      element={<AdminSubmissions type="SUGGESTION" />} />
         <Route path="feedback"         element={<AdminSubmissions type="FEEDBACK" />} />
-        <Route path="map"              element={<MapView />} />
+        {/* The Map View was removed on Nov 17, 2026 (maps are no longer used). */}
+        <Route path="map"              element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="analytics"        element={<Analytics />} />
         <Route path="staff"            element={<Staff />} />
         <Route path="ai-classification" element={<AIClassification />} />
@@ -118,9 +117,10 @@ function AppRoutes() {
       <Route path="/staff" element={<PrivateRoute role="STAFF"><StaffLayout /></PrivateRoute>}>
         <Route path="dashboard"     element={<StaffDashboard />} />
         <Route path="submissions"   element={<StaffSubmissions />} />
-        <Route path="map"           element={<StaffOfficeMap />} />
-        {/* The old All Offices page: staff now see only their own office's reports. */}
-        <Route path="monitor"       element={<Navigate to="/staff/map" replace />} />
+        {/* The Office Map (removed Nov 17, 2026: maps are no longer used) and the old
+            All Offices page: old links open the dashboard. */}
+        <Route path="map"           element={<Navigate to="/staff/dashboard" replace />} />
+        <Route path="monitor"       element={<Navigate to="/staff/dashboard" replace />} />
         <Route path="notifications" element={<StaffNotifications />} />
         <Route path="admin-access"  element={<StaffAdminAccess />} />
         <Route index element={<Navigate to="dashboard" replace />} />

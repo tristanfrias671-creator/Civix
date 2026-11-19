@@ -6,10 +6,9 @@ import Icon from '../../components/common/Icons';
 import { CHANNEL_LABELS, typedIn } from '../../data/channels';
 import { SkeletonTable, Skel, useSkeletonGate } from '../../components/common/Skeleton';
 import DeadlineBadge, { formatDueDate } from '../../components/common/DeadlineBadge';
-import FeedbackRatingDisplay from '../../components/common/FeedbackRatingDisplay';
-import CsmAnswers, { OverallAnswer } from '../../components/common/CsmAnswers';
+import { OverallAnswer, LowPartActions } from '../../components/common/CsmAnswers';
+import FilledForm from '../../components/staff/FilledForm';
 import RemarkRule, { RemarkBadge } from '../../components/common/RemarkRule';
-import ReportMiniMap from '../../components/common/ReportMiniMap';
 import PhotoViewer from '../../components/common/PhotoViewer';
 import { useTheme } from '../../context/ThemeContext';
 import { mediaUrl } from '../../utils/mediaUrl';
@@ -205,18 +204,11 @@ function PhotoLightbox({ media, index, onClose, onNavigate }) {
   );
 }
 
-function CitizenAvatar({ name, size = 'w-10 h-10' }) {
-  return (
-    <div className={`${size} rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${name ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
-      {name
-        ? name.charAt(0).toUpperCase()
-        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M12.5 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>}
-    </div>
-  );
-}
-
-// One report: what the citizen sent first, then the status steps, the history,
-// and (tucked away) moving it to another office.
+// One report. The window opens on the form the citizen filled in (components/staff/
+// FilledForm.jsx) and shows only the form (the user, Nov 18, 2026: "make it whole form
+// showing"). The button at the top ("Update the status") turns it to its second page:
+// how urgent, the status steps with the photos of the work, the history, moving the
+// report and marking it as spam. "Back to the citizen's form" turns it back.
 function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
   const { dark } = useTheme();
   const [detail, setDetail] = useState(null);
@@ -244,6 +236,12 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
   const [savingUrgency, setSavingUrgency] = useState(false);
   const photoInputRef = useRef(null);
   const photoButtonRef = useRef(null);
+  // The window's two pages: 'form' (what it opens on) and 'work' (the status steps,
+  // photos, history and the rest).
+  const [view, setView] = useState('form');
+  const boxRef = useRef(null);         // the layer the window sits on (it scrolls)
+  const pageButtonRef = useRef(null);  // the button at the top that turns the page
+  const turnedRef = useRef(false);     // the page was turned (not just opened)
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
@@ -375,7 +373,7 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
       setUrgencyTo('');
       setUrgencyWhy('');
       onUpdated(res.data);
-      toast.success(`Now ${PRIORITY_LABEL[res.data.priority]}${res.data.dueAt ? `, finish by ${formatDueDate(res.data.dueAt, true)}` : ''}. The citizen gets an email and sees it when they track the report.`);
+      toast.success(`Now ${PRIORITY_LABEL[res.data.priority]}${res.data.dueAt ? `, finish by ${formatDueDate(res.data.dueAt, true)}` : ''}. The citizen sees it when they track the report.`);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Could not change the urgency');
     } finally {
@@ -420,12 +418,29 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
     }
   }
 
-  const citizenName = detail?.user?.fullName || '';
-  const email = detail?.user?.email || detail?.email || '';
-  const phone = detail?.contactNumber || '';
+  // Turns the window to the other page. It starts at the top, with the keyboard on the
+  // button that turns it back (in the same place as the one just pressed).
+  function showView(next) {
+    turnedRef.current = true;
+    setView(next);
+  }
+  useEffect(() => {
+    if (!turnedRef.current) return;
+    boxRef.current?.scrollTo({ top: 0 });
+    pageButtonRef.current?.focus({ preventScroll: true });
+  }, [view]);
+
   const currentIndex = detail ? STEP_INDEX[detail.status] : 0;
   const changing = detail && nextStatus !== detail.status;
   const noOffice = detail?.department === 'UNASSIGNED';
+  // The button to the second page, named for what staff do there. The blue one is the
+  // usual job (a complaint or suggestion to work on, or a report with no office yet).
+  const workLabel = !detail ? ''
+    : detail.status === 'SPAM' ? 'Spam: see why, or put it back'
+    : noOffice ? 'Send to the right office'
+    : detail.type !== 'FEEDBACK' ? 'Update the status'
+    : detail.csm ? 'History, or mark as spam' : 'History, move, or mark as spam';
+  const workMain = Boolean(detail) && detail.status !== 'SPAM' && (noOffice || detail.type !== 'FEEDBACK');
 
   // Moving the report to another office (for a report with no office: sending it to one).
   function moveForm({ heading, onCancel }) {
@@ -466,10 +481,18 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
     );
   }
 
+  // The window is one long sheet, as tall as the form (the user's choice, Nov 18, 2026:
+  // "Full-length window"). The layer it sits on scrolls (one scroll bar, no small scroll
+  // box inside the window) and the header with "Update the status" stays at the top. The
+  // dimmed background is a layer of its own: a blur on the scrolling layer would make the
+  // photo viewers (outside it) scroll away with it.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
+    <>
+    <div className="fixed inset-0 z-50" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }} aria-hidden="true" />
+    <div ref={boxRef} data-report-overlay className="fixed inset-0 z-50 overflow-y-auto overscroll-contain p-3 sm:p-6" onClick={onClose}>
+      <div className="min-h-full flex justify-center">
       <div role="dialog" aria-modal="true" aria-labelledby="report-window-title"
-        className="ss-card bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        className="ss-card bg-white rounded-2xl shadow-2xl max-w-2xl w-full my-auto" onClick={e => e.stopPropagation()}>
         {loading ? (
           <div className="p-6">
             <Skel className="h-3 w-40 mb-2" />
@@ -486,7 +509,7 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
         ) : (
           <>
             {/* Header */}
-            <div className="sticky top-0 bg-white border-b border-gray-100 px-5 sm:px-6 py-4 flex items-start justify-between gap-3 z-10">
+            <div className="sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 px-5 sm:px-6 py-4 flex items-start justify-between gap-3 z-10">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-1.5">
                   <span className="font-mono text-xs font-semibold text-gray-600">{detail.trackingId}</span>
@@ -504,6 +527,25 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                   {typedIn(detail) ? ` · ${CHANNEL_LABELS[detail.channel]}, typed in by ${detail.encodedByName || 'staff'}` : ''}
                   {detail.dueAt ? ` · Resolve by ${formatDueDate(detail.dueAt, true)}` : ''}
                 </p>
+                {/* The window shows only the form; this turns to the work on the report, and back */}
+                {view === 'form' ? (
+                  <button type="button" ref={pageButtonRef} onClick={() => showView('work')} data-view-work
+                    className={`mt-2.5 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                      workMain ? 'bg-blue-700 text-white hover:bg-blue-800' : 'border border-gray-300 bg-white text-gray-800 hover:bg-gray-50'}`}>
+                    {workLabel}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button type="button" ref={pageButtonRef} onClick={() => showView('form')} data-view-form
+                    className="mt-2.5 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M19 12H5M12 19l-7-7 7-7" />
+                    </svg>
+                    Back to the citizen's form
+                  </button>
+                )}
               </div>
               <button type="button" onClick={onClose} aria-label="Close"
                 className="w-9 h-9 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors flex-shrink-0">
@@ -512,102 +554,29 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
             </div>
 
             <div className="p-5 sm:p-6 space-y-6">
-              {/* No office yet: sending it on is the first job */}
-              {noOffice && <section>{moveForm({ heading: 'Send to the right office' })}</section>}
-
-              {/* Who sent it (feedback is anonymous) */}
-              {detail.type === 'FEEDBACK' ? (
-                <section>
-                  <h3 className={SECTION}>Client</h3>
-                  <p className="text-sm text-gray-700">
-                    <span className="font-semibold text-gray-800">Anonymous.</span> Feedback never shows who answered, so clients can be honest.
-                  </p>
-                </section>
-              ) : <section>
-                <h3 className={SECTION}>Citizen</h3>
-                <div className="flex items-center gap-3">
-                  <CitizenAvatar name={citizenName} />
-                  <div className="min-w-0">
-                    <p className={`text-sm font-semibold ${citizenName ? 'text-gray-800' : 'text-gray-600 italic'}`}>{citizenName || 'Anonymous'}</p>
-                    <p className="text-sm text-gray-600 flex flex-wrap gap-x-3 gap-y-0.5">
-                      {email && <a href={`mailto:${email}`} className="text-blue-700 hover:underline break-all">{email}</a>}
-                      {phone && <a href={`tel:${phone}`} className="text-blue-700 hover:underline">{phone}</a>}
-                      {!email && !phone && 'No contact details given'}
-                    </p>
-                  </div>
+              {/* Page 1: all of the citizen's form, their answers marked, and nothing else
+                  (a walk-in report: the same form, parts 1 to 3 unanswered, since staff typed
+                  it in). Since Nov 17, 2026 it shows no mobile number or email, not even the
+                  ones older reports still have saved. */}
+              {view === 'form' ? (
+              <section data-view="form">
+                <h3 className={SECTION}>The citizen's form</h3>
+                <div className="space-y-4">
+                  <FilledForm report={detail} answers={detail.csm || detail.formAnswers || null} onOpenPhoto={setLightboxIndex}>
+                    {detail.type === 'FEEDBACK' && detail.remark && (
+                      <div className="space-y-2" data-remark>
+                        <RemarkBadge remark={detail.remark} />
+                        <RemarkRule />
+                      </div>
+                    )}
+                  </FilledForm>
+                  {/* Feedback: what the office can do about the parts the client disagreed with */}
+                  {detail.csm && <LowPartActions csm={detail.csm} />}
                 </div>
-              </section>}
-
-              {/* Feedback: the client's answers to the satisfaction form (ARTA CSM) */}
-              {detail.csm && (
-                <section>
-                  <h3 className={SECTION}>Satisfaction form (ARTA CSM)</h3>
-                  <CsmAnswers csm={detail.csm} />
-                </section>
-              )}
-
-              {/* What they reported (feedback: the client's suggestions) */}
-              <section>
-                <h3 className={SECTION}>{detail.csm ? "Client's suggestions" : 'What they reported'}</h3>
-                {detail.description
-                  ? <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{detail.description}</p>
-                  : <p className="text-sm text-gray-600">No suggestions were written.</p>}
-                {detail.type === 'FEEDBACK' && detail.remark && (
-                  <div className="mt-3 space-y-2" data-remark>
-                    <RemarkBadge remark={detail.remark} />
-                    <RemarkRule />
-                  </div>
-                )}
-                {detail.type === 'FEEDBACK' && !detail.csm && (
-                  <div className="mt-3">
-                    <FeedbackRatingDisplay rating={detail.rating} reaction={detail.reaction} feedbackTags={detail.feedbackTags} />
-                  </div>
-                )}
               </section>
-
-              {/* Photos (feedback has none) */}
-              {detail.type !== 'FEEDBACK' && <section>
-                <h3 className={SECTION}>Photos {detail.media?.length > 0 && `(${detail.media.length})`}</h3>
-                {detail.media?.length > 0 ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {detail.media.map((m, i) => (
-                      <button key={m.id} type="button" onClick={() => setLightboxIndex(i)} aria-label={`Open photo ${i + 1}`}
-                        className="ss-photo relative aspect-square rounded-lg overflow-hidden border border-gray-200">
-                        <img src={mediaUrl(m.filePath)} alt="" className="w-full h-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-600">No photos were attached.</p>
-                )}
-              </section>}
-
-              {/* Where */}
-              {(detail.address || detail.location) && (
-                <section>
-                  <h3 className={SECTION}>Where</h3>
-                  {detail.address && (
-                    <p className="flex items-start gap-2 text-sm text-gray-800 mb-2">
-                      <svg className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                      </svg>
-                      {detail.address}
-                    </p>
-                  )}
-                  {detail.location && (
-                    <>
-                      <ReportMiniMap latitude={detail.location.latitude} longitude={detail.location.longitude} type={detail.type} />
-                      <a href={`https://www.google.com/maps?q=${detail.location.latitude},${detail.location.longitude}`} target="_blank" rel="noopener noreferrer"
-                        className="mt-2 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 20l-6-3V4l6 3 6-3 6 3v13l-6-3-6 3z" /><path d="M9 7v13M15 4v13" />
-                        </svg>
-                        Open in Google Maps
-                      </a>
-                    </>
-                  )}
-                </section>
-              )}
+              ) : (<div data-view="work" className="space-y-6">
+              {/* Page 2: the work on the report. No office yet: sending it on comes first. */}
+              {noOffice && <section>{moveForm({ heading: 'Send to the right office' })}</section>}
 
               {/* Marked as spam: who, why, and the way back */}
               {detail.status === 'SPAM' && (() => {
@@ -712,7 +681,7 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
               )}
 
               {/* Status steps */}
-              {detail.status !== 'SPAM' && detail.type !== 'FEEDBACK' && <section className="rounded-2xl border border-gray-200 p-4 sm:p-5">
+              {detail.status !== 'SPAM' && detail.type !== 'FEEDBACK' && <section data-status-steps className="rounded-2xl border border-gray-200 p-4 sm:p-5">
                 <h3 className="text-base font-bold text-gray-900">Update the status</h3>
                 <p className="text-sm text-gray-600 mt-0.5">Choose the step this report is at now.</p>
                 <ol className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -915,10 +884,13 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
                 )}
               </section>
               )}
+              </div>)}
             </div>
           </>
         )}
       </div>
+      </div>
+    </div>
 
       {lightboxIndex !== null && detail?.media?.length > 0 && (
         <PhotoLightbox
@@ -932,7 +904,7 @@ function ReportWindow({ id, departments, onClose, onUpdated, onMoved }) {
         <PhotoViewer photos={viewer.photos} index={viewer.index} caption={viewer.caption} alt="Photo of the work"
           onIndex={index => setViewer(v => ({ ...v, index }))} onClose={() => setViewer(null)} />
       )}
-    </div>
+    </>
   );
 }
 
@@ -1213,7 +1185,8 @@ export default function StaffSubmissions() {
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">
                       <p className={`text-sm font-semibold ${s.user?.fullName ? 'text-gray-800' : 'text-gray-600 italic'}`}>{citizenLine(s)}</p>
-                      <p className="text-xs text-gray-600">{s.type === 'FEEDBACK' ? 'Not shown' : s.user?.email || s.contactNumber || 'No contact'}</p>
+                      {/* No mobile number or email since Nov 17, 2026 (not even older ones). */}
+                      <p className="text-xs text-gray-600">{s.type === 'FEEDBACK' ? 'Not shown' : 'No contact'}</p>
                     </td>
                     <td className="px-4 py-3.5"><DeadlineBadge submission={s} showDate /></td>
                     <td className="px-4 py-3.5 whitespace-nowrap">{statusCell(s)}</td>

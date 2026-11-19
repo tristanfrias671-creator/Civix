@@ -26,7 +26,6 @@ const NAV_SECTIONS = [
       { to: '/admin/complaints', label: 'Complaints', icon: 'complaint' },
       { to: '/admin/suggestions', label: 'Suggestions', icon: 'suggestion' },
       { to: '/admin/feedback', label: 'Feedback', icon: 'feedback' },
-      { to: '/admin/map', label: 'Map View', icon: 'map' },
       { to: '/admin/analytics', label: 'Analytics', icon: 'analytics' },
     ],
   },
@@ -95,7 +94,6 @@ export default function AdminLayout() {
     };
   }, [location.pathname]);
 
-  const isMapPage = location.pathname.startsWith('/admin/map');
   const activeItem = navItems.find(i => i.to === '/admin/dashboard'
     ? location.pathname === i.to
     : location.pathname.startsWith(i.to));
@@ -258,11 +256,10 @@ export default function AdminLayout() {
           </div>
         </header>
 
-        {/* The map page fills the height; it still scrolls if the screen is too short.
-            "relative" keeps anything a page places absolutely (e.g. a hidden note for
+        {/* "relative" keeps anything a page places absolutely (e.g. a hidden note for
             screen readers) inside this scrolling panel; outside it, such an element
             made the whole window scroll, with a second scroll bar (Settings → Security). */}
-        <main className={`relative flex-1 min-h-0 overflow-y-auto ${isMapPage ? 'flex flex-col' : ''}`}>
+        <main className="relative flex-1 min-h-0 overflow-y-auto">
           <Outlet key={location.key} />
         </main>
       </div>

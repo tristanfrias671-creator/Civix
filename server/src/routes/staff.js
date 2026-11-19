@@ -6,7 +6,7 @@ const { requireRealPhotos, refuseLargeBodies } = require('../utils/uploadSafety'
 const {
   getStaff, createStaff, updateStaff, deleteStaff,
   getMyStats, getMyAlerts, getMyActivity, getMySubmissions, getMySubmissionDetail, updateMySubmission,
-  updateMyUrgency, assignSubmission, getMyMapReports,
+  updateMyUrgency, assignSubmission,
 } = require('../controllers/staff');
 const { createQueueCode, getMyQueueCodes, getMySatisfaction } = require('../controllers/feedback');
 const { createWalkInReport } = require('../controllers/submissions');
@@ -22,7 +22,7 @@ router.get('/portal/stats',             authenticate, requireStaff, getMyStats);
 router.get('/portal/alerts',            authenticate, requireStaff, getMyAlerts);
 router.get('/portal/activity',          authenticate, requireStaff, getMyActivity);
 router.get('/portal/submissions',       authenticate, requireStaff, getMySubmissions);
-router.get('/portal/map',               authenticate, requireStaff, getMyMapReports);
+// (The Office Map and its /portal/map were removed on Nov 17, 2026: maps are no longer used.)
 router.get('/portal/submission/:id',    authenticate, requireStaff, getMySubmissionDetail);
 // A status update may carry up to 5 photos of the work (multipart form); the photos
 // are saved and checked to be real pictures before the update itself is checked.

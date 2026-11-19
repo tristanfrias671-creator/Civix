@@ -3,7 +3,6 @@ import toast from 'react-hot-toast';
 import Icon from '../common/Icons';
 import api from '../../utils/api';
 import { copyText } from '../../utils/clipboard';
-import { MOBILE_DIGITS, typedMobile } from '../../utils/mobile';
 import { useAuth } from '../../context/AuthContext';
 import { officeLabel } from '../../data/officeNames';
 import { Req, RequiredNote } from '../common/RequiredMark';
@@ -34,10 +33,12 @@ const TYPE_WORD = { COMPLAINT: 'Complaint', SUGGESTION: 'Suggestion' };
 const MIN_TEXT = 20;
 const MAX_TEXT = 2000;
 
+// Since Nov 17, 2026 no mobile number or email, like the citizen's form: the citizen
+// follows the report with the slip.
 const blankForm = (department, channel = 'WALK_IN') => ({
-  channel, type: 'COMPLAINT', department, service: '', description: '', address: '', contactNumber: '', email: '',
+  channel, type: 'COMPLAINT', department, service: '', description: '', address: '',
 });
-const hasDraft = f => [f.service, f.description, f.address, f.contactNumber, f.email].some(v => v.trim());
+const hasDraft = f => [f.service, f.description, f.address].some(v => v.trim());
 
 const trackUrl = code => `${window.location.origin}/track?id=${encodeURIComponent(code)}`;
 const trackAddress = () => `${window.location.host}/track`;
@@ -104,14 +105,12 @@ export default function WalkInDialog({ open, onClose }) {
   const cardRef = useRef(null);
   const firstRef = useRef(null);
   const refs = {
-    department: useRef(null), service: useRef(null), description: useRef(null),
-    address: useRef(null), contactNumber: useRef(null), email: useRef(null),
+    department: useRef(null), service: useRef(null), description: useRef(null), address: useRef(null),
   };
   const [form, setForm] = useState(() => blankForm(own));
   const [offices, setOffices] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null); // { text, field }
-  const [mobileNote, setMobileNote] = useState(false); // a typed number didn't start with 09
   const [slip, setSlip] = useState(null); // the saved report; `again` when it was saved before
   const [qr, setQr] = useState(null); // { size, path }, or 'failed'
   const latest = useRef({ form, slip });
@@ -125,7 +124,6 @@ export default function WalkInDialog({ open, onClose }) {
     if (latest.current.slip || !hasDraft(latest.current.form)) setForm(blankForm(own));
     setSlip(null);
     setError(null);
-    setMobileNote(false);
     api.get('/settings/public')
       .then(res => active && setOffices(res.data.departments || []))
       .catch(() => active && setOffices(own ? [own] : []));
@@ -165,15 +163,6 @@ export default function WalkInDialog({ open, onClose }) {
     if (error?.field === field) setError(null);
   };
 
-  // The mobile number keeps to 09 and 9 more digits, as on the citizen's form: letters
-  // and other keys are dropped, a key that would break the 09 start is ignored (with a
-  // note under the box), and so is a 12th digit.
-  function setMobile(raw) {
-    const next = typedMobile(raw, form.contactNumber);
-    setMobileNote(next === null);
-    if (next !== null) set('contactNumber', next);
-  }
-
   function showError(text, field) {
     setError({ text, field });
     const target = refs[field]?.current;
@@ -199,16 +188,12 @@ export default function WalkInDialog({ open, onClose }) {
       showError(`Please write what the citizen said in at least ${MIN_TEXT} characters.`, 'description');
       return;
     }
-    if (form.contactNumber && form.contactNumber.length !== MOBILE_DIGITS) {
-      showError(`Please enter a valid mobile number: all ${MOBILE_DIGITS} digits, starting with 09 (e.g. 09171234567), or leave it empty.`, 'contactNumber');
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
       const res = await api.post('/staff/portal/reports', {
         channel: form.channel, type: form.type, department: form.department, description,
-        service: form.service.trim(), address: form.address.trim(), contactNumber: form.contactNumber.trim(), email: form.email.trim(),
+        service: form.service.trim(), address: form.address.trim(),
       });
       saved(res.data.report, false);
     } catch (err) {
@@ -223,7 +208,6 @@ export default function WalkInDialog({ open, onClose }) {
   function nextReport() {
     setSlip(null);
     setError(null);
-    setMobileNote(false);
     setForm(f => blankForm(own, f.channel));
     setTimeout(() => firstRef.current?.focus(), 0);
   }
@@ -348,32 +332,9 @@ export default function WalkInDialog({ open, onClose }) {
                 </datalist>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="wi-mobile" className={LABEL}>
-                    Mobile number <span className="font-normal text-gray-600">(optional)</span>
-                  </label>
-                  <input id="wi-mobile" ref={refs.contactNumber} type="tel" inputMode="numeric" value={form.contactNumber}
-                    autoComplete="off" onChange={e => setMobile(e.target.value)} placeholder="09XX XXX XXXX"
-                    aria-invalid={error?.field === 'contactNumber' || undefined} aria-describedby="wi-mobile-note"
-                    className={`${INPUT}${invalid('contactNumber')}`} />
-                  <p id="wi-mobile-note" aria-live="polite" className={mobileNote ? 'text-xs text-red-700 mt-1' : 'sr-only'}>
-                    {mobileNote ? 'Mobile numbers start with 09.' : ''}
-                  </p>
-                </div>
-                <div>
-                  <label htmlFor="wi-email" className={LABEL}>
-                    Email <span className="font-normal text-gray-600">(optional)</span>
-                  </label>
-                  <input id="wi-email" ref={refs.email} type="email" value={form.email} maxLength={191}
-                    autoComplete="off" onChange={e => set('email', e.target.value)} placeholder="name@gmail.com"
-                    aria-invalid={error?.field === 'email' || undefined}
-                    className={`${INPUT}${invalid('email')}`} />
-                </div>
-              </div>
               <p className="text-xs text-gray-600 -mt-2">
-                With these, the office can reach the citizen, and CIVIX sends them the updates. Without them, the citizen
-                follows the report with the slip.
+                CIVIX does not ask for the citizen's mobile number or email. Give them the slip: they follow the report with
+                its Transaction Code or QR code on Track My Report.
               </p>
 
               {error && <p role="alert" className="text-sm font-medium text-red-700">{error.text}</p>}

@@ -20,25 +20,22 @@ const NOT_SPAM = { status: { not: 'SPAM' } };
 const CASES = { type: { not: 'FEEDBACK' }, ...NOT_SPAM };
 
 // ── Color constants (PDFKit accepts hex strings only — NO rgba()) ─────────────
-const BRAND      = '#1D4ED8';
-const BRAND_DARK = '#1e3a8a';
-const TEXT_DARK  = '#0f172a';
-const TEXT_MID   = '#475569';
-const TEXT_LIGHT = '#94a3b8';
-const DIVIDER    = '#e2e8f0';
-const ROW_ALT    = '#f8fafc';
-const ROW_HEAD   = '#1e3a8a';
+// The PDF reads as a formal government report: black text, gray rules and
+// shading, and color only inside the charts.
+const BRAND      = '#1D4ED8'; // the trend line
+const TEXT_DARK  = '#111827';
+const TEXT_MID   = '#374151'; // notes and captions
+const TEXT_LIGHT = '#4b5563'; // axis labels, page headers and footers (7.6:1 on white)
+const RULE       = '#374151'; // table borders and section boxes
+const GRID       = '#9ca3af'; // lines inside tables
+const DIVIDER    = '#d1d5db'; // chart grid lines
+const SHADE      = '#e5e7eb'; // section titles and label cells
+const HEAD_FILL  = '#f3f4f6'; // table header rows, group rows and totals
 
 const TYPE_COLORS = {
-  COMPLAINT:  { bar: '#ef4444', light: '#fee2e2', text: '#991b1b' },
-  SUGGESTION: { bar: '#3b82f6', light: '#dbeafe', text: '#1e40af' },
-  FEEDBACK:   { bar: '#22c55e', light: '#dcfce7', text: '#166534' },
-};
-const STATUS_COLORS = {
-  PENDING:     { bar: '#6B7280', light: '#f3f4f6', text: '#374151' },
-  REVIEWING:   { bar: '#1D4ED8', light: '#dbeafe', text: '#1e40af' },
-  IN_PROGRESS: { bar: '#CA8A04', light: '#fef9c3', text: '#854d0e' },
-  RESOLVED:    { bar: '#16A34A', light: '#dcfce7', text: '#166534' },
+  COMPLAINT:  { bar: '#DC2626' },
+  SUGGESTION: { bar: '#2563EB' },
+  FEEDBACK:   { bar: '#16A34A' },
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -72,10 +69,10 @@ function pageFooter(doc, pageNum, pageCount, reportId, verifyCode) {
   // phantom page, so the bottom margin is zeroed for the duration of this draw.
   const savedBottom = doc.page.margins.bottom;
   doc.page.margins.bottom = 0;
-  doc.moveTo(50, H - 48).lineTo(W - 50, H - 48).lineWidth(0.5).stroke(DIVIDER);
+  doc.moveTo(50, H - 48).lineTo(W - 50, H - 48).lineWidth(0.5).stroke(GRID);
   doc.fontSize(7).font('Helvetica').fillColor(TEXT_LIGHT)
     .text(
-      'CIVIX – Integrated Citizen Engagement Platform  |  Municipality of Cantilan, Surigao del Sur  |  Confidential',
+      'CIVIX – Integrated Citizen Engagement Platform  |  Municipality of Cantilan, Surigao del Sur  |  For Internal Use Only',
       50, H - 40, { width: W - 100, align: 'center', lineBreak: false }
     );
   // Left: traceable report ID. Center: page number. Right: verification code —
@@ -90,25 +87,36 @@ function pageFooter(doc, pageNum, pageCount, reportId, verifyCode) {
   doc.page.margins.bottom = savedBottom;
 }
 
-function sectionHead(doc, num, title, y) {
+// The report's name and period at the top of every page after the first.
+function pageHeader(doc, left, right) {
   const W = doc.page.width;
-  doc.rect(50, y, 4, 20).fill(BRAND);
-  doc.fontSize(13).font('Helvetica-Bold').fillColor(TEXT_DARK)
-    .text(`${num}.  ${title}`, 62, y + 3);
-  y += 24;
-  doc.moveTo(50, y).lineTo(W - 50, y).lineWidth(0.5).stroke(DIVIDER);
-  return y + 12;
+  const half = (W - 100) / 2;
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_LIGHT)
+    .text(left, 50, 29, { width: half + 40, lineBreak: false })
+    .text(right, 50 + half - 40, 29, { width: half + 40, align: 'right', lineBreak: false });
+  doc.moveTo(50, 41).lineTo(W - 50, 41).lineWidth(0.5).stroke(GRID);
 }
 
-function kpiCard(doc, label, value, x, y, w, h, accent) {
-  doc.rect(x, y, w, h).fill('#f0f9ff');
-  doc.rect(x, y, w, h).lineWidth(0.5).stroke('#bfdbfe');
-  doc.rect(x, y, 4, h).fill(accent);
-  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-    .text(label.toUpperCase(), x + 10, y + 9, { width: w - 14 });
-  doc.fontSize(20).font('Helvetica-Bold').fillColor(TEXT_DARK)
-    .text(String(value), x + 10, y + 23, { width: w - 14 });
+// A section title in a shaded, bordered box across the page ("1.  Title", or
+// just the title when num is null).
+function sectionHead(doc, num, title, y) {
+  const W = doc.page.width;
+  doc.rect(50, y, W - 100, 20).lineWidth(0.75).fillAndStroke(SHADE, RULE);
+  doc.fontSize(10.5).font('Helvetica-Bold').fillColor(TEXT_DARK)
+    .text(num ? `${num}.  ${title}` : title, 58, y + 5.5, { width: W - 116, lineBreak: false });
+  return y + 32;
 }
+
+// "Figure 1. ..." under a chart, centered.
+function caption(doc, text, y) {
+  const W = doc.page.width;
+  doc.fontSize(8).font('Helvetica-Oblique').fillColor(TEXT_MID)
+    .text(text, 50, y, { width: W - 100, align: 'center', lineBreak: false });
+  return y + 14;
+}
+
+// The note statistical tables carry when rounded percentages miss 100.0%.
+const ROUNDING_NOTE = 'Note: Percentages may not add up to 100.0% because of rounding.';
 
 function horizBar(doc, label, count, total, color, lightColor, y) {
   const BAR_X = 160;
@@ -154,9 +162,8 @@ function drawBarChart(doc, deptData, startY) {
   const axis = niceAxis(Math.max(...TOP.map(d => Math.max(...TYPES.map(t => d.counts[t] || 0)))));
   const maxCount = axis.top;
 
-  // Chart background
-  doc.rect(CHART_X, y, CHART_W, CHART_H).fill('#fafafa');
-  doc.rect(CHART_X, y, CHART_W, CHART_H).lineWidth(0.4).stroke(DIVIDER);
+  // Chart frame
+  doc.rect(CHART_X, y, CHART_W, CHART_H).lineWidth(0.5).stroke(GRID);
 
   // Y-axis grid lines + labels
   for (let i = 0; i <= 4; i++) {
@@ -182,10 +189,9 @@ function drawBarChart(doc, deptData, startY) {
 
       if (barH > 0) {
         doc.rect(bx, by, BAR_W - 2, barH).fill(color);
-        if (barH > 14) {
-          doc.fontSize(7).font('Helvetica-Bold').fillColor('#ffffff')
-            .text(String(cnt), bx, by + 4, { width: BAR_W - 2, align: 'center' });
-        }
+        // The count just above its bar, in dark text.
+        doc.fontSize(7).font('Helvetica-Bold').fillColor(TEXT_DARK)
+          .text(String(cnt), bx - 4, by - 9, { width: BAR_W + 6, align: 'center', lineBreak: false });
       } else {
         doc.rect(bx, C_BOT - 3, BAR_W - 2, 3).fill('#e5e7eb');
       }
@@ -207,8 +213,8 @@ function drawBarChart(doc, deptData, startY) {
     .lineWidth(0.7).stroke(TEXT_LIGHT);
 
   const noteY = C_BOT + 60;
-  doc.fontSize(7).font('Helvetica').fillColor(TEXT_LIGHT)
-    .text(`* Showing top ${TOP.length} departments by submission volume.`, CHART_X, noteY);
+  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
+    .text(`Note: Showing the top ${TOP.length} departments by number of submissions.`, CHART_X, noteY, { lineBreak: false });
 
   return noteY + 14;
 }
@@ -241,41 +247,73 @@ function drawPieChart(doc, cx, cy, r, slices) {
   });
 }
 
-function pieLegend(doc, x, y, slices, total) {
-  let ly = y;
-  slices.forEach(s => {
-    const pct = total > 0 ? ((s.value / total) * 100).toFixed(1) : '0.0';
-    doc.rect(x, ly + 1, 10, 10).fill(s.color);
-    doc.fontSize(8.5).font('Helvetica-Bold').fillColor(TEXT_DARK)
-      .text(s.label, x + 16, ly, { width: 130, lineBreak: false });
-    doc.fontSize(8).font('Helvetica').fillColor(TEXT_MID)
-      .text(`${s.value}  (${pct}%)`, x + 16, ly + 12, { width: 130, lineBreak: false });
-    ly += 32;
-  });
-  return ly;
+// The pie's legend as a small table beside it: each slice's color, count and share.
+function pieTable(doc, x, y, firstLabel, slices) {
+  const right = doc.page.width - 50;
+  const total = slices.reduce((n, s) => n + s.value, 0);
+  // Each share rounded on its own (12 of 26 is 46.2% in every table).
+  const tenths = slices.map(s => (total ? Math.round((s.value * 1000) / total) : 0));
+  const rows = [
+    ...slices.map((s, i) => ({ ...s, share: `${(tenths[i] / 10).toFixed(1)}%` })),
+    { label: 'Total', value: total, share: total ? '100.0%' : '0.0%', isTotal: true },
+  ];
+  const countX = right - 150;
+  const end = pdfTable(doc, y, [
+    { label: firstLabel, x: x + 5, width: countX - x - 5 },
+    { label: 'COUNT', x: countX, width: 70, align: 'center' },
+    { label: 'PERCENT', x: countX + 70, width: 80, align: 'center' },
+  ], rows, (row, ry) => {
+    if (row.color) doc.rect(x + 6, ry + 4.5, 8, 8).fill(row.color);
+    doc.fontSize(8).font(row.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK)
+      .text(row.label, x + (row.color ? 20 : 6), ry + 5, { width: countX - x - 26, lineBreak: false })
+      .text(String(row.value), countX, ry + 5, { width: 70, align: 'center', lineBreak: false })
+      .text(row.share, countX + 70, ry + 5, { width: 80, align: 'center', lineBreak: false });
+  }, { rowH: 17, left: x, right });
+  if (total && tenths.reduce((n, t) => n + t, 0) !== 1000) {
+    doc.fontSize(7).font('Helvetica').fillColor(TEXT_MID).text(ROUNDING_NOTE, x, end + 3, { width: right - x, lineBreak: false });
+  }
+  return end;
 }
 
-// ── A table that carries on over new pages, repeating its header row ──────────
+// ── A bordered table that carries on over new pages, repeating its header row ─
 // cols: [{ label, x, width, align }]; drawRow(row, y, i) draws one row's cells.
-// Returns the y just below the table.
-function pdfTable(doc, y, cols, rows, drawRow, { rowH = 16, headH = 18 } = {}) {
-  const W = doc.page.width;
+// Group rows (head: true) and totals (isTotal: true) are shaded; a group row has
+// no lines between its columns. Returns the y just below the table.
+function pdfTable(doc, y, cols, rows, drawRow, { rowH = 16, headH = 18, left = 50, right = doc.page.width - 50 } = {}) {
   const bottom = doc.page.height - 70;
+  // The line between two columns: halfway across the gap between them, or just
+  // left of a column whose text starts at its edge.
+  const seps = cols.slice(1).map((c, i) => {
+    const end = cols[i].x + cols[i].width;
+    if (end < c.x) return (end + c.x) / 2;
+    return c.align === 'center' || c.align === 'right' ? c.x : c.x - 3;
+  });
+  const colLines = (from, to) => {
+    doc.lineWidth(0.4).strokeColor(GRID);
+    seps.forEach(x => doc.moveTo(x, from).lineTo(x, to).stroke());
+  };
+  let top = y; // where this page's part of the table starts
+  const box = () => doc.rect(left, top, right - left, y - top).lineWidth(0.75).stroke(RULE);
   const header = () => {
-    doc.rect(50, y, W - 100, headH).fill(ROW_HEAD);
-    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff');
-    cols.forEach(c => doc.text(c.label, c.x, y + 5, { width: c.width, align: c.align || 'left', lineBreak: false }));
+    top = y;
+    doc.rect(left, y, right - left, headH).fill(HEAD_FILL);
+    colLines(y, y + headH);
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor(TEXT_DARK);
+    cols.forEach(c => doc.text(c.label, c.x, y + 5.5, { width: c.width, align: c.align || 'left', lineBreak: false }));
     y += headH;
+    doc.moveTo(left, y).lineTo(right, y).lineWidth(0.75).stroke(RULE);
   };
   if (y + headH + rowH > bottom) { doc.addPage(); y = 50; }
   header();
   rows.forEach((row, i) => {
-    if (y + rowH > bottom) { doc.addPage(); y = 50; header(); }
-    if (i % 2 === 0) doc.rect(50, y, W - 100, rowH).fill(ROW_ALT);
-    doc.rect(50, y, W - 100, rowH).lineWidth(0.3).stroke(DIVIDER);
+    if (y + rowH > bottom) { box(); doc.addPage(); y = 50; header(); }
+    if (row.head || row.isTotal) doc.rect(left, y + 0.4, right - left, rowH - 0.4).fill(HEAD_FILL);
+    if (!row.head) colLines(y, y + rowH);
+    doc.moveTo(left, y + rowH).lineTo(right, y + rowH).lineWidth(0.4).stroke(GRID);
     drawRow(row, y, i);
     y += rowH;
   });
+  box();
   return y;
 }
 
@@ -287,8 +325,7 @@ function drawLineChart(doc, data, x, y, w, h) {
   const stepX = n > 1 ? w / (n - 1) : 0;
   const pts = data.map((m, i) => ({ x: x + i * stepX, y: y + h - (m.total / maxVal) * h }));
 
-  doc.rect(x, y, w, h).fill('#fafafa');
-  doc.rect(x, y, w, h).lineWidth(0.4).stroke(DIVIDER);
+  doc.rect(x, y, w, h).lineWidth(0.5).stroke(GRID);
 
   for (let i = 0; i <= 4; i++) {
     const val = axis.step * i;
@@ -339,9 +376,9 @@ const RATING_COLORS = {
   Poor:                { light: '#fee2e2', text: '#991b1b' },
 };
 const pctText = value => (value == null ? '—' : `${value.toFixed(1)}%`);
-const SCORE_NOTE = 'A score is the share of Agree and Strongly agree among the answers that are not N/A. The overall score ' +
-  'covers SQD1–SQD8 together; SQD0 (overall satisfaction) is shown on its own. Ratings (ARTA): 95% and up Outstanding, ' +
-  '90–94.9% Very Satisfactory, 80–89.9% Satisfactory, 60–79.9% Fair, below 60% Poor.';
+const SCORE_NOTE = 'A score is the percentage of Agree and Strongly agree answers, not counting N/A. The overall score ' +
+  'covers SQD1 to SQD8 together; SQD0 (overall satisfaction) is reported separately. ARTA rating scale: Outstanding, 95% and above; ' +
+  'Very Satisfactory, 90% to 94.9%; Satisfactory, 80% to 89.9%; Fair, 60% to 79.9%; Poor, below 60%.';
 const CODES_NOTE = "Each client gets a code on a slip from the office (New client), and one code opens one satisfaction form for 7 days, so each code is one transaction. RESPONSE RATE: the share of the codes given that were used to answer the form. Ratings of resolved complaints and suggestions use their Transaction Code instead and are not counted here.";
 const SQD_SHORT = { sqd0: 'Overall satisfaction', ...Object.fromEntries(SQD.slice(1).map(key => [key, SQD_STATEMENTS[key].dimension])) };
 
@@ -375,22 +412,19 @@ function clientRows(result) {
   ];
 }
 
-// A small title inside a section, on a new page when too little room is left.
+// A numbered title inside a section ("6.1  Results by office"), on a new page
+// when too little room is left.
 function subHead(doc, title, y, room = 90) {
   if (y + room > doc.page.height - 70) { doc.addPage(); y = 50; }
-  doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text(title, 50, y, { width: doc.page.width - 100 });
-  return y + 17;
+  doc.fontSize(9.5).font('Helvetica-Bold').fillColor(TEXT_DARK).text(title, 50, y, { width: doc.page.width - 100 });
+  return y + 16;
 }
 
-// A rating as a colored tag, centered in its cell ("—" when there is no score).
+// A rating in bold, centered in its cell ("—" when there is no score).
 function ratingTag(doc, rating, x, y, width) {
-  const c = RATING_COLORS[rating];
-  if (!c) {
-    doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID).text(rating || '—', x, y + 2, { width, align: 'center', lineBreak: false });
-    return;
-  }
-  doc.rect(x + 4, y, width - 8, 12).fill(c.light);
-  doc.fontSize(7).font('Helvetica-Bold').fillColor(c.text).text(rating, x, y + 3, { width, align: 'center', lineBreak: false });
+  const known = Boolean(RATING_COLORS[rating]);
+  doc.fontSize(7.5).font(known ? 'Helvetica-Bold' : 'Helvetica').fillColor(known ? TEXT_DARK : TEXT_MID)
+    .text(rating || '—', x, y + 2, { width, align: 'center', lineBreak: false });
 }
 
 // Rows with a count and its share of `whole`; head rows name the group below them.
@@ -414,10 +448,10 @@ function shareTable(doc, y, firstLabel, rows, whole) {
 
 // The codes each office gave its clients (New client) in the time, with how many
 // were used to answer the form: the clients served and the response rate.
-function drawCodes(doc, s, y) {
+function drawCodes(doc, s, y, head) {
   const W = doc.page.width;
   const rows = [...s.offices, { department: 'All offices', ...s.all, isTotal: true }];
-  y = subHead(doc, 'Codes given to clients and response rate, by office', y);
+  y = head('Codes given to clients and response rate, by office', y);
   y = pdfTable(doc, y, [
     { label: 'OFFICE',        x: 55,  width: 170 },
     { label: 'CODES GIVEN',   x: 225, width: 65, align: 'center' },
@@ -443,9 +477,9 @@ function drawCodes(doc, s, y) {
 const REMARKS_NOTE = 'A remark is what a client wrote in the last box of the form, sorted from its words (English, Filipino or Bisaya): '
   + 'a complaint names a problem, a suggestion asks for a change, and a comment is any other remark, such as thanks. '
   + 'A remark is not a complaint report and has no deadline.';
-function drawRemarks(doc, s, officeRows, y) {
+function drawRemarks(doc, s, officeRows, y, head) {
   const W = doc.page.width;
-  y = subHead(doc, "Clients' remarks: comments, complaints and suggestions", y);
+  y = head("Clients' remarks: comments, complaints and suggestions", y);
   const r = s.all.remarks;
   const labelRows = [
     ...REMARKS.map(kind => ({ label: REMARK_PLURAL[kind], ...r[kind] })),
@@ -484,14 +518,14 @@ function drawRemarks(doc, s, officeRows, y) {
   return doc.y + 16;
 }
 
-// What to improve: each office's parts of the service under 80% (below
+// Areas for improvement: each office's parts of the service under 80% (below
 // Satisfactory), the lowest first, with the suggested actions (utils/csmActions.js).
 const ACTIONS_NOTE = "Suggested actions for each office's action plan, based on the Citizen's Charter and RA 11032 (Ease of Doing Business); each office decides its own.";
-const ALL_SATISFACTORY = "Every part of each office's service is Satisfactory (80%) or better.";
-function drawImprove(doc, s, y) {
+const ALL_SATISFACTORY = "All parts of each office's service are rated Satisfactory (80%) or higher.";
+function drawImprove(doc, s, y, head) {
   const W = doc.page.width;
   const bottom = () => doc.page.height - 70;
-  y = subHead(doc, 'What to improve: parts under 80% (below Satisfactory), by office', y);
+  y = head('Areas for improvement: parts under 80% (below Satisfactory), by office', y);
   const offices = s.offices.map(o => ({ o, low: lowParts(o) })).filter(x => x.low.length);
   if (!offices.length) {
     doc.fontSize(8).font('Helvetica').fillColor(TEXT_MID).text(ALL_SATISFACTORY, 50, y, { width: W - 100 });
@@ -521,8 +555,11 @@ function drawImprove(doc, s, y) {
   return doc.y + 16;
 }
 
-function drawSatisfaction(doc, period, s, y) {
+function drawSatisfaction(doc, period, s, y, num) {
   const W = doc.page.width;
+  // Numbered subsections: 6.1, 6.2, ...
+  let n = 0;
+  const head = (title, at, room) => subHead(doc, `${num}.${++n}  ${title}`, at, room);
   const filed = period.kind === 'all' ? '' : ` sent ${period.rangeFull}`;
   doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
     .text(`Answers to the ARTA Client Satisfaction Measurement (CSM) form${filed}. A client rates one office's service with ` +
@@ -533,42 +570,42 @@ function drawSatisfaction(doc, period, s, y) {
     doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK)
       .text(period.kind === 'all' ? 'No client has answered the satisfaction form yet.' : `No client answered the satisfaction form in this ${period.word}.`, 50, y);
     y = doc.y + 14;
-    return s.all.codes.given ? drawCodes(doc, s, y) : y - 4;
+    return s.all.codes.given ? drawCodes(doc, s, y, head) : y - 4;
   }
 
   // Each office (the offices on the Settings list, even with no answers), then all of them.
   const officeRows = [...s.offices, { department: 'All offices', ...s.all, isTotal: true }];
-  y = subHead(doc, 'Results by office', y);
+  y = head('Results by office', y);
   y = pdfTable(doc, y, [
-    { label: 'OFFICE',   x: 55,  width: 135 },
-    { label: 'ANSWERS',  x: 190, width: 45, align: 'center' },
-    { label: 'OVERALL',  x: 235, width: 60, align: 'center' },
-    { label: 'RATING',   x: 295, width: 85, align: 'center' },
-    { label: 'SQD0',     x: 380, width: 45, align: 'center' },
-    { label: 'POSITIVE', x: 425, width: 40, align: 'center' },
-    { label: 'NEUTRAL',  x: 465, width: 40, align: 'center' },
-    { label: 'NEGATIVE', x: 505, width: 40, align: 'center' },
+    { label: 'OFFICE',   x: 55,  width: 125 },
+    { label: 'ANSWERS',  x: 180, width: 47, align: 'center' },
+    { label: 'OVERALL',  x: 227, width: 52, align: 'center' },
+    { label: 'RATING',   x: 279, width: 80, align: 'center' },
+    { label: 'SQD0',     x: 359, width: 42, align: 'center' },
+    { label: 'POSITIVE', x: 401, width: 48, align: 'center' },
+    { label: 'NEUTRAL',  x: 449, width: 48, align: 'center' },
+    { label: 'NEGATIVE', x: 497, width: 48, align: 'center' },
   ], officeRows, (o, ry) => {
     doc.fontSize(7.5).font(o.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK);
-    doc.text(fitText(doc, o.department, 130), 55, ry + 6, { width: 135, lineBreak: false })
-      .text(String(o.responses), 190, ry + 6, { width: 45, align: 'center', lineBreak: false })
-      .text(pctText(o.overall), 235, ry + 6, { width: 60, align: 'center', lineBreak: false })
-      .text(pctText(o.sqd.sqd0.score), 380, ry + 6, { width: 45, align: 'center', lineBreak: false })
-      .text(String(o.sentiment.POSITIVE), 425, ry + 6, { width: 40, align: 'center', lineBreak: false })
-      .text(String(o.sentiment.NEUTRAL), 465, ry + 6, { width: 40, align: 'center', lineBreak: false })
-      .text(String(o.sentiment.NEGATIVE), 505, ry + 6, { width: 40, align: 'center', lineBreak: false });
-    ratingTag(doc, o.responses ? o.rating : 'No answers', 295, ry + 4, 85);
+    doc.text(fitText(doc, o.department, 120), 55, ry + 6, { width: 125, lineBreak: false })
+      .text(String(o.responses), 180, ry + 6, { width: 47, align: 'center', lineBreak: false })
+      .text(pctText(o.overall), 227, ry + 6, { width: 52, align: 'center', lineBreak: false })
+      .text(pctText(o.sqd.sqd0.score), 359, ry + 6, { width: 42, align: 'center', lineBreak: false })
+      .text(String(o.sentiment.POSITIVE), 401, ry + 6, { width: 48, align: 'center', lineBreak: false })
+      .text(String(o.sentiment.NEUTRAL), 449, ry + 6, { width: 48, align: 'center', lineBreak: false })
+      .text(String(o.sentiment.NEGATIVE), 497, ry + 6, { width: 48, align: 'center', lineBreak: false });
+    ratingTag(doc, o.responses ? o.rating : 'No answers', 279, ry + 4, 80);
   }, { rowH: 20 });
   doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
     .text('OVERALL: the overall score (SQD1–SQD8). SQD0: satisfied with the service. POSITIVE / NEUTRAL / NEGATIVE: the label of each answered form, from its SQD0 answer (or the average of SQD1–SQD8 when SQD0 is N/A).',
       50, y + 5, { width: W - 100 });
   y = doc.y + 16;
 
-  y = drawRemarks(doc, s, officeRows, y);
-  y = drawCodes(doc, s, y);
+  y = drawRemarks(doc, s, officeRows, y, head);
+  y = drawCodes(doc, s, y, head);
 
   // The score of each statement, office by office.
-  y = subHead(doc, 'Score of each part of the service, by office', y);
+  y = head('Score of each part of the service, by office', y);
   y = pdfTable(doc, y, [
     { label: 'OFFICE', x: 55, width: 120 },
     ...SQD.map((key, i) => ({ label: key.toUpperCase(), x: 175 + i * 40, width: 40, align: 'center' })),
@@ -581,10 +618,10 @@ function drawSatisfaction(doc, period, s, y) {
     .text(SQD.map(key => `${key.toUpperCase()} ${SQD_SHORT[key]}`).join('  ·  '), 50, y + 5, { width: W - 100 });
   y = doc.y + 16;
 
-  y = drawImprove(doc, s, y);
+  y = drawImprove(doc, s, y, head);
 
   // ARTA's table: how many gave each answer to each statement.
-  y = subHead(doc, 'Answers to each statement, all offices', y);
+  y = head('Answers to each statement, all offices', y);
   const statementRows = [
     ...SQD.map(key => ({ label: `${key.toUpperCase()} ${SQD_SHORT[key]}`, counts: s.all.sqd[key].counts, total: s.all.responses, score: s.all.sqd[key].score })),
     { label: 'Overall (SQD1–SQD8)', ...overallCounts(s.all), isTotal: true },
@@ -611,11 +648,11 @@ function drawSatisfaction(doc, period, s, y) {
   y += 16;
 
   // The Citizen's Charter.
-  y = subHead(doc, "Citizen's Charter, all offices", y, 120);
+  y = head("Citizen's Charter, all offices", y, 120);
   const cc = s.all.charter;
   doc.fontSize(8).font('Helvetica').fillColor(TEXT_MID)
-    .text(`Know what a Citizen's Charter is: ${pctText(cc.aware)}   ·   Saw this office's Charter: ${pctText(cc.sawCharter)}   ·   ` +
-      `Easy to see: ${pctText(cc.easyToSee)}   ·   It helped: ${pctText(cc.helped)}  (the last two of those who did not answer N/A)`,
+    .text(`Aware of the Citizen's Charter: ${pctText(cc.aware)}   ·   Saw this office's Charter: ${pctText(cc.sawCharter)}   ·   ` +
+      `Found it easy to see: ${pctText(cc.easyToSee)}   ·   Found it helpful: ${pctText(cc.helped)}  (the last two exclude N/A answers)`,
     50, y, { width: W - 100 });
   y = doc.y + 8;
   y = shareTable(doc, y, 'QUESTION AND ANSWER', charterRows(s.all), s.all.responses) + 16;
@@ -623,7 +660,7 @@ function drawSatisfaction(doc, period, s, y) {
   // The services rated, when the slips named them.
   if (s.services.length) {
     const shown = s.services.slice(0, 15);
-    y = subHead(doc, 'Services rated', y);
+    y = head('Services rated', y);
     y = pdfTable(doc, y, [
       { label: 'OFFICE',  x: 55,  width: 140 },
       { label: 'SERVICE', x: 195, width: 170 },
@@ -646,8 +683,8 @@ function drawSatisfaction(doc, period, s, y) {
     y += 16;
   }
 
-  // Who answered.
-  y = subHead(doc, 'Who answered, all offices', y, 120);
+  // The respondents: client type, sex and age group.
+  y = head('Respondents, all offices', y, 120);
   return shareTable(doc, y, 'CLIENT', clientRows(s.all), s.all.responses) + 10;
 }
 
@@ -824,15 +861,20 @@ async function generatePDF(req, res) {
   if (!period) return;
   let data;
   let seal;
+  let preparer;
   try {
-    [data, seal] = await Promise.all([
+    [data, seal, preparer] = await Promise.all([
       gatherReport(period),
       ensureSettings().then(s => loadSealImage(s.sealUrl)).catch(() => null),
+      // The administrator who downloads the report signs it as "Prepared by"
+      // (the name on their profile now, not the one at sign-in).
+      prisma.user.findUnique({ where: { id: req.user.id }, select: { fullName: true } }).catch(() => null),
     ]);
   } catch (err) {
     console.error('PDF report data error:', err);
     return res.status(500).json({ error: 'Failed to generate report' });
   }
+  const preparedBy = (preparer?.fullName || req.user.fullName || '').trim();
 
   // Pages are kept until the end, so the footers can say "Page 2 of 6" and the
   // table of contents can give the page each section landed on.
@@ -841,14 +883,14 @@ async function generatePDF(req, res) {
   res.setHeader('Content-Disposition', `attachment; filename="${reportFileName(period, 'pdf')}"`);
   doc.pipe(res);
   try {
-    drawPdfReport(doc, period, data, seal);
+    drawPdfReport(doc, period, data, seal, preparedBy);
   } catch (err) {
     console.error('PDF generation error:', err);
   }
   doc.end();
 }
 
-function drawPdfReport(doc, period, d, seal) {
+function drawPdfReport(doc, period, d, seal, preparedBy) {
   const W = doc.page.width;
   const H = doc.page.height;
   const isAll = period.kind === 'all';
@@ -869,58 +911,47 @@ function drawPdfReport(doc, period, d, seal) {
   const verifyCode = `${verifyHash.slice(0, 4)}-${verifyHash.slice(4, 8)}-${verifyHash.slice(8, 12)}`;
 
   // ══════════════════════════════════════════════════════════════════════
-  // PAGE 1 — COVER
+  // PAGE 1 — Letterhead, title, document information, summary and contents
   // ══════════════════════════════════════════════════════════════════════
-  doc.rect(0, 0, W, 190).fill(BRAND_DARK);
-  doc.rect(0, 188, W, 6).fill(BRAND);
-  doc.rect(0, 194, W, 3).fill('#93c5fd');
+  const centered = (text, y, size, font, color = TEXT_DARK) => doc.fontSize(size).font(font).fillColor(color)
+    .text(text, 50, y, { width: W - 100, align: 'center', lineBreak: false });
 
-  // Header text (solid white — no rgba)
-  doc.fillColor('#c7d2fe').fontSize(9).font('Helvetica')
-    .text('REPUBLIC OF THE PHILIPPINES', 0, 40, { align: 'center', width: W, lineBreak: false });
-  doc.fillColor('#e0e7ff').fontSize(11).font('Helvetica-Bold')
-    .text('MUNICIPALITY OF CANTILAN, SURIGAO DEL SUR', 0, 56, { align: 'center', width: W, lineBreak: false });
+  // Letterhead: the municipal seal at the left, the government lines centered.
+  if (seal) doc.image(seal.buffer, 56, 34, { fit: [64, 64], align: 'center', valign: 'center' });
+  centered('Republic of the Philippines', 40, 10, 'Times-Roman');
+  centered('Province of Surigao del Sur', 53, 10, 'Times-Roman');
+  centered('MUNICIPALITY OF CANTILAN', 67, 14, 'Times-Bold');
+  centered('CIVIX – Integrated Citizen Engagement Platform', 86, 9.5, 'Times-Italic', TEXT_MID);
+  doc.moveTo(50, 106).lineTo(W - 50, 106).lineWidth(1.6).stroke(TEXT_DARK);
+  doc.moveTo(50, 109.5).lineTo(W - 50, 109.5).lineWidth(0.5).stroke(TEXT_DARK);
 
-  // Title, paired with the municipal seal as one centered group (widths computed
-  // precisely via widthOfString so the seal can never collide with the text).
-  const titleText = `CIVIX ${period.title}`;
-  doc.font('Helvetica-Bold').fontSize(25);
-  const titleWidth = doc.widthOfString(titleText);
-  const SEAL_SIZE = 46;
-  const SEAL_GAP = 14;
-  const groupWidth = (seal ? SEAL_SIZE + SEAL_GAP : 0) + titleWidth;
-  const groupX = (W - groupWidth) / 2;
-  const titleY = 100;
-  if (seal) {
-    doc.image(seal.buffer, groupX, titleY + (25 - SEAL_SIZE) / 2 + 4, { fit: [SEAL_SIZE, SEAL_SIZE], align: 'center', valign: 'center' });
-  }
-  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(25)
-    .text(titleText, groupX + (seal ? SEAL_SIZE + SEAL_GAP : 0), titleY, { lineBreak: false });
+  // The report's title and the period it covers.
+  centered(`CIVIX ${period.title}`.toUpperCase(), 126, 17, 'Times-Bold');
+  centered('Citizen Complaints, Suggestions and Client Satisfaction', 148, 11, 'Times-Italic', TEXT_MID);
+  centered(isAll ? `All recorded submissions as of ${genDate}` : `For the period ${period.rangeFull}`, 166, 9.5, 'Helvetica');
 
-  doc.fillColor('#bfdbfe').fontSize(11).font('Helvetica')
-    .text('Integrated Citizen Engagement Platform', 0, 140, { align: 'center', width: W, lineBreak: false });
-  doc.fillColor('#93c5fd').fontSize(8.5).font('Helvetica')
-    .text(isAll ? `Generated: ${genDate}` : `Reporting period: ${period.range}   |   Generated: ${genDate}`, 0, 162, { align: 'center', width: W });
-
-  // Meta info box
-  const bx = 100; const by = 218; const bw = W - 200; const bh = 152;
-  doc.rect(bx, by, bw, bh).fill('#f0f9ff');
-  doc.rect(bx, by, bw, bh).lineWidth(0.6).stroke('#bfdbfe');
-  doc.rect(bx, by, 4, bh).fill(BRAND);
-  const meta = [
+  // Document information, as a bordered form: shaded labels at the left.
+  const info = [
     ['Report Date',       genDate],
     ['Reporting Period',  period.rangeFull],
-    ['Prepared By',       'CIVIX System — Auto-Generated'],
+    ['Prepared By',       preparedBy ? `${preparedBy}, System Administrator` : 'System Administrator'],
     ['Classification',    'For Internal Use Only'],
     ['Report ID',         reportId],
     ['Verification Code', verifyCode],
   ];
-  let my = by + 12;
-  for (const [lbl, val] of meta) {
-    doc.fontSize(8.5).font('Helvetica-Bold').fillColor(TEXT_MID).text(lbl + ':', bx + 14, my);
-    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_DARK).text(val, bx + 140, my);
-    my += 22;
-  }
+  const INFO_TOP = 192;
+  const LABEL_W = 130;
+  const INFO_ROW = 18;
+  info.forEach(([label, value], i) => {
+    const ry = INFO_TOP + i * INFO_ROW;
+    doc.rect(50, ry, LABEL_W, INFO_ROW).fill(SHADE);
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor(TEXT_DARK).text(label, 58, ry + 5, { width: LABEL_W - 12, lineBreak: false });
+    doc.font('Helvetica').text(fitText(doc, value, W - 118 - LABEL_W), 59 + LABEL_W, ry + 5, { lineBreak: false });
+    if (i) doc.moveTo(50, ry).lineTo(W - 50, ry).lineWidth(0.4).stroke(GRID);
+  });
+  const infoBottom = INFO_TOP + info.length * INFO_ROW;
+  doc.moveTo(50 + LABEL_W, INFO_TOP).lineTo(50 + LABEL_W, infoBottom).lineWidth(0.4).stroke(GRID);
+  doc.rect(50, INFO_TOP, W - 100, infoBottom - INFO_TOP).lineWidth(0.75).stroke(RULE);
 
   // Executive Summary
   const rated = d.satisfaction.all;
@@ -945,16 +976,13 @@ function drawPdfReport(doc, period, d, seal) {
       `resolution time is ${d.avgDays} day(s); statuses are as of ${genDate}. Feedback is the satisfaction form: it rates ` +
       `one office's service and has no status steps or deadline. ${satisfactionText}` +
       `This document is intended for review by municipal officials and designated department heads.`;
-  doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Executive Summary', 50, 394);
-  doc.moveTo(50, 410).lineTo(W - 50, 410).lineWidth(0.5).stroke(DIVIDER);
-  doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID);
-  const summaryH = doc.heightOfString(summaryText, { width: W - 100, lineGap: 4 });
-  doc.text(summaryText, 50, 422, { width: W - 100, lineGap: 4, align: 'justify' });
+  let cy = sectionHead(doc, null, 'Executive Summary', infoBottom + 18);
+  doc.fontSize(9).font('Helvetica').fillColor(TEXT_DARK)
+    .text(summaryText, 50, cy, { width: W - 100, lineGap: 3, align: 'justify' });
+  cy = doc.y + 18;
 
-  // Table of Contents (page numbers are filled in at the end)
-  const tocTop = Math.max(532, 422 + summaryH + 16);
-  doc.fontSize(10).font('Helvetica-Bold').fillColor(TEXT_DARK).text('Table of Contents', 50, tocTop);
-  doc.moveTo(50, tocTop + 16).lineTo(W - 50, tocTop + 16).lineWidth(0.5).stroke(DIVIDER);
+  // Table of Contents, with dot leaders (page numbers are filled in at the end)
+  cy = sectionHead(doc, null, 'Table of Contents', cy);
   const toc = [
     [1, 'Key Performance Indicators'],
     [2, 'Submission Type Distribution'],
@@ -965,27 +993,14 @@ function drawPdfReport(doc, period, d, seal) {
     [7, logTitle],
   ];
   const tocRowY = {};
-  let ty = tocTop + 27;
   for (const [num, title] of toc) {
-    doc.fontSize(9).font('Helvetica').fillColor(TEXT_MID)
-      .text(`${num}.  ${title}`, 60, ty, { width: W - 160 });
-    doc.moveTo(60, ty + 12).lineTo(W - 100, ty + 12)
-      .lineWidth(0.3).dash(1, { space: 3 }).stroke(DIVIDER);
-    doc.undash();
-    tocRowY[num] = ty;
-    ty += 22;
-  }
-
-  // Cover footer (drawn inside the bottom margin band — see pageFooter() for why
-  // the margin must be zeroed here too, or PDFKit silently inserts a phantom page)
-  doc.rect(0, H - 46, W, 46).fill(BRAND_DARK);
-  {
-    const savedBottom = doc.page.margins.bottom;
-    doc.page.margins.bottom = 0;
-    doc.fontSize(7.5).font('Helvetica').fillColor('#93c5fd')
-      .text('CIVIX – Integrated Citizen Engagement Platform  |  Municipality of Cantilan, Surigao del Sur',
-        0, H - 26, { align: 'center', width: W, lineBreak: false });
-    doc.page.margins.bottom = savedBottom;
+    const label = `${num}.  ${title}`;
+    doc.fontSize(9.5).font('Helvetica').fillColor(TEXT_DARK).text(label, 58, cy, { lineBreak: false });
+    doc.moveTo(58 + doc.widthOfString(label) + 6, cy + 8.5).lineTo(W - 80, cy + 8.5)
+      .lineWidth(0.9).lineCap('round').dash(0.1, { space: 2.8 }).stroke(TEXT_LIGHT);
+    doc.undash().lineCap('butt');
+    tocRowY[num] = cy;
+    cy += 19;
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -995,77 +1010,72 @@ function drawPdfReport(doc, period, d, seal) {
   let y = 50;
   sectionPage[1] = sectionPage[2] = sectionPage[3] = pageNo();
 
-  // Section 1 — KPIs
+  // Section 1 — KPIs, as a table: each figure with what it counts.
   y = sectionHead(doc, 1, 'Key Performance Indicators', y);
-  if (!isAll) {
-    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
-      .text(`Reports filed ${period.rangeFull}. Statuses as of ${genDate}.`, 50, y, { width: W - 100 });
-    y += 18;
-  }
-
-  const CARD_W = (W - 100 - 21) / 4;
-  const CARD_H = 60;
-  [
-    ['Total Submissions', d.total,      BRAND,     ],
-    ['Resolved',          d.resolved,   '#15803d'  ],
-    ['In Progress',       d.inProgress, '#b45309'  ],
-    ['Pending',           d.pending,    '#6B7280'  ],
-  ].forEach(([lbl, val, acc], i) => {
-    kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
+  doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
+    .text(`${isAll ? 'All recorded submissions' : `Submissions filed ${period.rangeFull}`}. Statuses are as of ${genDate}.`, 50, y, { width: W - 100 });
+  y += 16;
+  const kpis = [
+    { head: true, label: 'Submissions' },
+    { label: 'Total submissions', value: d.total, note: 'Complaints, suggestions and feedback' },
+    { label: 'Feedback', value: d.feedbacks, note: 'Satisfaction forms (no status steps or deadline)' },
+    { head: true, label: 'Complaints and suggestions, by status' },
+    { label: 'Pending', value: d.pending, note: 'Not yet acted on by the office' },
+    { label: 'Reviewing', value: d.reviewing, note: 'Under review by the office' },
+    { label: 'In Progress', value: d.inProgress, note: 'Being acted on by the office' },
+    { label: 'Resolved', value: d.resolved, note: 'Action completed' },
+    { label: 'Response rate', value: `${d.responseRate}%`, note: 'Percentage no longer pending' },
+    { label: 'Average resolution time', value: `${d.avgDays} days`, note: 'From filing to resolution' },
+    // How urgent they were (set by the AI from a complaint's description, or changed
+    // by the office), and whether the urgent ones were resolved on time.
+    { head: true, label: 'Complaints and suggestions, by urgency' },
+    { label: PRIORITY_LABELS.URGENT, value: d.urgent, note: 'Shortest deadline' },
+    { label: PRIORITY_LABELS.STANDARD, value: d.normal, note: 'Standard deadline' },
+    { label: PRIORITY_LABELS.LOW, value: d.canWait, note: 'Longest deadline' },
+    { label: 'Urgent, resolved on time', value: d.urgentResolved ? `${d.urgentOnTime} of ${d.urgentResolved}` : '—', note: 'Resolved by their resolve-by date' },
+  ];
+  y = pdfTable(doc, y, [
+    { label: 'INDICATOR', x: 55, width: 185 },
+    { label: 'VALUE', x: 240, width: 80, align: 'center' },
+    { label: 'DESCRIPTION', x: 329, width: 211 },
+  ], kpis, (k, ry) => {
+    doc.fontSize(8).font('Helvetica-Bold').fillColor(TEXT_DARK);
+    if (k.head) {
+      doc.text(k.label, 55, ry + 4.5, { width: 480, lineBreak: false });
+      return;
+    }
+    doc.text(String(k.value), 240, ry + 4.5, { width: 80, align: 'center', lineBreak: false });
+    doc.font('Helvetica').text(k.label, 65, ry + 4.5, { width: 170, lineBreak: false });
+    doc.fillColor(TEXT_MID).text(fitText(doc, k.note, 205), 329, ry + 4.5, { width: 211, lineBreak: false });
   });
-  y += CARD_H + 8;
-
-  [
-    ['Reviewing',        d.reviewing,            '#1d4ed8'],
-    ['Response Rate',    `${d.responseRate}%`,   '#7c3aed'],
-    ['Avg. Resolution',  `${d.avgDays} days`,    '#0369a1'],
-    ['Feedbacks',        d.feedbacks,            '#059669'],
-  ].forEach(([lbl, val, acc], i) => {
-    kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
-  });
-  y += CARD_H + 8;
-
-  // How urgent the complaints and suggestions were (set by the AI from a complaint's
-  // description, or changed by the office), and whether the urgent ones were resolved on time.
-  [
-    ['Urgent',           d.urgent,               '#b91c1c'],
-    ['Normal',           d.normal,               '#1d4ed8'],
-    ['Can Wait',         d.canWait,              '#475569'],
-    ['Urgent On Time',   d.urgentResolved ? `${d.urgentOnTime} of ${d.urgentResolved}` : '—', '#15803d'],
-  ].forEach(([lbl, val, acc], i) => {
-    kpiCard(doc, lbl, val, 50 + i * (CARD_W + 7), y, CARD_W, CARD_H, acc);
-  });
-  y += CARD_H + 6;
   doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-    .text('Urgency covers complaints and suggestions. "Urgent On Time": urgent reports resolved by their resolve-by date, out of all urgent reports resolved.',
-      50, y, { width: W - 100 });
-  y += 26;
+    .text('The urgency of a complaint is set by the AI from its description, or changed by the office.', 50, y + 5, { width: W - 100 });
+  y = doc.y + 16;
 
-  // Section 2 — Type Distribution (pie)
+  // Section 2 — Type Distribution (pie, with a table of the counts)
   y = sectionHead(doc, 2, 'Submission Type Distribution', y);
   {
-    const pieCx = 50 + 68; const pieCy = y + 52; const pieR = 48;
     const typeSlices = [
       { label: 'Complaints',  value: d.complaints,  color: TYPE_COLORS.COMPLAINT.bar },
       { label: 'Suggestions', value: d.suggestions, color: TYPE_COLORS.SUGGESTION.bar },
       { label: 'Feedback',    value: d.feedbacks,   color: TYPE_COLORS.FEEDBACK.bar },
     ];
-    drawPieChart(doc, pieCx, pieCy, pieR, typeSlices);
-    pieLegend(doc, 50 + 155, y + 8, typeSlices, d.total);
+    drawPieChart(doc, 50 + 72, y + 46, 46, typeSlices);
+    pieTable(doc, 215, y + 4, 'TYPE', typeSlices);
+    y = caption(doc, 'Figure 1. Submissions by type', y + 108) + 10;
   }
-  y += 122;
 
-  // Section 3 — Sentiment (pie)
+  // Section 3 — Sentiment (pie, with a table of the counts)
   y = sectionHead(doc, 3, 'Sentiment Analysis', y);
   {
-    const pieCx = 50 + 68; const pieCy = y + 52; const pieR = 48;
     const sentSlices = [
       { label: 'Positive', value: d.positive, color: '#16A34A' },
       { label: 'Neutral',  value: d.neutral,  color: '#6B7280' },
       { label: 'Negative', value: d.negative, color: '#DC2626' },
     ];
-    drawPieChart(doc, pieCx, pieCy, pieR, sentSlices);
-    pieLegend(doc, 50 + 155, y + 8, sentSlices, d.total);
+    drawPieChart(doc, 50 + 72, y + 46, 46, sentSlices);
+    pieTable(doc, 215, y + 4, 'SENTIMENT', sentSlices);
+    caption(doc, 'Figure 2. Submissions by sentiment', y + 108);
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1089,7 +1099,7 @@ function drawPdfReport(doc, period, d, seal) {
   const LC_W = W - LC_X - 50;
   const LC_H = 190;
   drawLineChart(doc, d.trend, LC_X, y, LC_W, LC_H);
-  y += LC_H + 26;
+  y = caption(doc, `Figure 3. Submissions per ${isAll || period.kind === 'year' ? 'month' : 'day'}`, y + LC_H + 21) + 6;
 
   const sum = key => d.trend.reduce((n, t) => n + t[key], 0);
   const trendRows = [...d.trend, { long: 'Total', COMPLAINT: sum('COMPLAINT'), SUGGESTION: sum('SUGGESTION'), FEEDBACK: sum('FEEDBACK'), total: sum('total'), isTotal: true }];
@@ -1134,17 +1144,20 @@ function drawPdfReport(doc, period, d, seal) {
   y += 20;
 
   y = drawBarChart(doc, d.departments, y);
+  if (d.departments.length) y = caption(doc, 'Figure 4. Submissions by department and type', y + 2);
   y += 10;
 
   if (d.departments.length) {
+    const add = key => d.departments.reduce((n, row) => n + row[key], 0);
+    const deptRows = [...d.departments, { dept: 'Total', COMPLAINT: add('COMPLAINT'), SUGGESTION: add('SUGGESTION'), FEEDBACK: add('FEEDBACK'), total: add('total'), isTotal: true }];
     y = pdfTable(doc, y, [
       { label: 'DEPARTMENT',  x: 55,  width: 210 },
       { label: 'COMPLAINTS',  x: 270, width: 70, align: 'center' },
       { label: 'SUGGESTIONS', x: 340, width: 75, align: 'center' },
       { label: 'FEEDBACK',    x: 415, width: 65, align: 'center' },
       { label: 'TOTAL',       x: 485, width: 55, align: 'center' },
-    ], d.departments, (row, ry) => {
-      doc.fontSize(7).font('Helvetica').fillColor(TEXT_DARK);
+    ], deptRows, (row, ry) => {
+      doc.fontSize(7.5).font(row.isTotal ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT_DARK);
       doc.text(fitText(doc, row.dept, 205),      55,  ry + 4, { width: 210, lineBreak: false })
         .text(String(row.COMPLAINT),  270, ry + 4, { width: 70, align: 'center', lineBreak: false })
         .text(String(row.SUGGESTION), 340, ry + 4, { width: 75, align: 'center', lineBreak: false })
@@ -1160,7 +1173,7 @@ function drawPdfReport(doc, period, d, seal) {
   y = 50;
   sectionPage[6] = pageNo();
   y = sectionHead(doc, 6, 'Client Satisfaction (ARTA CSM)', y);
-  drawSatisfaction(doc, period, d.satisfaction, y);
+  drawSatisfaction(doc, period, d.satisfaction, y, 6);
 
   // ══════════════════════════════════════════════════════════════════════
   // PAGE 6 — Submissions Log (continues over more pages when needed)
@@ -1187,58 +1200,58 @@ function drawPdfReport(doc, period, d, seal) {
       { label: 'STATUS',      x: 402, width: 80, align: 'center' },
       { label: 'DATE FILED',  x: 488, width: 55 },
     ], shown, (s, ry) => {
-      const tC = TYPE_COLORS[s.type]     || { light: '#f3f4f6', text: '#374151' };
-      const sC = STATUS_COLORS[s.status] || { light: '#f3f4f6', text: '#374151' };
-      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-        .text(s.trackingId, 55, ry + 6, { width: 110, lineBreak: false });
-      // Type badge
-      doc.rect(168, ry + 4, 64, 12).fill(tC.light);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor(tC.text)
-        .text(s.type, 168, ry + 7, { width: 64, align: 'center', lineBreak: false });
-      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_DARK);
-      doc.text(fitText(doc, officeName(s), 156), 238, ry + 6, { width: 160, lineBreak: false });
-      // Status badge
-      doc.rect(402, ry + 4, 80, 12).fill(sC.light);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor(sC.text)
-        .text(s.status.replace(/_/g, ' '), 402, ry + 7, { width: 80, align: 'center', lineBreak: false });
-      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-        .text(fmtShortDate(s.createdAt), 488, ry + 6, { width: 57, lineBreak: false });
-    }, { rowH: 20 });
+      doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_DARK)
+        .text(s.trackingId, 55, ry + 5, { width: 110, lineBreak: false })
+        .text(XL_TYPE[s.type]?.label || titleCase(s.type), 168, ry + 5, { width: 64, align: 'center', lineBreak: false })
+        .text(fitText(doc, officeName(s), 156), 238, ry + 5, { width: 160, lineBreak: false })
+        .text(XL_STATUS[s.status]?.label || titleCase(s.status), 402, ry + 5, { width: 80, align: 'center', lineBreak: false })
+        .text(fmtShortDate(s.createdAt), 488, ry + 5, { width: 57, lineBreak: false });
+    }, { rowH: 17 });
   }
 
-  // Certification block (on a new page when the log filled this one)
-  if (y + 24 + 130 > H - 70) { doc.addPage(); y = 50; } else { y += 24; }
-  doc.moveTo(50, y).lineTo(W - 50, y).lineWidth(0.5).stroke(DIVIDER);
-  y += 12;
-  doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK).text('CERTIFICATION', 50, y);
-  y += 14;
-  doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_MID)
-    .text(
-      'This report was automatically generated by the CIVIX Integrated Citizen Engagement Platform. ' +
-      'The data presented herein is accurate as of the date of generation. ' +
-      'This document is certified for official use by the Municipality of Cantilan.',
-      50, y, { width: W - 100, lineGap: 3, align: 'justify' }
-    );
-  y += 46;
+  // Certification and signatures (on a new page when they don't fit below the log)
+  const certText = 'This is to certify that this report was generated from the records of the CIVIX Integrated Citizen ' +
+    'Engagement Platform of the Municipality of Cantilan, Surigao del Sur, and that the data presented herein ' +
+    `are accurate as of ${genDate}.`;
+  doc.fontSize(9).font('Helvetica');
+  const certHeight = 28 + 32 + doc.heightOfString(certText, { width: W - 100, lineGap: 3 }) + 24 + 100;
+  if (y + certHeight > H - 66) { doc.addPage(); y = 50; } else { y += 28; }
+  y = sectionHead(doc, null, 'Certification', y);
+  doc.fontSize(9).font('Helvetica').fillColor(TEXT_DARK)
+    .text(certText, 50, y, { width: W - 100, lineGap: 3, align: 'justify' });
+  y = doc.y + 24;
 
-  // Signature lines
-  const sigW = 150;
-  doc.moveTo(50, y).lineTo(50 + sigW, y).lineWidth(0.5).stroke(TEXT_DARK);
-  doc.moveTo(W - 50 - sigW, y).lineTo(W - 50, y).lineWidth(0.5).stroke(TEXT_DARK);
-  doc.fontSize(7.5).font('Helvetica').fillColor(TEXT_MID)
-    .text('System Administrator', 50, y + 5, { width: sigW, align: 'center', lineBreak: false });
-  doc.text('Authorized Municipal Official', W - 50 - sigW, y + 5, { width: sigW, align: 'center', lineBreak: false });
+  // Two signature blocks: the administrator who prepared the report, and the
+  // official who notes it. Each signs above the printed name.
+  const SIG_W = 190;
+  const signers = [
+    { x: 50, role: 'Prepared by:', name: preparedBy.toUpperCase(), title: 'System Administrator' },
+    { x: W - 50 - SIG_W, role: 'Noted by:', name: '', title: 'Municipal Mayor' },
+  ];
+  for (const s of signers) {
+    doc.fontSize(9).font('Helvetica').fillColor(TEXT_DARK).text(s.role, s.x, y, { lineBreak: false });
+    if (s.name) {
+      doc.font('Helvetica-Bold').text(fitText(doc, s.name, SIG_W), s.x, y + 46, { width: SIG_W, align: 'center', lineBreak: false });
+    }
+    doc.moveTo(s.x, y + 58).lineTo(s.x + SIG_W, y + 58).lineWidth(0.6).stroke(TEXT_DARK);
+    doc.fontSize(8.5).font('Helvetica').fillColor(TEXT_DARK)
+      .text(s.title, s.x, y + 62, { width: SIG_W, align: 'center', lineBreak: false })
+      .text('Date: ______________________', s.x, y + 86, { width: SIG_W, align: 'center', lineBreak: false });
+  }
 
-  // Footers on every page after the cover, then the contents' page numbers.
+  // Footers on every page, the running header from page 2, then the contents' page numbers.
   const pageCount = pageNo();
-  for (let i = 1; i < pageCount; i++) {
+  const headerLeft = `Municipality of Cantilan  ·  CIVIX ${period.title}`;
+  const headerRight = isAll ? `All recorded submissions as of ${genDate}` : period.rangeFull;
+  for (let i = 0; i < pageCount; i++) {
     doc.switchToPage(i);
+    if (i) pageHeader(doc, headerLeft, headerRight);
     pageFooter(doc, i + 1, pageCount, reportId, verifyCode);
   }
   doc.switchToPage(0);
   for (const [num, rowY] of Object.entries(tocRowY)) {
-    doc.fontSize(9).font('Helvetica-Bold').fillColor(TEXT_DARK)
-      .text(String(sectionPage[num]), W - 90, rowY, { width: 30, align: 'right', lineBreak: false });
+    doc.fontSize(9.5).font('Helvetica').fillColor(TEXT_DARK)
+      .text(String(sectionPage[num]), W - 76, rowY, { width: 18, align: 'right', lineBreak: false });
   }
 }
 
@@ -1685,8 +1698,8 @@ async function generateExcel(req, res) {
       { bold: o.isTotal, total: o.isTotal, zebraRow: i % 2 === 0 && !o.isTotal }));
     rs += 1;
 
-    // What to improve: each office's parts under 80%, with the suggested actions.
-    rs = xlSectionLabel(sCsm, rs, 10, 'What to Improve: Parts under 80% (below Satisfactory), by Office');
+    // Areas for improvement: each office's parts under 80%, with the suggested actions.
+    rs = xlSectionLabel(sCsm, rs, 10, 'Areas for Improvement: Parts under 80% (below Satisfactory), by Office');
     const improve = sat.offices.flatMap(o => lowParts(o).map(key => ({ o, key })));
     if (!improve.length) {
       csmNote(ALL_SATISFACTORY);
@@ -1737,8 +1750,8 @@ async function generateExcel(req, res) {
       CC_QUESTIONS[key].options.forEach((option, i) => csmRow([option, sat.all.charter[key][i], share(sat.all.charter[key][i])], { indent: 2 }));
     });
     const cc = sat.all.charter;
-    csmNote(`Know what a Citizen's Charter is: ${pctText(cc.aware)}  ·  Saw this office's Charter: ${pctText(cc.sawCharter)}  ·  ` +
-      `Easy to see: ${pctText(cc.easyToSee)}  ·  It helped: ${pctText(cc.helped)} (the last two of those who did not answer N/A).`);
+    csmNote(`Aware of the Citizen's Charter: ${pctText(cc.aware)}  ·  Saw this office's Charter: ${pctText(cc.sawCharter)}  ·  ` +
+      `Found it easy to see: ${pctText(cc.easyToSee)}  ·  Found it helpful: ${pctText(cc.helped)} (the last two exclude N/A answers).`);
     rs += 1;
 
     // The services the slips named, office by office.
@@ -1753,7 +1766,7 @@ async function generateExcel(req, res) {
     });
     rs += 1;
 
-    rs = xlSectionLabel(sCsm, rs, 10, 'Who Answered — All Offices');
+    rs = xlSectionLabel(sCsm, rs, 10, 'Respondents — All Offices');
     csmHeader(['Client', 'Count', '% of Answers']);
     clientRows(sat.all).forEach(row => (row.head
       ? csmRow([row.label, '', ''], { bold: true, zebraRow: true })

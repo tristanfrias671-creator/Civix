@@ -3,19 +3,42 @@ import { useTheme } from '../../context/ThemeContext';
 import { SQD_KEYS, SQD_DIMENSIONS } from '../../data/csm';
 import { SQD_ACTIONS, lowParts } from '../../data/csmActions';
 import api from '../../utils/api';
-import LabelRule from './LabelRule';
+import LabelRule, { RuleDetails } from './LabelRule';
 import RemarkRule, { REMARKS, REMARK_PLURAL } from './RemarkRule';
 
 // The satisfaction form's results (ARTA CSM) on the staff dashboard and the admin
 // Analytics page: the overall score and its rating, each part of the service, the
-// Citizen's Charter, who answered and the services rated. The server works the
+// Citizen's Charter, the respondents and the services rated. The server works the
 // numbers out (server/src/utils/csmResults.js), as ARTA's CSM reports do.
 
-export const SCORE_NOTE = 'A score is the share of Agree and Strongly agree among the answers that are not N/A. '
-  + 'The overall score covers SQD1–SQD8; SQD0 (satisfied with the service) is shown on its own.';
-export const RATING_NOTE = 'ARTA ratings: 95% and up Outstanding · 90–94.9% Very Satisfactory · 80–89.9% Satisfactory · 60–79.9% Fair · below 60% Poor.';
-
 export const pctText = value => (value == null ? '—' : `${value.toFixed(1)}%`);
+
+// ARTA's rating for each score (server/src/utils/csmResults.js, RATINGS).
+const RATING_SCALE = [
+  ['Outstanding', '95% and above'],
+  ['Very Satisfactory', '90% to 94.9%'],
+  ['Satisfactory', '80% to 89.9%'],
+  ['Fair', '60% to 79.9%'],
+  ['Poor', 'below 60%'],
+];
+
+// How the scores and ratings are computed, in a few lines that open on demand.
+export function ScoreRule({ className = '' }) {
+  return (
+    <RuleDetails question="How are the scores and ratings computed?" data="score-rule" className={className}>
+      <p>
+        <strong className="text-gray-900">Score:</strong> the percentage of Agree and Strongly agree answers, not
+        counting N/A. The overall score covers SQD1–SQD8; SQD0 (satisfaction with the service) is shown separately.
+      </p>
+      <p><strong className="text-gray-900">ARTA rating:</strong></p>
+      <ul className="list-disc pl-5 space-y-0.5">
+        {RATING_SCALE.map(([name, range]) => (
+          <li key={name}><strong className="text-gray-900">{name}:</strong> {range}</li>
+        ))}
+      </ul>
+    </RuleDetails>
+  );
+}
 
 // Each rating as text on a tint (light page / dark page).
 const RATING_TONES = {
@@ -139,7 +162,7 @@ export function ScoreHeadline({ result }) {
           <dd className="text-xl font-bold tabular-nums" style={{ color: strong }}>{pctText(result.sqd.sqd0.score)}</dd>
         </div>
         <div className="col-span-2">
-          <dt className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: muted }}>Forms by label</dt>
+          <dt className="text-xs font-bold uppercase tracking-wide mb-0.5" style={{ color: muted }}>Forms by sentiment</dt>
           <dd><LabelCounts sentiment={result.sentiment} /></dd>
           <dd className="mt-1.5"><LabelRule type="FEEDBACK" /></dd>
         </div>
@@ -183,16 +206,16 @@ export function ImproveList({ result }) {
   const { strong, body, muted, tile } = useInk();
   const low = lowParts(result);
   return (
-    <section aria-label="What to improve" data-csm-improve className="mt-6">
-      <h3 className="text-sm font-bold mb-1" style={{ color: strong }}>What to improve</h3>
+    <section aria-label="Areas for improvement" data-csm-improve className="mt-6">
+      <h3 className="text-sm font-bold mb-1" style={{ color: strong }}>Areas for improvement</h3>
       {low.length === 0 ? (
         <p className="text-sm" style={{ color: body }} data-csm-improve-none>
-          Every part of the service is Satisfactory (80%) or better.
+          All parts of the service are rated Satisfactory (80%) or higher.
         </p>
       ) : (
         <>
           <p className="text-sm mb-2.5" style={{ color: muted }}>
-            The parts under 80% (below Satisfactory), the lowest first, with suggested actions for the office's action plan.
+            Parts of the service below 80%, lowest first, with suggested actions.
           </p>
           <ul className="space-y-2.5">
             {low.map(key => {
@@ -240,7 +263,7 @@ export function RemarkTable({ result }) {
     <section aria-label="Clients' remarks" data-remarks>
       <h3 className="text-sm font-bold mb-1" style={{ color: strong }}>Clients' remarks</h3>
       <p className="text-sm mb-2" style={{ color: muted }}>
-        What the clients wrote in the last box of the form, sorted as a comment, a complaint or a suggestion, by the form's label.
+        Remarks written on the form, classified as comments, complaints or suggestions.
       </p>
       <ul className="sm:hidden" data-remark-list>
         {REMARKS.map(key => (
@@ -293,16 +316,16 @@ export function CharterFacts({ result }) {
     <section aria-label="Citizen's Charter">
       <h3 className="text-sm font-bold mb-2" style={{ color: strong }}>Citizen's Charter</h3>
       <div className="grid grid-cols-2 gap-2">
-        <Tile value={c.aware} label="Know what a Citizen's Charter is" />
+        <Tile value={c.aware} label="Aware of the Citizen's Charter" />
         <Tile value={c.sawCharter} label="Saw this office's Charter" />
-        <Tile value={c.easyToSee} label="Found it easy to see" note="Of those who did not answer N/A" />
-        <Tile value={c.helped} label="Said it helped" note="Of those who did not answer N/A" />
+        <Tile value={c.easyToSee} label="Found it easy to see" note="Excluding N/A" />
+        <Tile value={c.helped} label="Found it helpful" note="Excluding N/A" />
       </div>
     </section>
   );
 }
 
-// Client type, sex and age group of the clients who answered.
+// Client type, sex and age group of the respondents (the clients who answered).
 export function ClientFacts({ result }) {
   const { strong, body, muted, line } = useInk();
   const groups = [
@@ -311,8 +334,8 @@ export function ClientFacts({ result }) {
     ['Age', result.clients.ages],
   ];
   return (
-    <section aria-label="Who answered">
-      <h3 className="text-sm font-bold mb-2" style={{ color: strong }}>Who answered</h3>
+    <section aria-label="Respondents">
+      <h3 className="text-sm font-bold mb-2" style={{ color: strong }}>Respondents</h3>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-3">
         {groups.map(([title, rows]) => (
           <div key={title}>
@@ -367,7 +390,7 @@ export function CodeFacts({ codes }) {
   if (!codes) return null;
   const items = [
     ['given', codes.given, 'Codes given'],
-    ['answered', codes.answered, 'Used to answer the form'],
+    ['answered', codes.answered, 'Forms answered'],
     ['waiting', codes.waiting, 'Not used yet'],
     ['rate', pctText(codes.rate), 'Response rate'],
   ];
@@ -383,8 +406,8 @@ export function CodeFacts({ codes }) {
         ))}
       </div>
       <p className="text-xs mt-2" style={{ color: muted }}>
-        Each New client slip is one transaction; its code opens one satisfaction form for 7 days.
-        {codes.expired > 0 && ` ${codes.expired} ${codes.expired === 1 ? 'code' : 'codes'} expired without an answer.`}
+        Each code is valid for one form within 7 days.
+        {codes.expired > 0 && ` ${codes.expired} ${codes.expired === 1 ? 'code' : 'codes'} expired unused.`}
       </p>
     </section>
   );

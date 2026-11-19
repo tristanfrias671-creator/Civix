@@ -11,9 +11,9 @@ const { getReceivingOffice } = require('../controllers/settings');
 
 const HOUR_MS = 60 * 60 * 1000;
 
-// Counted across all offices, like the citizens' receipts (controllers/submissions.js):
-// a flood of reports must not use up the mailbox's sending limit. Past the cap the
-// reports still show in the staff portal (list, alerts and pop-ups).
+// Counted across all offices: a flood of reports must not use up the mailbox's
+// sending limit. Past the cap the reports still show in the staff portal (list,
+// alerts and pop-ups). (Citizens get no emails since Nov 17, 2026.)
 const budget = {
   hour: createLimiter({ windowMs: HOUR_MS, max: Number(process.env.STAFF_REPORT_EMAILS_PER_HOUR) || 60 }),
   day: createLimiter({ windowMs: 24 * HOUR_MS, max: Number(process.env.STAFF_REPORT_EMAILS_PER_DAY) || 400 }),

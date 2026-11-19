@@ -52,7 +52,8 @@ const MECHANISM_LOOK = [
 const SMALL_BUTTON = 'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors';
 
 // One office's part of the charter: its services, each with the time the law allows
-// and the two ways to answer it, or a note that the charter doesn't have it yet.
+// and a button to the one form (feedback, complaint or suggestion; the office's code
+// still decides the office), or a note that the charter doesn't have it yet.
 function OfficeServices({ office, t }) {
   const part = charterFor(office);
   const name = officeLabel(office);
@@ -62,9 +63,7 @@ function OfficeServices({ office, t }) {
         <p className="text-sm font-semibold text-gray-900">{t.notInCharter(name)}</p>
         <p className="text-sm text-gray-700 mt-1">{t.notInCharterText}</p>
         <div className="flex flex-wrap gap-2 mt-3">
-          <Link to="/rate" className={SMALL_BUTTON}><Ico d={ICONS.star} className="w-4 h-4" /> {t.rateOffice}</Link>
-          <Link to="/submit" state={{ type: 'COMPLAINT', department: office }} className={SMALL_BUTTON}><Ico d={ICONS.alert} className="w-4 h-4" /> {t.complain}</Link>
-          <Link to="/submit" state={{ type: 'SUGGESTION', department: office }} className={SMALL_BUTTON}><Ico d={ICONS.idea} className="w-4 h-4" /> {t.suggest}</Link>
+          <Link to="/submit" state={{ department: office }} className={SMALL_BUTTON}><Ico d={ICONS.pen} className="w-4 h-4" /> {t.openForm}</Link>
         </div>
         <a href={CHARTER_HOME} target="_blank" rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 mt-3 text-sm font-semibold text-blue-700 hover:underline">
@@ -97,11 +96,8 @@ function OfficeServices({ office, t }) {
               </p>
             </div>
             <div className="flex flex-wrap gap-2 lg:flex-shrink-0">
-              <Link to="/rate" state={{ service: s.name, department: office }} aria-label={t.rateLabel(s.name)} className={SMALL_BUTTON}>
-                <Ico d={ICONS.star} className="w-4 h-4" /> {t.rate}
-              </Link>
-              <Link to="/submit" state={{ type: 'COMPLAINT', department: office, service: s.name }} aria-label={t.complainLabel(s.name)} className={SMALL_BUTTON}>
-                <Ico d={ICONS.alert} className="w-4 h-4" /> {t.complain}
+              <Link to="/submit" state={{ service: s.name, department: office }} aria-label={t.rateOrComplainLabel(s.name)} className={SMALL_BUTTON}>
+                <Ico d={ICONS.star} className="w-4 h-4" /> {t.rateOrComplain}
               </Link>
             </div>
           </li>
@@ -112,7 +108,7 @@ function OfficeServices({ office, t }) {
           <p>{t.ideaTitle}</p>
           {part.employeeServicesLeftOut && <p className="text-xs text-gray-600 mt-1">{t.othersInCopy}</p>}
         </div>
-        <Link to="/submit" state={{ type: 'SUGGESTION', department: office }} className={`${SMALL_BUTTON} self-start sm:self-auto flex-shrink-0`}>
+        <Link to="/submit" state={{ department: office }} className={`${SMALL_BUTTON} self-start sm:self-auto flex-shrink-0`}>
           <Ico d={ICONS.idea} className="w-4 h-4" /> {t.suggest}
         </Link>
       </div>
@@ -246,11 +242,8 @@ export default function Charter() {
               <p className="text-white/75 text-sm mt-1">{t.ctaText}</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link to="/rate" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white text-blue-800 text-sm font-bold hover:bg-blue-50 transition-colors">
-                <Ico d={ICONS.star} className="w-4 h-4" /> {t.rateCta}
-              </Link>
-              <Link to="/submit" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-white/30 text-white text-sm font-bold hover:bg-white/10 transition-colors">
-                <Ico d={ICONS.pen} className="w-4 h-4" /> {t.reportCta}
+              <Link to="/submit" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white text-blue-800 text-sm font-bold hover:bg-blue-50 transition-colors">
+                <Ico d={ICONS.pen} className="w-4 h-4" /> {t.openForm}
               </Link>
             </div>
           </div>

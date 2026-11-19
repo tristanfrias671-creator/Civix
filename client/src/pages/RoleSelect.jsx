@@ -15,7 +15,7 @@ const TEXT = {
     intro: 'Your voice matters! Report your concerns, track your submissions, and help make Cantilan a cleaner, safer, and more progressive community.',
     tagline: 'A Cleaner, Safer, Stronger Cantilan for Everyone',
     cards: {
-      report: ['Report a Concern', 'File a complaint, suggestion, or concern quickly and easily.'],
+      report: ['Report a Concern', "Rate an office's service, or send a complaint or suggestion, with the code from the office."],
       track: ['Track Your Report', 'Check the status of your submitted concern.'],
       guidelines: ['View Guidelines', 'Learn about our policies and what to include in your report.'],
       help: ['Need Help?', 'Get assistance from our support team.'],
@@ -37,7 +37,7 @@ const TEXT = {
     intro: 'Mahalaga ang boses mo! Iulat ang iyong mga hinaing, subaybayan ang iyong mga ipinadala, at tumulong na gawing mas malinis, mas ligtas, at mas maunlad na komunidad ang Cantilan.',
     tagline: 'Mas Malinis, Mas Ligtas, Mas Matatag na Cantilan para sa Lahat',
     cards: {
-      report: ['Mag-ulat ng Problema', 'Magpadala ng reklamo, mungkahi, o hinaing nang mabilis at madali.'],
+      report: ['Mag-ulat ng Problema', 'I-rate ang serbisyo ng opisina, o magpadala ng reklamo o mungkahi, gamit ang code mula sa opisina.'],
       track: ['Subaybayan ang Iyong Ulat', 'Tingnan ang kalagayan ng iyong ipinadalang ulat.'],
       guidelines: ['Tingnan ang mga Gabay', 'Alamin ang aming mga patakaran at kung ano ang dapat isama sa iyong ulat.'],
       help: ['Kailangan ng Tulong?', 'Humingi ng tulong sa aming mga kawani.'],
@@ -59,7 +59,7 @@ const TEXT = {
     intro: 'Importante ang imong tingog! I-report ang imong mga reklamo, sundan ang imong mga gipadala, ug tabangi nga mahimong mas limpyo, mas luwas, ug mas uswag nga komunidad ang Cantilan.',
     tagline: 'Mas Limpyo, Mas Luwas, Mas Lig-on nga Cantilan alang sa Tanan',
     cards: {
-      report: ['Pag-report og Problema', 'Ipadala ang imong reklamo, sugyot, o kabalaka sa dali ug sayon nga paagi.'],
+      report: ['Pag-report og Problema', 'I-rate ang serbisyo sa opisina, o ipadala ang reklamo o sugyot, gamit ang code gikan sa opisina.'],
       track: ['Sundan ang Imong Report', 'Tan-awa ang kahimtang sa imong gipadala nga report.'],
       guidelines: ['Tan-awa ang mga Giya', 'Hibal-i ang among mga lagda ug unsa ang ilakip sa imong report.'],
       help: ['Nanginahanglan og Tabang?', 'Pangayo og tabang sa among mga kawani.'],

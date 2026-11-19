@@ -298,6 +298,11 @@ async function deliver(build) {
 }
 
 // ── The emails ──
+// Since Nov 17, 2026 CIVIX sends no email to citizens: the form and the walk-in
+// report ask for no email or mobile number, and a citizen follows a report with its
+// Transaction Code on Track My Report. The citizen emails below (receipt, thank-you,
+// status update, urgency change) are only built for previews and tests; nothing
+// sends them. The office's staff and the administrators still get theirs.
 
 const TYPE_LABELS = { COMPLAINT: 'Complaint', SUGGESTION: 'Suggestion', FEEDBACK: 'Feedback' };
 
@@ -563,7 +568,7 @@ async function buildNewReportStaffEmail({ email, fullName }, submission, { offic
       ${noteBlock('Why it was moved', move?.reason)}
       ${submission.description ? quote(walkIn ? 'What the citizen said' : 'What the citizen wrote', escapeHtml(excerpt(submission.description))) : ''}
       ${button(staffReportUrl(submission), 'Open this report')}
-      ${small("For the citizen's privacy, their phone number and email are not in this email. You can see them in the report in the staff portal.")}
+      ${small('CIVIX does not ask citizens for a phone number or email: the citizen follows this report with its Transaction Code on Track My Report.')}
       ${office ? small(`You get these emails as staff of the ${escapeHtml(officeLabel(office))} in CIVIX.`) : ''}
     `,
   });
@@ -783,9 +788,6 @@ async function buildNewDeviceSignInEmail({ email, fullName, role }, { createdAt,
   return { to: email, subject: 'CIVIX — New sign-in to your account', html };
 }
 
-const sendSubmissionReceivedEmail = submission => deliver(buildSubmissionReceivedEmail(submission));
-const sendStatusUpdateEmail = (submission, newStatus, note) => deliver(buildStatusUpdateEmail(submission, newStatus, note));
-const sendUrgencyChangeEmail = (submission, change) => deliver(buildUrgencyChangeEmail(submission, change));
 const sendNewReportStaffEmail = (person, submission, info) => deliver(buildNewReportStaffEmail(person, submission, info));
 const sendNegativeFeedbackStaffEmail = (person, submission, info) => deliver(buildNegativeFeedbackStaffEmail(person, submission, info));
 const sendAccessRequestAlertEmail = (to, request) => deliver(buildAccessRequestAlertEmail(to, request));
@@ -826,7 +828,7 @@ async function sendSignInCodeEmail(person, code, minutes, purpose) {
 }
 
 module.exports = {
-  sendMail, sendSubmissionReceivedEmail, sendStatusUpdateEmail, sendUrgencyChangeEmail, sendVerificationCodeEmail,
+  sendMail, sendVerificationCodeEmail,
   sendStaffAccountDecisionEmail, sendAccessRequestAlertEmail, sendAdminAccessDecisionEmail, sendNewReportStaffEmail,
   sendNegativeFeedbackStaffEmail,
   sendPasswordResetCodeEmail, sendPasswordChangedEmail, sendNewDeviceSignInEmail, sendSignInCodeEmail,

@@ -1,8 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Prisma } = require('@prisma/client');
-const { sendStatusUpdateEmail, sendUrgencyChangeEmail } = require('../utils/mailer');
 const { emailOfficeStaff } = require('../utils/staffEmails');
-const { sendStatusUpdateSms } = require('../utils/sms');
 const { phDayStart, phMonthStart, deadlineDays, dueAfterUrgencyChange } = require('../utils/deadline');
 const { PRIORITIES, PRIORITY_LABELS } = require('../utils/urgency');
 const { getDepartmentList, getReceivingOffice, ensureSettings } = require('./settings');
@@ -11,7 +9,7 @@ const { logSignIn } = require('../utils/signInLog');
 const { forgetPasswordChange } = require('../middleware/auth');
 const { savedPhotoPath } = require('../middleware/upload');
 const { discardUploads } = require('../utils/uploadSafety');
-const { CSM_ANSWERS, officeView } = require('../utils/csm');
+const { CSM_ANSWERS, formAnswersOf, officeView } = require('../utils/csm');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STATUSES = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
@@ -59,6 +57,14 @@ const urgencyChangesOf = submissionId => prisma.priorityChangeLog.findMany({
 });
 // The office's reason for changing the urgency is shown to the citizen.
 const URGENCY_REASON_MIN = 10;
+// What the report window gets: the report, the answers to the form it was sent with
+// (`formAnswers`, for a complaint or suggestion sent online since Nov 10, 2026; the
+// window shows the form as the citizen filled it in) and its urgency changes.
+const reportWindow = async submission => ({
+  ...officeView(submission),
+  formAnswers: await formAnswersOf(prisma, submission),
+  urgencyChanges: await urgencyChangesOf(submission.id),
+});
 
 // A short preview of a report's text for lists.
 const excerpt = text => (text && text.length > 140 ? `${text.slice(0, 140).trimEnd()}…` : text || '');
@@ -410,7 +416,7 @@ async function getMySubmissionDetail(req, res) {
       await prisma.$executeRaw`UPDATE Submission SET readAt = ${submission.readAt}, updatedAt = updatedAt WHERE id = ${submission.id} AND readAt IS NULL`;
     }
 
-    res.json({ ...officeView(submission), urgencyChanges: await urgencyChangesOf(submission.id) });
+    res.json(await reportWindow(submission));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch submission' });
@@ -481,11 +487,11 @@ async function updateMySubmission(req, res) {
       if (submission.userId) {
         await prisma.notification.create({ data: { userId: submission.userId, message: fullMessage } });
       }
-      if (updated.email) sendStatusUpdateEmail(updated, status, note || undefined);
-      sendStatusUpdateSms(updated, status);
+      // No email or text to the citizen (since Nov 17, 2026): they see each step on
+      // Track My Report with their Transaction Code.
     }
 
-    res.json({ ...officeView(updated), urgencyChanges: await urgencyChangesOf(updated.id) });
+    res.json(await reportWindow(updated));
   } catch (err) {
     console.error(err);
     discardUploads(req);
@@ -522,7 +528,7 @@ async function updateMyUrgency(req, res) {
       createdAt: submission.createdAt, dueAt: submission.dueAt,
       from: submission.priority, to: priority, days: deadlineDays(settings, submission.type, priority),
     });
-    const [change, updated] = await prisma.$transaction([
+    const [, updated] = await prisma.$transaction([
       prisma.priorityChangeLog.create({
         data: {
           submissionId: submission.id, trackingId: submission.trackingId,
@@ -539,9 +545,9 @@ async function updateMyUrgency(req, res) {
         data: { userId: submission.userId, message: `Your submission ${submission.trackingId} is now marked ${PRIORITY_LABELS[priority]}. Reason: ${reason}` },
       });
     }
-    if (updated.email) sendUrgencyChangeEmail(updated, change);
-
-    res.json({ ...updated, urgencyChanges: await urgencyChangesOf(submission.id) });
+    // The citizen sees the change and its reason on Track My Report (no email since
+    // Nov 17, 2026).
+    res.json(await reportWindow(updated));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to change the urgency' });
@@ -616,30 +622,6 @@ async function getMyActivity(req, res) {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load activity' });
-  }
-}
-
-// GET /api/staff/portal/map — the office's reports for the Office Map (pinned
-// ones are drawn; the rest are only counted).
-async function getMyMapReports(req, res) {
-  try {
-    const scope = await officeScope(req.user.id);
-    if (!scope) return res.status(400).json({ error: NO_OFFICE });
-    const reports = await prisma.submission.findMany({
-      where: { department: { in: scope.departments }, ...NOT_SPAM },
-      select: {
-        id: true, trackingId: true, type: true, status: true, priority: true, description: true, address: true,
-        department: true, citizenDepartment: true, createdAt: true, dueAt: true, updatedAt: true,
-        location: { select: { latitude: true, longitude: true } },
-        user: { select: { fullName: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 2000,
-    });
-    res.json({ department: scope.department, submissions: reports.map(r => ({ ...r, description: excerpt(r.description) })) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to load the map' });
   }
 }
 
@@ -735,8 +717,7 @@ async function assignSubmission(req, res) {
         if (existing.userId) {
           await prisma.notification.create({ data: { userId: existing.userId, message: fullMessage } });
         }
-        if (updated.email) sendStatusUpdateEmail(updated, status, note?.trim());
-        sendStatusUpdateSms(updated, status);
+        // No email or text to the citizen (since Nov 17, 2026): Track My Report shows it.
       }
     }
 
@@ -749,7 +730,7 @@ async function assignSubmission(req, res) {
 
 module.exports = {
   officeScope,
-  getMyAlerts, getMyActivity, getMyMapReports,
+  getMyAlerts, getMyActivity,
   getStaff, createStaff, updateStaff, deleteStaff,
   getMyStats, getMySubmissions, getMySubmissionDetail, updateMySubmission, updateMyUrgency,
   assignSubmission,

@@ -180,11 +180,11 @@ const TYPE_SERVICE = { COMPLAINT: 'Complaint handling', SUGGESTION: 'Suggestion 
 
 const refusals = {
   notFound: { status: 404, code: 'CODE_NOT_FOUND', error: 'We could not find this code. Please check it and try again.' },
-  used: { status: 409, code: 'CODE_USED', error: 'This code was already used to rate the service. Each code can be used once.' },
+  used: { status: 409, code: 'CODE_USED', error: 'This code was already used. Each code opens the form once.' },
   expired: { status: 410, code: 'CODE_EXPIRED', error: `This code has expired. Codes work for ${QUEUE_CODE_DAYS} days after the visit.` },
-  isFeedback: { status: 400, code: 'IS_FEEDBACK', error: 'This is the code of a feedback. To rate a service, use the code on your slip from the office.' },
-  notResolved: { status: 409, code: 'NOT_RESOLVED', error: 'You can rate how the office handled this report once it is marked Resolved.' },
-  rated: { status: 409, code: 'ALREADY_RATED', error: 'You already rated how the office handled this report. Thank you!' },
+  isFeedback: { status: 400, code: 'IS_FEEDBACK', error: 'This is the Transaction Code of a form already sent. Please use the code on the slip from the office.' },
+  notResolved: { status: 409, code: 'NOT_RESOLVED', error: 'This report is not resolved yet. Its code opens the form once it is marked Resolved. For a new complaint or suggestion, use the code on the slip from the office.' },
+  rated: { status: 409, code: 'ALREADY_RATED', error: 'You already sent the form for this report. Thank you!' },
 };
 
 // What a code lets the citizen rate: { kind: 'QUEUE', code, queueCode, department,
@@ -220,14 +220,50 @@ const CSM_ANSWERS = Object.fromEntries([
   'service', 'clientType', 'sex', 'age', 'region', 'cc1', 'cc2', 'cc3', ...SQD, 'createdAt',
 ].map(field => [field, true]));
 
-// Feedback as the pages of the office and of the administrators get it. It is
-// anonymous: the email a client may give is only for the thank-you note, so these
-// pages never get it (nor a phone number, which older feedback had). `remark` is
-// the kind of remark the client wrote: a comment, a complaint or a suggestion
-// (utils/remarks.js), or null.
-const officeView = s => (s && s.type === 'FEEDBACK'
-  ? { ...s, email: null, contactNumber: null, remark: remarkKind(s.description) }
-  : s);
+// The answers to the form a complaint or suggestion was sent with. Since Nov 10, 2026
+// the one form saves the client's answers (as feedback) and, when the box was read
+// as a complaint or suggestion, the report too, both at once (controllers/
+// submissions.js, createForm). Nothing in the database links the two, so the answers
+// are found by what they share: the office the form went to (an office move doesn't
+// change it), the moment (both are saved within the same second) and the client's
+// words (the report starts with "Service: ..." when the form named a service). The
+// staff's report window shows them as the form the citizen filled in. Null for a
+// walk-in report, a report sent before Nov 10, 2026, or feedback (which has its own).
+const SAME_FORM_MS = 5000;
+async function formAnswersOf(prisma, report) {
+  if (!report || !['COMPLAINT', 'SUGGESTION'].includes(report.type)) return null;
+  if (report.channel && report.channel !== 'ONLINE') return null;
+  const at = new Date(report.createdAt).getTime();
+  const answered = await prisma.submission.findMany({
+    where: {
+      type: 'FEEDBACK',
+      citizenDepartment: report.citizenDepartment,
+      createdAt: { gte: new Date(at - SAME_FORM_MS), lte: new Date(at + SAME_FORM_MS) },
+      csm: { isNot: null },
+    },
+    select: { description: true, createdAt: true, csm: { select: CSM_ANSWERS } },
+    take: 25,
+  });
+  const words = report.description || '';
+  const sameForm = f => f.csm && (words === f.description
+    || (f.csm.service != null && words === `Service: ${f.csm.service}\n\n${f.description}`));
+  const gap = f => Math.abs(new Date(f.createdAt).getTime() - at);
+  const form = answered.filter(sameForm).sort((a, b) => gap(a) - gap(b))[0];
+  return form ? form.csm : null;
+}
+
+// A report as the pages of the office and of the administrators get it. Since Nov 17,
+// 2026 CIVIX asks citizens for no mobile number or email, so these pages never get
+// one, not even the ones older reports still have saved (feedback never showed them).
+// For feedback, `remark` is the kind of remark the client wrote: a comment, a
+// complaint or a suggestion (utils/remarks.js), or null.
+const officeView = s => {
+  if (!s) return s;
+  const view = { ...s, email: null, contactNumber: null };
+  if (s.user) view.user = { ...s.user, email: null };
+  if (s.type === 'FEEDBACK') view.remark = remarkKind(s.description);
+  return view;
+};
 
 // Wrong codes per network, on the form and when checking a code: someone trying
 // codes to find a working one is slowed down; a person mistyping theirs a few times
@@ -237,6 +273,6 @@ const TOO_MANY_WRONG_CODES = 'Too many codes were not found from this network. P
 
 module.exports = {
   CLIENT_TYPES, CLIENT_TYPE_LABELS, SEXES, REGIONS, CC_QUESTIONS, SQD, SQD_STATEMENTS, answerLabel,
-  QUEUE_CODE_DAYS, cleanService, readCsm, csmSentiment, normalizeCode, generateQueueCode, resolveRatingCode,
-  CSM_ANSWERS, officeView, wrongRatingCodes, TOO_MANY_WRONG_CODES,
+  QUEUE_CODE_DAYS, cleanService, readCsm, csmSentiment, normalizeCode, generateQueueCode, resolveRatingCode, refusals,
+  CSM_ANSWERS, formAnswersOf, officeView, wrongRatingCodes, TOO_MANY_WRONG_CODES,
 };

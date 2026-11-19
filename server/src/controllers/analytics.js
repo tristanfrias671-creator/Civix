@@ -55,7 +55,8 @@ async function getSummary(req, res) {
   try {
     // Feedback has no workflow (no status steps or deadline), so
     // the case figures (pending, resolved, overdue, response rate, resolution time)
-    // count complaints and suggestions only. The total counts every submission.
+    // count complaints and suggestions only. The total counts every submission;
+    // caseTotal counts complaints and suggestions (the Status Breakdown's 100%).
     const cases = { type: { not: 'FEEDBACK' }, ...NOT_SPAM };
     const [total, caseTotal, pending, reviewing, inProgress, resolved, overdue] = await Promise.all([
       prisma.submission.count({ where: NOT_SPAM }),
@@ -92,7 +93,7 @@ async function getSummary(req, res) {
     const urgentOnTime = urgentDone.filter(s => !s.dueAt || s.updatedAt <= s.dueAt).length;
 
     res.json({
-      total, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate,
+      total, caseTotal, pending, reviewing, inProgress, resolved, overdue, avgResolutionTime, responseRate,
       urgentOpen, urgentResolved: urgentDone.length, urgentOnTime,
     });
   } catch (err) {

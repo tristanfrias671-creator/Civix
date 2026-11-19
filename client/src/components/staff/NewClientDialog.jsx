@@ -44,13 +44,15 @@ p { margin: 0; }
 <p class="office">${escapeHtml(officeLabel(slip.department))}</p>
 <p class="title">Rate our service</p>
 <p class="alt">I-rate ang among serbisyo</p>
+<p class="small">The same form takes your comment, complaint or suggestion.</p>
+<p class="small alt">Sa samang form, mahimo kang mosulat og komento, reklamo o sugyot.</p>
 <div class="qr">${qrSvg(qr)}</div>
 <p class="small">Scan the QR code, or go to <b>${escapeHtml(rateAddress())}</b> and enter this code:</p>
 <p class="small alt">I-scan ang QR code, o adto sa ${escapeHtml(rateAddress())} ug isulod kini nga code:</p>
 <p class="code">${escapeHtml(slip.code)}</p>
 ${service}
 <p class="small">Valid until ${escapeHtml(fmtDate(slip.expiresAt))} &middot; one use only</p>
-<p class="foot">Your answers are anonymous. Thank you!<br><i>Dili mahibaloan kon kinsa ka. Salamat!</i></p>
+<p class="foot">Your answers to the questions are anonymous. Thank you!<br><i>Dili mahibaloan kon kinsa ang mitubag sa mga pangutana. Salamat!</i></p>
 </div></body></html>`;
 }
 
@@ -61,9 +63,10 @@ function codeState(c) {
 }
 
 // "New client" (staff portal): a queuing code for a client the office just served,
-// printed on a slip with a QR code that opens the satisfaction form (ARTA CSM) at
-// /rate/<code>. Each code rates once, for 7 days. Below: the office's codes from
-// those days and whether each was used — never what the client answered.
+// printed on a slip with a QR code that opens the one form at /rate/<code> (since
+// Nov 10, 2026): the satisfaction questions (ARTA CSM), then one box for a comment,
+// complaint or suggestion. Each code opens it once, for 7 days. Below: the office's
+// codes from those days and whether each was used — never what the client answered.
 export default function NewClientDialog({ open, onClose }) {
   const cardRef = useRef(null);
   const serviceRef = useRef(null);
@@ -169,8 +172,10 @@ export default function NewClientDialog({ open, onClose }) {
           <div className="min-w-0 flex-1 pr-8">
             <h2 id="new-client-title" className="text-lg font-semibold text-gray-900 leading-7">New client</h2>
             <p className="mt-1 text-sm leading-6 text-gray-600">
-              After serving a client, give them a slip. They scan the QR code (or type the code) to answer the
-              satisfaction form (ARTA CSM). Each code works once, for {days} days. You never see who answered.
+              After serving a client, give them a slip. The code opens your office's form: the satisfaction
+              questions (ARTA CSM), then one box for a comment, complaint or suggestion. A complaint or
+              suggestion comes to your office as a report with a deadline. Each code works once, for {days} days.
+              You never see who answered the questions.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
@@ -218,6 +223,7 @@ export default function NewClientDialog({ open, onClose }) {
                 <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: '#374151' }}>Municipality of Cantilan</p>
                 <p className="text-sm font-bold mt-0.5">{officeLabel(slip.department)}</p>
                 <p className="text-lg font-bold mt-2">Rate our service</p>
+                <p className="text-xs mt-0.5" style={{ color: '#374151' }}>The same form takes your comment, complaint or suggestion.</p>
                 <div className="mx-auto my-2 w-40 h-40 flex items-center justify-center">
                   <QrImage qr={qr} label={`QR code that opens ${rateUrl(slip.code)}`}
                     failedText="The QR code could not be drawn. The client can type the code below." />

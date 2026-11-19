@@ -8,7 +8,7 @@ import { Skel, SkeletonStatCards, useSkeletonGate } from '../../components/commo
 import Icon from '../../components/common/Icons';
 import LabelRule from '../../components/common/LabelRule';
 import CsmResultsDetails, {
-  RangeSwitch, RatingBadge, ScoreHeadline, CodeFacts, LabelCounts, useSatisfaction, pctText, SCORE_NOTE, RATING_NOTE, RANGE_WORDS,
+  RangeSwitch, RatingBadge, ScoreHeadline, CodeFacts, LabelCounts, ScoreRule, useSatisfaction, pctText, RANGE_WORDS,
 } from '../../components/common/CsmResults';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../utils/api';
@@ -101,6 +101,20 @@ async function downloadError(err, fallback) {
   } catch {
     return err.response ? fallback : err.message;
   }
+}
+
+// Whole-number shares of `total` for a list of counts. Each share is rounded down,
+// then the points lost go to the largest remainders, so when the counts make up
+// the total the shares add up to exactly 100% (never 99% or 101% from rounding).
+function sharesOf(values, total = values.reduce((n, v) => n + (v || 0), 0)) {
+  if (!(total > 0)) return values.map(() => 0);
+  const exact = values.map(v => ((v || 0) / total) * 100);
+  const out = exact.map(Math.floor);
+  let left = Math.round(exact.reduce((n, v) => n + v, 0)) - out.reduce((n, v) => n + v, 0);
+  [...exact.keys()]
+    .sort((a, b) => (exact[b] - out[b]) - (exact[a] - out[a]))
+    .forEach(i => { if (left > 0) { out[i] += 1; left -= 1; } });
+  return out;
 }
 
 const analyticsCss = `
@@ -399,6 +413,8 @@ function Donut({ data, colorFor, centerLabel, legend = 'tiles' }) {
   const boxRef = useRef(null);
   const [tip, setTip] = useState(null);
   const total = data.reduce((n, d) => n + d.value, 0);
+  const shares = sharesOf(data.map(d => d.value), total);
+  const shareOf = Object.fromEntries(data.map((d, i) => [d.name, shares[i]]));
 
   const W = 300, H = 200, cx = 150, cy = 82, R = 118, r = 66, T = 0.5, h = 24;
   let angle = -Math.PI / 2;
@@ -469,7 +485,7 @@ function Donut({ data, colorFor, centerLabel, legend = 'tiles' }) {
         {tip && (
           <div className="an-tip" style={{ left: tip.x, top: tip.y }}>
             <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: tip.s.color }} />
-            <b>{tip.s.name}</b>: {tip.s.value} ({total > 0 ? Math.round((tip.s.value / total) * 100) : 0}%)
+            <b>{tip.s.name}</b>: {tip.s.value} ({shareOf[tip.s.name]}%)
           </div>
         )}
         <p className="text-center text-xs -mt-1" style={{ color: inkMuted }}>
@@ -479,7 +495,7 @@ function Donut({ data, colorFor, centerLabel, legend = 'tiles' }) {
       {legend === 'rows' ? (
         <div className="mt-3 space-y-1.5">
           {data.map(d => {
-            const pct = total > 0 ? Math.round((d.value / total) * 100) : 0;
+            const pct = shareOf[d.name];
             return (
               <div key={d.name} className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: dark ? 'rgba(255,255,255,0.04)' : '#f8fafc' }}>
                 <span className="an-dot w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: colorFor(d.name) }} />
@@ -493,7 +509,7 @@ function Donut({ data, colorFor, centerLabel, legend = 'tiles' }) {
       ) : (
       <div className="grid gap-2 mt-3" style={{ gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))` }}>
         {data.map(d => {
-          const pct = total > 0 ? Math.round((d.value / total) * 100) : 0;
+          const pct = shareOf[d.name];
           return (
             <div key={d.name} className="rounded-lg px-2.5 py-2 min-w-0" style={{ background: dark ? 'rgba(255,255,255,0.04)' : '#f8fafc' }}>
               <div className="flex items-center gap-1.5 min-w-0">
@@ -525,21 +541,22 @@ function QuarterlyTooltip({ active, payload, label }) {
   const { pal } = useChartTheme();
   if (!active || !payload?.length) return null;
   const total = payload.reduce((sum, p) => sum + (p.value || 0), 0);
+  const shares = sharesOf(payload.map(p => p.value || 0), total);
   return (
     <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl shadow-lg px-4 py-3 min-w-[180px]">
       <p className="text-sm font-semibold text-gray-800 dark:text-slate-100 border-b border-gray-100 dark:border-slate-700 pb-2 mb-2">{label}</p>
-      <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">{total} total submission{total !== 1 ? 's' : ''}</p>
+      <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">{total} {total === 1 ? 'submission' : 'submissions'} in total</p>
       <div className="space-y-1.5">
-        {payload.map(entry => {
+        {payload.map((entry, i) => {
           const meta = TYPES.find(t => t.key === entry.dataKey);
-          const pct = total > 0 ? Math.round((entry.value / total) * 100) : 0;
+          const pct = shares[i];
           return (
             <div key={entry.dataKey} className="flex items-center justify-between gap-4 text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: pal[entry.dataKey] }} />
                 <span className="text-gray-600 dark:text-slate-300">{meta?.name || entry.name}</span>
               </div>
-              <span className="font-semibold text-gray-800 dark:text-slate-100">{entry.value} <span className="text-gray-400 dark:text-slate-500 font-normal">({pct}%)</span></span>
+              <span className="font-semibold text-gray-800 dark:text-slate-100">{entry.value} <span className="text-gray-500 dark:text-slate-400 font-normal">({pct}%)</span></span>
             </div>
           );
         })}
@@ -610,7 +627,7 @@ function QuarterlyChart({ data }) {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h2 className="font-semibold text-lg" style={{ color: ink }}>Submissions by Quarter</h2>
-            <p className="text-xs mt-1" style={{ color: inkMuted }}>Complaints, suggestions, and feedback grouped by fiscal quarter</p>
+            <p className="text-xs mt-1" style={{ color: inkMuted }}>All submission types per quarter</p>
           </div>
           <div className="flex flex-wrap gap-3">
             {TYPES.map(t => (
@@ -623,18 +640,18 @@ function QuarterlyChart({ data }) {
         </div>
         <div className="grid grid-cols-3 gap-3 mt-4">
           <div className={tile} style={tileStyle}>
-            <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: inkMuted }}>All quarters</p>
+            <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: inkMuted }}>Total</p>
             <p className="text-xl font-bold mt-0.5" style={{ color: ink }}>{grandTotal}</p>
           </div>
           <div className={tile} style={tileStyle}>
-            <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: inkMuted }}>Peak quarter</p>
+            <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: inkMuted }}>Highest quarter</p>
             <p className="text-xl font-bold mt-0.5" style={{ color: ink }}>{peak?.total ?? 0}</p>
             <p className="text-[10px] truncate" style={{ color: inkMuted }}>{peak?.label ?? '—'}</p>
           </div>
           <div className={tile} style={tileStyle}>
             <p className="text-[10px] uppercase tracking-wide font-semibold truncate" style={{ color: inkMuted }}>Latest ({latest?.label})</p>
             <p className="text-xl font-bold mt-0.5" style={{ color: ink }}>{latest?.total ?? 0}</p>
-            <p className="text-[10px]" style={{ color: inkMuted }}>Avg {avgPerQuarter} / quarter</p>
+            <p className="text-[10px]" style={{ color: inkMuted }}>Average {avgPerQuarter} per quarter</p>
           </div>
         </div>
       </div>
@@ -652,7 +669,7 @@ function QuarterlyChart({ data }) {
             <YAxis tick={{ fontSize: 11, fill: axisTick }} axisLine={false} tickLine={false} allowDecimals={false} width={36} />
             <Tooltip content={<QuarterlyTooltip />} cursor={{ fill: dark ? 'rgba(148,163,184,0.06)' : 'rgba(29,78,216,0.03)' }} />
             <ReferenceLine y={Number(avgPerQuarter)} stroke={inkMuted} strokeDasharray="6 4"
-              label={{ value: `Avg ${avgPerQuarter}`, position: 'insideTopRight', fill: inkMuted, fontSize: 11 }} />
+              label={{ value: `Average ${avgPerQuarter}`, position: 'insideTopRight', fill: inkMuted, fontSize: 11 }} />
             {TYPES.map(t => (
               <Bar key={t.key} dataKey={t.key} name={t.name} maxBarSize={28} fill={pal[t.key]}
                 shape={<Bar3D gid={`${gid}-${t.key}`} scene={gid} />}>
@@ -708,7 +725,7 @@ function Satisfaction() {
         <div className="min-w-0">
           <h2 id="csm-title" className="font-semibold" style={{ color: ink }}>Client Satisfaction (ARTA CSM)</h2>
           <p className="text-xs mt-0.5" style={{ color: inkMuted }}>
-            How clients rated each office on the satisfaction form{data && !failed ? `: ${data.label}` : ''}
+            Results by office{data && !failed ? ` · ${data.label}` : ''}
           </p>
         </div>
         <RangeSwitch value={range} onChange={setRange} />
@@ -723,7 +740,7 @@ function Satisfaction() {
           <div className="flex flex-col items-center text-center py-8" data-csm-empty>
             <p className="font-semibold" style={{ color: ink }}>No satisfaction forms answered{RANGE_WORDS[range]} yet</p>
             <p className="text-sm mt-1 max-w-lg" style={{ color: inkMuted }}>
-              Each office gives its clients a slip with a QR code (New client in the staff portal). The answers show here, office by office.
+              Results will appear here once clients answer the form using the QR code on their slip.
             </p>
           </div>
         ) : (
@@ -809,8 +826,7 @@ function Satisfaction() {
               })}
             </ul>
 
-            <p className="text-xs mt-4" style={{ color: inkMuted }}>{SCORE_NOTE}</p>
-            <p className="text-xs mt-1" style={{ color: inkMuted }}>{RATING_NOTE}</p>
+            <ScoreRule className="mt-4" />
 
             {/* The details of the office picked above (all offices at first) */}
             <div ref={detailsRef} tabIndex={-1} aria-labelledby="csm-details-title" role="region"
@@ -820,7 +836,7 @@ function Satisfaction() {
                   Details: {shown || 'All offices'}
                 </h3>
                 <div>
-                  <label htmlFor="csm-office" className="block text-xs font-semibold mb-1" style={{ color: inkMuted }}>Show the details of</label>
+                  <label htmlFor="csm-office" className="block text-xs font-semibold mb-1" style={{ color: inkMuted }}>Show details for</label>
                   <select id="csm-office" value={shown} onChange={e => setOffice(e.target.value)}
                     className="h-11 px-3 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary">
                     <option value="">All offices</option>
@@ -950,6 +966,15 @@ export default function Analytics() {
   );
 
   const departments = breakdown?.department || [];
+  // Statuses apply to complaints and suggestions only (feedback has none), so the
+  // Status Breakdown's shares are of caseTotal, as in the PDF and Excel reports.
+  const statusRows = [
+    { label: 'Pending',     value: summary?.pending ?? 0,    color: '#6B7280' },
+    { label: 'Reviewing',   value: summary?.reviewing ?? 0,  color: '#1D4ED8' },
+    { label: 'In Progress', value: summary?.inProgress ?? 0, color: '#CA8A04' },
+    { label: 'Resolved',    value: summary?.resolved ?? 0,   color: '#16A34A' },
+  ];
+  const statusShares = sharesOf(statusRows.map(s => s.value), summary?.caseTotal);
 
   return (
     <div key={location.key} className="p-6 max-w-7xl mx-auto">
@@ -959,7 +984,7 @@ export default function Analytics() {
       <div className="flex flex-wrap justify-between items-end gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>Analytics</h1>
-          <p className="text-sm mt-0.5" style={{ color: inkPage }}>Performance metrics and submission insights</p>
+          <p className="text-sm mt-0.5" style={{ color: inkPage }}>Submissions, office performance and client satisfaction</p>
         </div>
         <div className="flex flex-wrap items-end gap-2.5">
           <div>
@@ -999,9 +1024,9 @@ export default function Analytics() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Total Submissions" value={summary?.total} accent="#2563eb" icon="submissions" />
-        <KPICard label="Response Rate" value={`${summary?.responseRate ?? 0}%`} accent="#7c3aed" icon="analytics" sub="Non-pending share" />
-        <KPICard label="Avg Resolution" value={`${summary?.avgResolutionTime ?? 0}d`} accent="#0891b2" icon="clock" />
+        <KPICard label="Total Submissions" value={summary?.total} accent="#2563eb" icon="submissions" sub="All types" />
+        <KPICard label="Response Rate" value={`${summary?.responseRate ?? 0}%`} accent="#7c3aed" icon="analytics" sub="No longer pending" />
+        <KPICard label="Avg Resolution" value={`${summary?.avgResolutionTime ?? 0}d`} accent="#0891b2" icon="clock" sub="Days to resolve" />
         <KPICard label="Overdue" value={summary?.overdue} accent="#dc2626" icon="complaint" sub="Past their deadline" />
       </div>
 
@@ -1055,7 +1080,7 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="Sentiment Distribution" subtitle="Positive, Neutral or Negative, for every type of report">
+        <ChartCard title="Sentiment Distribution" subtitle="All submission types">
           {sentimentTotal === 0 ? <EmptyChart /> : (
             <Donut data={sentiment} colorFor={name => pal[name] || pal.total} centerLabel="Submissions" />
           )}
@@ -1071,7 +1096,7 @@ export default function Analytics() {
           <QuarterlyChart data={quarterly} />
         )}
 
-        <ChartCard title="By Type" subtitle="Share of all submissions">
+        <ChartCard title="Submissions by Type" subtitle="Share of all submissions">
           {!breakdown?.type?.length ? <EmptyChart /> : (
             <Donut data={breakdown.type} colorFor={name => pal[TYPE_KEY[name]] || pal.total} centerLabel="Submissions" legend="rows" />
           )}
@@ -1080,7 +1105,7 @@ export default function Analytics() {
 
       {/* By Department — one series, so one color for every bar */}
       <div className="mb-6">
-        <ChartCard title="By Department" subtitle="Workload distribution across departments">
+        <ChartCard title="Submissions by Department" subtitle="Workload distribution across departments">
           {!departments.length ? <EmptyChart height="h-48" /> : (
             <ResponsiveContainer width="100%" height={Math.max(200, departments.length * 42 + 30)}>
               <BarChart data={departments} layout="vertical" margin={{ top: 12, right: 40, left: 10, bottom: 6 }} barCategoryGap="34%">
@@ -1104,21 +1129,21 @@ export default function Analytics() {
 
       {/* Urgency: how urgent complaints and suggestions are, and urgent ones finished on time */}
       <div className="mb-6">
-        <ChartCard title="Urgency" subtitle="How urgent complaints and suggestions are: set by the AI from a complaint's description, or changed by the office with a reason">
+        <ChartCard title="Urgency" subtitle="Complaints and suggestions by urgency level">
           {(() => {
             const levels = [
               { label: 'Urgent',   color: '#B91C1C' },
               { label: 'Normal',   color: '#1D4ED8' },
               { label: 'Can wait', color: '#475569' },
             ].map(l => ({ ...l, value: breakdown?.priority?.find(p => p.name === l.label)?.value || 0 }));
-            const all = levels.reduce((n, l) => n + l.value, 0);
+            const shares = sharesOf(levels.map(l => l.value));
             const done = summary?.urgentResolved || 0;
             const onTime = summary?.urgentOnTime || 0;
             return (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-3">
-                  {levels.map(l => {
-                    const pct = all > 0 ? Math.round((l.value / all) * 100) : 0;
+                  {levels.map((l, i) => {
+                    const pct = shares[i];
                     return (
                       <div key={l.label}>
                         <div className="flex justify-between text-sm mb-1">
@@ -1134,15 +1159,15 @@ export default function Analytics() {
                 </div>
                 <dl className="grid grid-cols-2 lg:grid-cols-1 gap-3">
                   <div className="rounded-xl px-4 py-3" style={{ background: dark ? 'rgba(220,38,38,0.12)' : '#fef2f2' }}>
-                    <dt className="text-xs font-semibold" style={{ color: dark ? '#fca5a5' : '#991b1b' }}>Urgent, still open</dt>
+                    <dt className="text-xs font-semibold" style={{ color: dark ? '#fca5a5' : '#991b1b' }}>Urgent, unresolved</dt>
                     <dd className="text-2xl font-bold mt-0.5" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>{summary?.urgentOpen ?? 0}</dd>
                   </div>
                   <div className="rounded-xl px-4 py-3" style={{ background: dark ? 'rgba(22,163,74,0.12)' : '#f0fdf4' }}>
-                    <dt className="text-xs font-semibold" style={{ color: dark ? '#86efac' : '#166534' }}>Urgent, finished on time</dt>
+                    <dt className="text-xs font-semibold" style={{ color: dark ? '#86efac' : '#166534' }}>Urgent, resolved on time</dt>
                     <dd className="text-2xl font-bold mt-0.5" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>
                       {done ? `${onTime} of ${done}` : '—'}
                     </dd>
-                    <p className="text-xs mt-0.5" style={{ color: inkMuted }}>{done ? `${Math.round((onTime / done) * 100)}% by their finish-by date` : 'None resolved yet'}</p>
+                    <p className="text-xs mt-0.5" style={{ color: inkMuted }}>{done ? `${Math.round((onTime / done) * 100)}% within the deadline` : 'None resolved yet'}</p>
                   </div>
                 </dl>
               </div>
@@ -1151,19 +1176,20 @@ export default function Analytics() {
         </ChartCard>
       </div>
 
-      {/* How complaints and suggestions came in: online, or typed in by the office's staff */}
+      {/* How complaints and suggestions were received: online, or entered by the
+          office's staff for a citizen who came, called, wrote or sent a message */}
       <div className="mb-6">
-        <ChartCard title="How Reports Came In"
-          subtitle="Complaints and suggestions: sent online by citizens, or typed in by the office's staff for a citizen who came, called, wrote or sent a message">
+        <ChartCard title="Submission Channels" subtitle="How complaints and suggestions were received">
           {!breakdown?.channel ? <EmptyChart height="h-40" /> : (() => {
             const ways = breakdown.channel;
             const all = ways.reduce((n, w) => n + w.value, 0);
             const typed = ways.filter(w => w.key !== 'ONLINE').reduce((n, w) => n + w.value, 0);
+            const shares = sharesOf(ways.map(w => w.value), all);
             return (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-3" data-channels>
-                  {ways.map(w => {
-                    const pct = all > 0 ? Math.round((w.value / all) * 100) : 0;
+                  {ways.map((w, i) => {
+                    const pct = shares[i];
                     return (
                       <div key={w.key}>
                         <div className="flex justify-between text-sm mb-1">
@@ -1179,7 +1205,7 @@ export default function Analytics() {
                 </div>
                 <dl className="grid grid-cols-1 gap-3 content-start">
                   <div className="rounded-xl px-4 py-3" style={{ background: dark ? 'rgba(37,99,235,0.12)' : '#eff6ff' }}>
-                    <dt className="text-xs font-semibold" style={{ color: dark ? '#93c5fd' : '#1e40af' }}>Typed in by staff</dt>
+                    <dt className="text-xs font-semibold" style={{ color: dark ? '#93c5fd' : '#1e40af' }}>Entered by staff</dt>
                     <dd className="text-2xl font-bold mt-0.5" style={{ color: dark ? '#f1f5f9' : '#1f2937' }}>{typed}</dd>
                     {/* Darker than inkMuted: the tile's light blue needs it for 4.5:1 */}
                     <p className="text-xs mt-0.5" style={{ color: dark ? '#cbd5e1' : '#4b5563' }}>
@@ -1195,15 +1221,10 @@ export default function Analytics() {
 
       {/* Status Breakdown + Top Departments */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <ChartCard title="Status Breakdown" className="lg:col-span-1">
-          <div className="space-y-3">
-            {[
-              { label: 'Pending',     value: summary?.pending,    color: '#6B7280' },
-              { label: 'Reviewing',   value: summary?.reviewing,  color: '#1D4ED8' },
-              { label: 'In Progress', value: summary?.inProgress, color: '#CA8A04' },
-              { label: 'Resolved',    value: summary?.resolved,   color: '#16A34A' },
-            ].map(s => {
-              const pct = summary?.total > 0 ? Math.round((s.value / summary.total) * 100) : 0;
+        <ChartCard title="Status Breakdown" subtitle="Complaints and suggestions only" className="lg:col-span-1">
+          <div className="space-y-3" data-status-breakdown>
+            {statusRows.map((s, i) => {
+              const pct = statusShares[i];
               return (
                 <div key={s.label}>
                   <div className="flex justify-between text-sm mb-1">
@@ -1219,7 +1240,7 @@ export default function Analytics() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Top Departments" subtitle="Departments most cited by citizen submissions" className="lg:col-span-2">
+        <ChartCard title="Top Departments" subtitle="Departments most often selected by citizens" className="lg:col-span-2">
           {!breakdown?.departmentSelections?.length ? <EmptyChart height="h-40" /> : (
             <div className="space-y-3">
               {breakdown.departmentSelections.map((c, i) => {

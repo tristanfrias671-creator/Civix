@@ -6,7 +6,7 @@ import { Skel, SkeletonStatCards, SkeletonTable, useSkeletonGate } from '../../c
 import Icon from '../../components/common/Icons';
 import StatCard from '../../components/common/StatCard';
 import CsmResultsDetails, {
-  RangeSwitch, ScoreHeadline, CodeFacts, useSatisfaction, SCORE_NOTE, RATING_NOTE, RANGE_WORDS,
+  RangeSwitch, ScoreHeadline, CodeFacts, ScoreRule, useSatisfaction, RANGE_WORDS,
 } from '../../components/common/CsmResults';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -167,7 +167,7 @@ function Satisfaction({ dark, onNewClient }) {
             </div>
             <p className="font-semibold" style={{ color: strong }}>No answers{RANGE_WORDS[range]} yet</p>
             <p className="text-sm mt-1 max-w-md" style={{ color: muted }}>
-              Give each client a slip with New client. The client scans the QR code on it and rates your office's service.
+              Give each client a slip with New client. The client scans the QR code on it, rates your office's service, and can add a comment, complaint or suggestion.
             </p>
             {onNewClient && (
               <button type="button" onClick={onNewClient}
@@ -186,7 +186,7 @@ function Satisfaction({ dark, onNewClient }) {
             <div className="mt-6 pt-6 border-t" style={{ borderColor: line }}>
               <CsmResultsDetails result={data} services={data.services} />
             </div>
-            <p className="text-xs mt-6" style={{ color: muted }}>{SCORE_NOTE} {RATING_NOTE}</p>
+            <ScoreRule className="mt-6" />
           </>
         )}
       </div>

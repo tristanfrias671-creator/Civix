@@ -6,12 +6,13 @@ import { StatusBadge, TypeBadge } from '../../components/common/StatusBadge';
 import { useText } from '../../i18n/LanguageContext';
 import GUIDELINES_TEXT from '../../i18n/guidelinesText';
 import SUBMIT_TEXT from '../../i18n/submitText';
+import CSM_TEXT from '../../i18n/csmText';
 import TRACK_TEXT from '../../i18n/trackText';
 
-// Every rule on this page mirrors real system behavior: the Submit form's fields
-// and validation (pages/citizen/Submit.jsx), the upload limits
-// (server/src/middleware/upload.js), the tracking code format, the Track page's
-// status messages, and the emails sent by server/src/utils/mailer.js.
+// Every rule on this page mirrors real system behavior: the one form's parts
+// and validation (pages/citizen/Submit.jsx, since Nov 10, 2026; no mobile number,
+// email, place or photos since Nov 17), the tracking code format, and the Track
+// page's status messages.
 // If any of those change, update this page too. The wording is in
 // i18n/guidelinesText.js (English, Filipino, Bisaya); this file keeps the icons
 // and colors, paired with the wording by position.
@@ -25,7 +26,6 @@ const ICONS = {
   camera: ['M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z', 'M15 13a3 3 0 11-6 0 3 3 0 016 0z'],
   ticket: 'M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z',
   checkCircle: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
-  inbox: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
   sparkle: 'M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z',
   shield: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
   lock: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
@@ -43,28 +43,30 @@ const ICONS = {
 
 const SECTION_IDS = ['how', 'form', 'types', 'write', 'after', 'checklist', 'policies', 'faq'];
 
-const STEP_ICONS = [ICONS.tag, ICONS.pen, ICONS.camera, ICONS.ticket];
+const STEP_ICONS = [ICONS.tag, ICONS.form, ICONS.pen, ICONS.ticket];
 
-// The Submit form's fields, in its order. Names and sample text come from the
-// form's own wording (SUBMIT_TEXT); the notes from GUIDELINES_TEXT.fieldNotes.
+// The one form's parts, in its order. Names and sample text come from the form's
+// own wording (SUBMIT_TEXT, CSM_TEXT); the notes from GUIDELINES_TEXT.fieldNotes.
+// need: 'required' | 'optional' | 'auto' (set by CIVIX).
 const noStar = label => label.replace(/\s*\*$/, '');
-const formFields = st => [
-  { key: 'type',        required: true,  label: noStar(st.typeLabel),   sample: st.types.COMPLAINT },
-  { key: 'office',      required: true,  label: noStar(st.officeLabel), sample: st.officePlaceholder },
-  { key: 'location',    required: false, label: st.locationLabel,       sample: st.locationPlaceholder },
-  { key: 'phone',       required: true,  label: noStar(st.phoneLabel),  sample: st.phonePlaceholder },
-  { key: 'email',       required: true,  label: noStar(st.emailLabel),  sample: st.emailPlaceholder },
-  { key: 'description', required: true,  label: noStar(st.descLabel),   sample: null }, // GUIDELINES_TEXT.descSample
-  // Set automatically from the description: nothing to fill in.
-  { key: 'urgency',     auto: true,      label: st.urgencyName,
+const noNote = label => label.replace(/\s*\(.*\)$/, '');
+const formFields = (st, tc, g) => [
+  { key: 'code',      need: 'required', label: noStar(tc.codeLabel),  sample: tc.codePlaceholder },
+  { key: 'questions', need: 'required', label: g.questionsLabel,      sample: tc.title },
+  { key: 'remark',    need: 'optional', label: noNote(tc.suggestions), sample: null }, // GUIDELINES_TEXT.descSample
+  // Set by CIVIX from the box: nothing to fill in (the citizen may change the kind).
+  { key: 'kind',      need: 'auto',     label: g.kindLabel,
+    sample: ['COMPLAINT', 'SUGGESTION', 'COMMENT'].map(kind => st.remarkKinds[kind]).join(' · ') },
+  { key: 'urgency',   need: 'auto',     label: st.urgencyName,
     sample: ['URGENT', 'STANDARD', 'LOW'].map(level => st.urgencyLevels[level].name).join(' · ') },
-  { key: 'photos',      required: false, label: st.photosLabel.replace(/\s*\(.*\)$/, ''), sample: st.photosClick + st.photosDrag },
 ];
 
-const REPORT_TYPES = [
-  { type: 'COMPLAINT',  accent: '#dc2626' },
-  { type: 'SUGGESTION', accent: '#2563eb' },
-  { type: 'FEEDBACK',   accent: '#16a34a' },
+// What the AI sorts the form's last box into. A comment stays with the feedback, so
+// it wears the Feedback badge's colors.
+const REMARK_KINDS = [
+  { type: 'COMPLAINT',  badge: 'COMPLAINT',  accent: '#dc2626' },
+  { type: 'SUGGESTION', badge: 'SUGGESTION', accent: '#2563eb' },
+  { type: 'COMMENT',    badge: 'FEEDBACK',   accent: '#16a34a' },
 ];
 
 const HIGHLIGHT = {
@@ -77,7 +79,7 @@ const HIGHLIGHT = {
 // Same wording as the status messages on the Track page (TRACK_TEXT.tones).
 const STATUSES = ['PENDING', 'REVIEWING', 'IN_PROGRESS', 'RESOLVED'];
 
-const CHECK_COUNT = 6; // GUIDELINES_TEXT.checks
+const CHECK_COUNT = 5; // GUIDELINES_TEXT.checks
 
 const POLICY_LOOK = [
   { icon: ICONS.lock,  accent: '#2563eb', bg: '#eff6ff' },
@@ -88,12 +90,11 @@ const POLICY_LOOK = [
 
 /* ─── Building blocks ──────────────────────────────────────────────────────── */
 
-function RequiredPill({ required, auto }) {
+function RequiredPill({ need }) {
   const g = useText(GUIDELINES_TEXT);
-  if (auto) return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700">{g.automatic}</span>;
-  return required
-    ? <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-50 text-red-700">{g.required}</span>
-    : <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600">{g.optional}</span>;
+  if (need === 'auto') return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700">{g.automatic}</span>;
+  if (need === 'required') return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-50 text-red-700">{g.required}</span>;
+  return <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600">{g.optional}</span>;
 }
 
 function WritingExample() {
@@ -195,6 +196,7 @@ export default function Guidelines() {
   const progress = useReadingProgress();
   const g = useText(GUIDELINES_TEXT);
   const st = useText(SUBMIT_TEXT);
+  const tc = useText(CSM_TEXT);
   const tt = useText(TRACK_TEXT);
 
   return (
@@ -246,11 +248,11 @@ export default function Guidelines() {
 
           <Section id="form" icon={ICONS.form} title={g.formTitle} subtitle={g.formSubtitle}>
             <div className="divide-y divide-gray-100">
-              {formFields(st).map(f => (
-                <div key={f.key} className="py-3.5 first:pt-0 last:pb-0 grid grid-cols-1 sm:grid-cols-[190px_1fr] gap-2 sm:gap-5">
-                  <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-1.5">
-                    <p className="text-sm font-semibold text-gray-800">{f.label}{f.required && <span className="text-red-600"> *</span>}</p>
-                    <RequiredPill required={f.required} auto={f.auto} />
+              {formFields(st, tc, g).map(f => (
+                <div key={f.key} data-guide-field={f.key} className="py-3.5 first:pt-0 last:pb-0 grid grid-cols-1 sm:grid-cols-[190px_1fr] gap-2 sm:gap-5">
+                  <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-start sm:gap-1.5">
+                    <p className="text-sm font-semibold text-gray-800">{f.label}{f.need === 'required' && <span className="text-red-600"> *</span>}</p>
+                    <RequiredPill need={f.need} />
                   </div>
                   <div>
                     <div className="px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-500 truncate">{f.sample || g.descSample}</div>
@@ -265,11 +267,11 @@ export default function Guidelines() {
             </div>
           </Section>
 
-          <Section id="types" icon={ICONS.tag} title={g.typesTitle}>
+          <Section id="types" icon={ICONS.tag} title={g.typesTitle} subtitle={g.typesSubtitle}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {REPORT_TYPES.map(t => (
-                <div key={t.type} className="rounded-xl border border-gray-100 bg-gray-50/60 dark:bg-slate-900/40 p-4" style={{ borderTop: `3px solid ${t.accent}` }}>
-                  <TypeBadge type={t.type} label={tt.types[t.type]} />
+              {REMARK_KINDS.map(t => (
+                <div key={t.type} data-guide-kind={t.type} className="rounded-xl border border-gray-100 bg-gray-50/60 dark:bg-slate-900/40 p-4" style={{ borderTop: `3px solid ${t.accent}` }}>
+                  <TypeBadge type={t.badge} label={st.remarkKinds[t.type]} />
                   <p className="text-sm font-semibold text-gray-800 mt-3">{g.typeInfo[t.type].when}</p>
                   <ul className="mt-2.5 space-y-1.5">
                     {g.typeInfo[t.type].examples.map((ex, i) => (
@@ -279,6 +281,7 @@ export default function Guidelines() {
                       </li>
                     ))}
                   </ul>
+                  <p className="text-xs text-gray-600 mt-3 pt-3 border-t border-gray-100 leading-relaxed">{g.typeInfo[t.type].goes}</p>
                 </div>
               ))}
             </div>
@@ -293,16 +296,16 @@ export default function Guidelines() {
 
           <Section id="after" icon={ICONS.checkCircle} title={g.afterTitle} subtitle={g.afterSubtitle}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center mb-6">
-              {/* Preview of the real "Submission Received!" screen */}
+              {/* Preview of the real screen after a form with a complaint */}
               <div className="rounded-2xl border border-gray-100 bg-white p-6 text-center shadow-sm">
                 <div className="inline-flex p-3 rounded-full bg-green-50 text-green-600 mb-3"><Ico d={ICONS.checkCircle} className="w-9 h-9" /></div>
-                <p className="text-lg font-bold text-gray-800">{st.receivedTitle}</p>
+                <p className="text-lg font-bold text-gray-800">{st.sentTitle.COMPLAINT}</p>
                 <p className="text-sm text-gray-500 mt-1 mb-2">{st.yourCode}</p>
                 <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 font-mono text-lg font-bold text-primary">MHO-20261029-K7Q3</div>
                 <p className="text-[11px] text-gray-500 mt-2">{g.exampleOnly}</p>
               </div>
               <ul className="space-y-3">
-                {[ICONS.ticket, ICONS.inbox, ICONS.search].map((icon, i) => ({ icon, text: g.afterTips[i] })).map((item, i) => (
+                {[ICONS.ticket, ICONS.camera, ICONS.search].map((icon, i) => ({ icon, text: g.afterTips[i] })).map((item, i) => (
                   <li key={i} className="flex items-start gap-3">
                     <span className="p-2 rounded-lg bg-blue-50 text-primary flex-shrink-0"><Ico d={item.icon} className="w-4 h-4" /></span>
                     <span className="text-sm text-gray-600 leading-relaxed pt-1">{item.text}</span>

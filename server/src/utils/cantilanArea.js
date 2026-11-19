@@ -1,7 +1,7 @@
 // Is a map pin inside Cantilan? Uses the municipal outline (PSA, 2023) in
 // ../data/cantilanBoundary.json. A pin counts if it is inside the outline or
 // within 500 m of it, so piers and the shoreline are accepted.
-// client/src/data/cantilanMap.js does the same check in the browser.
+// Only pages from before Nov 17, 2026 send a pin (the form had a map until then).
 const boundary = require('../data/cantilanBoundary.json');
 
 const EDGE_TOLERANCE_M = 500;

@@ -598,7 +598,9 @@ export default function Track() {
                   {[
                     ...(csm
                       ? (csm.service ? [{ label: t.service, value: serviceName(csm.service), icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' }] : [])
-                      : [{ label: t.location, value: result.address || t.notSpecified, icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' }]),
+                      // The place shows only on reports that have one (walk-in, or sent before
+                      // Nov 17, 2026): the form no longer asks for it.
+                      : (result.address ? [{ label: t.location, value: result.address, icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z' }] : [])),
                     { label: t.filed, value: fmtDateTime(result.createdAt), icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
                     ...(isFeedback ? [] : [{ label: t.lastUpdated, value: fmtDateTime(result.updatedAt), icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' }]),
                     ...(result.dueAt && !isFeedback && !isSpam ? [{

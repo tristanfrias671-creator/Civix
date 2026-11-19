@@ -12,8 +12,11 @@
 //  - Comment: any other remark, such as thanks or praise.
 // A word right after no, not, hindi, wala or dili (in the same part of a sentence)
 // reads the other way: "walang problema" is no complaint. "None", "N/A" or "wala po"
-// is no remark (null). A remark is not a complaint report: it has no deadline; a
-// client who wants the office to act files a complaint on the complaint form.
+// is no remark (null). Since Nov 10, 2026 the box is the only place a citizen writes
+// a complaint or suggestion (one form for all three, the panel's request): the form
+// shows this reading as the citizen types, the citizen may correct it, and a
+// complaint or suggestion is then also sent to the office as a report, with a
+// deadline (controllers/submissions.js, createForm). A comment stays with the answers.
 
 const REMARKS = ['COMMENT', 'COMPLAINT', 'SUGGESTION'];
 const REMARK_PLURAL = { COMMENT: 'Comments', COMPLAINT: 'Complaints', SUGGESTION: 'Suggestions' };
@@ -64,13 +67,17 @@ const SUGGEST_WORDS = new Set([
   // Filipino
   'sana', 'sanay', 'dapat', 'mungkahi', 'imungkahi', 'dagdagan', 'magdagdag', 'dagdag', 'karagdagang', 'lagyan',
   'maglagay', 'ayusin', 'pagbutihin', 'bilisan', 'pabilisin', 'nawa', 'paki', 'pakiayos', 'pakibilisan',
+  'madagdagan', 'pakidagdagan', 'pakilagyan', 'iminumungkahi',
   // Bisaya
   'unta', 'untaa', 'sugyot', 'isugyot', 'dugangan', 'idugang', 'dugang', 'butangan', 'ayuha', 'ayohon',
-  'paspasan', 'papaspasa',
+  'paspasan', 'papaspasa', 'hinaut', 'madugangan', 'dugangi', 'butangi', 'ipaayo',
 ]);
 
 // Groups of words that ask for a change.
-const SUGGEST_PHRASES = ['would be', 'could be', 'could also', 'it would', 'better if', 'would like'].map(p => p.split(' '));
+const SUGGEST_PHRASES = [
+  'would be', 'could be', 'could also', 'it would', 'better if', 'would like',
+  'mas maganda kung', 'mas mabuti kung', 'mas maayo kung', 'mas maayo kon',
+].map(p => p.split(' '));
 
 // Taken out before reading: service names and greetings that would read wrong
 // ("late registration" is a service of the Civil Registry; "more power" is praise).

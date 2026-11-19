@@ -47,8 +47,9 @@ function Fact({ label, children }) {
 }
 
 // The parts this client rated Disagree or Strongly disagree, the lowest first, each
-// with what the office can do about it (data/csmActions.js).
-function LowPartActions({ csm }) {
+// with what the office can do about it (data/csmActions.js). Also under the filled-in
+// form in the staff's report window.
+export function LowPartActions({ csm }) {
   const low = lowAnswers(csm);
   if (!low.length) return null;
   return (

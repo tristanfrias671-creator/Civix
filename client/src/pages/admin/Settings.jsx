@@ -1105,10 +1105,8 @@ export default function Settings() {
               ['Framework', 'React 18 + Express'],
               ['Database', 'MySQL + Prisma'],
               ['Authentication', 'JWT Bearer Token'],
-              ['Maps', 'Leaflet + OpenStreetMap'],
               ['Charts', 'Recharts'],
               ['Animated emoji', 'Google Noto Emoji (CC BY 4.0)'],
-              ['Map pins', 'Microsoft Fluent Emoji (MIT)'],
               ['Signed in as', profile.email],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between items-center px-4 py-3 bg-gray-50 dark:bg-slate-900/40 rounded-lg text-sm">
